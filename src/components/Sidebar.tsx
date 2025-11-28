@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { ChevronLeft, ChevronRight, Search, Radio, Filter, Beaker } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Search, Radio, Filter, Beaker, Calendar } from 'lucide-react';
 import { fetchLiveAnomalies, fetchResearchAnomalies } from '../api';
 import type { AnomalyReport } from '../types';
 import clsx from 'clsx';
@@ -230,13 +230,42 @@ export const Sidebar: React.FC<SidebarProps> = ({ onSelectAnomaly, selectedAnoma
                 <div className="bg-[#2C2F33] rounded-xl p-4 flex flex-col gap-4 shrink-0 animate-in fade-in slide-in-from-top-2">
                     <p className="text-white text-base font-bold leading-tight">Filter by Date</p>
                     <div className="flex items-center p-1 justify-between">
-                        <button onClick={() => changeDate(-1)} className="text-white/80 hover:text-white p-1 rounded hover:bg-white/10">
+                        <button onClick={() => changeDate(-1)} className="text-white/80 hover:text-white p-1 rounded hover:bg-white/10 transition-colors">
                             <ChevronLeft className="size-6" />
                         </button>
-                        <p className="text-white text-sm font-bold leading-tight flex-1 text-center">
-                            {selectedDate.toLocaleDateString(undefined, { weekday: 'short', year: 'numeric', month: 'long', day: 'numeric' })}
-                        </p>
-                        <button onClick={() => changeDate(1)} className="text-white/80 hover:text-white p-1 rounded hover:bg-white/10">
+                        
+                        <div className="flex-1 flex items-center justify-center gap-2 relative group cursor-pointer py-1 rounded hover:bg-white/5 transition-colors" onClick={() => {
+                            // Programmatically trigger the date input
+                            const input = document.getElementById('date-picker');
+                            if (input && 'showPicker' in input) {
+                                (input as any).showPicker();
+                            }
+                        }}>
+                            <Calendar className="size-4 text-white/60 group-hover:text-white transition-colors" />
+                            <p className="text-white text-sm font-bold leading-tight text-center select-none">
+                                {selectedDate.toLocaleDateString(undefined, { weekday: 'short', year: 'numeric', month: 'long', day: 'numeric' })}
+                            </p>
+                            <input 
+                                id="date-picker"
+                                type="date"
+                                className="absolute inset-0 opacity-0 cursor-pointer w-full h-full z-10 pointer-events-auto"
+                                value={selectedDate.toISOString().split('T')[0]}
+                                onChange={(e) => {
+                                    if (e.target.value) {
+                                        const parts = e.target.value.split('-');
+                                        // Create date using local time components to avoid timezone shifts
+                                        const newDate = new Date(
+                                            parseInt(parts[0]), 
+                                            parseInt(parts[1]) - 1, 
+                                            parseInt(parts[2])
+                                        );
+                                        setSelectedDate(newDate);
+                                    }
+                                }}
+                            />
+                        </div>
+
+                        <button onClick={() => changeDate(1)} className="text-white/80 hover:text-white p-1 rounded hover:bg-white/10 transition-colors">
                             <ChevronRight className="size-6" />
                         </button>
                     </div>
