@@ -266,7 +266,7 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ data, flightId, fl
     setLoading(true);
   
     try {
-      const OPENAI_KEY = "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";
+      const OPENAI_KEY = import.meta.env.VITE_OPENAI_API_KEY;
   
       // Compress flight points
       const pointsData = filterPoints(flightPoints);

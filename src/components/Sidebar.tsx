@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { ChevronLeft, ChevronRight, Search, Radio, Filter } from 'lucide-react';
-import { fetchLiveAnomalies } from '../api';
+import { ChevronLeft, ChevronRight, Search, Radio, Filter, Beaker } from 'lucide-react';
+import { fetchLiveAnomalies, fetchResearchAnomalies } from '../api';
 import type { AnomalyReport } from '../types';
 import clsx from 'clsx';
 import { ALERT_AUDIO_SRC, SOUND_COOLDOWN_MS } from '../constants';
@@ -8,10 +8,11 @@ import { ALERT_AUDIO_SRC, SOUND_COOLDOWN_MS } from '../constants';
 interface SidebarProps {
     onSelectAnomaly: (anomaly: AnomalyReport) => void;
     selectedAnomalyId?: string;
+    mode: 'historical' | 'realtime' | 'research';
+    setMode: (mode: 'historical' | 'realtime' | 'research') => void;
 }
 
-export const Sidebar: React.FC<SidebarProps> = ({ onSelectAnomaly, selectedAnomalyId }) => {
-    const [mode, setMode] = useState<'historical' | 'realtime'>('historical');
+export const Sidebar: React.FC<SidebarProps> = ({ onSelectAnomaly, selectedAnomalyId, mode, setMode }) => {
     const [selectedDate, setSelectedDate] = useState(new Date());
     const [anomalies, setAnomalies] = useState<AnomalyReport[]>([]);
     const [loading, setLoading] = useState(false);
@@ -38,8 +39,8 @@ export const Sidebar: React.FC<SidebarProps> = ({ onSelectAnomaly, selectedAnoma
             intervalRef.current = null;
         }
 
-        if (mode === 'historical') {
-            fetchHistorical();
+        if (mode === 'historical' || mode === 'research') {
+            fetchHistoricalOrResearch();
         } else {
             fetchRealtimeInitial();
             intervalRef.current = setInterval(fetchRealtimeUpdate, 5000);
@@ -50,7 +51,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ onSelectAnomaly, selectedAnoma
         };
     }, [mode, selectedDate]);
 
-    const fetchHistorical = async () => {
+    const fetchHistoricalOrResearch = async () => {
         setLoading(true);
         try {
             const start = new Date(selectedDate);
@@ -58,13 +59,15 @@ export const Sidebar: React.FC<SidebarProps> = ({ onSelectAnomaly, selectedAnoma
             const end = new Date(selectedDate);
             end.setHours(23, 59, 59, 999);
 
-            const data = await fetchLiveAnomalies(
+            const apiFunc = mode === 'research' ? fetchResearchAnomalies : fetchLiveAnomalies;
+
+            const data = await apiFunc(
                 Math.floor(start.getTime() / 1000),
                 Math.floor(end.getTime() / 1000)
             );
             setAnomalies(data);
         } catch (error) {
-            console.error("Error fetching historical anomalies:", error);
+            console.error("Error fetching data:", error);
         } finally {
             setLoading(false);
         }
@@ -190,7 +193,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ onSelectAnomaly, selectedAnoma
         <aside className="col-span-3 flex flex-col gap-6 overflow-y-auto h-full pr-2">
             
             {/* Mode Switcher */}
-            <div className="bg-[#2C2F33] rounded-xl p-1 flex">
+            <div className="bg-[#2C2F33] rounded-xl p-1 flex gap-1">
                 <button 
                     onClick={() => setMode('historical')}
                     className={clsx(
@@ -198,7 +201,17 @@ export const Sidebar: React.FC<SidebarProps> = ({ onSelectAnomaly, selectedAnoma
                         mode === 'historical' ? "bg-primary text-background-dark" : "text-white/60 hover:text-white"
                     )}
                 >
-                    Historical
+                    History
+                </button>
+                <button 
+                    onClick={() => setMode('research')}
+                    className={clsx(
+                        "flex-1 py-2 rounded-lg text-sm font-bold transition-all flex items-center justify-center gap-2",
+                        mode === 'research' ? "bg-purple-500 text-white" : "text-white/60 hover:text-white"
+                    )}
+                >
+                    <Beaker className="size-4" />
+                    Research
                 </button>
                 <button 
                     onClick={() => setMode('realtime')}
@@ -208,12 +221,12 @@ export const Sidebar: React.FC<SidebarProps> = ({ onSelectAnomaly, selectedAnoma
                     )}
                 >
                     <Radio className={clsx("size-4", mode === 'realtime' && "animate-pulse")} />
-                    Realtime
+                    Live
                 </button>
             </div>
 
-            {/* Date Filter (Only visible in Historical Mode) */}
-            {mode === 'historical' && (
+            {/* Date Filter (Only visible in Historical/Research Mode) */}
+            {(mode === 'historical' || mode === 'research') && (
                 <div className="bg-[#2C2F33] rounded-xl p-4 flex flex-col gap-4 shrink-0 animate-in fade-in slide-in-from-top-2">
                     <p className="text-white text-base font-bold leading-tight">Filter by Date</p>
                     <div className="flex items-center p-1 justify-between">
