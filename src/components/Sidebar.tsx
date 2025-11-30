@@ -26,7 +26,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ onSelectAnomaly, selectedAnoma
     const audioRef = useRef<HTMLAudioElement | null>(null);
     const lastSoundTimeRef = useRef(0);
 
-    const triggerOptions = ['All', 'Rules', 'XGBoost', 'DeepDense', 'DeepCNN', 'Transformer'];
+    const triggerOptions = ['All', 'Rules', 'XGBoost', 'DeepDense', 'DeepCNN', 'Transformer', 'Hybrid'];
 
     // Realtime tracking
     const lastFetchTimeRef = useRef<number>(0);
