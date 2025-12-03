@@ -3,14 +3,14 @@ import { Sidebar } from './components/Sidebar';
 import { MapComponent } from './components/MapComponent';
 import { ChatInterface } from './components/ChatInterface';
 import { ReportPanel } from './components/ReportPanel';
-import { fetchLiveTrack, fetchResearchTrack } from './api';
+import { fetchLiveTrack, fetchResearchTrack, fetchAnalyzeFlight } from './api';
 import type { AnomalyReport, FlightTrack } from './types';
 import { List, Map as MapIcon, FileText, Bot } from 'lucide-react';
 import clsx from 'clsx';
 import { ALERT_AUDIO_SRC } from './constants';
 
 export function MobileApp() {
-    const [mode, setMode] = useState<'historical' | 'realtime' | 'research'>('historical');
+    const [mode, setMode] = useState<'historical' | 'realtime' | 'research' | 'rules'>('historical');
     const [selectedAnomaly, setSelectedAnomaly] = useState<AnomalyReport | null>(null);
     const [flightData, setFlightData] = useState<FlightTrack | null>(null);
     const [loadingTrack, setLoadingTrack] = useState(false);
@@ -24,7 +24,7 @@ export function MobileApp() {
             // Switch to Map tab when an anomaly is selected
             setActiveTab('map');
             
-            const fetcher = mode === 'research' ? fetchResearchTrack : fetchLiveTrack;
+            const fetcher = mode === 'rules' ? fetchAnalyzeFlight : (mode === 'research' ? fetchResearchTrack : fetchLiveTrack);
             
             fetcher(selectedAnomaly.flight_id)
                 .then(track => {
