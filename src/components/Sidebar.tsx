@@ -459,7 +459,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ onSelectAnomaly, selectedAnoma
                              const subTitle = anomaly.callsign ? `ID: ${anomaly.flight_id}` : '';
 
                              // Version Badge Logic
-                             const cutoffTimestamp = new Date('2024-07-07T00:00:00Z').getTime() / 1000;
+                             const cutoffTimestamp = new Date('2025-07-07T00:00:00Z').getTime() / 1000;
                              const isV2 = anomaly.timestamp >= cutoffTimestamp;
 
                              return (

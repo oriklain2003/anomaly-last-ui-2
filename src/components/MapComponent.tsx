@@ -4,6 +4,19 @@ import 'maplibre-gl/dist/maplibre-gl.css';
 import type { TrackPoint } from '../types';
 import { fetchLearnedPaths } from '../api';
 
+// Fix for Hebrew text rendering (RTL)
+try {
+  if (maplibregl.getRTLTextPluginStatus() === 'unavailable') {
+    maplibregl.setRTLTextPlugin(
+      'https://unpkg.com/@mapbox/mapbox-gl-rtl-text@0.2.3/mapbox-gl-rtl-text.min.js',
+      null,
+      true // Lazy load
+    );
+  }
+} catch (err) {
+  console.error('Failed to set RTL text plugin', err);
+}
+
 interface MapComponentProps {
   points: TrackPoint[];
   secondaryPoints?: TrackPoint[];
