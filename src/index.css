@@ -12,3 +12,30 @@
     font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
 }
 
+/* Neon Colors */
+:root {
+  --neon-blue: #2dd9fe;
+  --neon-blue-glow: #00a3d5;
+}
+
+@keyframes gradient-x {
+  0% {
+    background-position: 0% 50%;
+  }
+  100% {
+    background-position: 100% 50%;
+  }
+}
+
+.animate-gradient-x {
+  background-size: 200% 100%;
+  animation: gradient-x 2s linear infinite;
+}
+
+.badge-v2 {
+  background-image: linear-gradient(90deg, #000000, #2dd9fe, #808080, #000000);
+  color: white;
+  border: 1px solid var(--neon-blue);
+  box-shadow: 0 0 5px var(--neon-blue-glow), inset 0 0 5px var(--neon-blue-glow);
+  text-shadow: 0 0 2px black;
+}

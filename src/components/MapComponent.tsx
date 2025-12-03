@@ -6,10 +6,11 @@ import { fetchLearnedPaths } from '../api';
 
 interface MapComponentProps {
   points: TrackPoint[];
+  secondaryPoints?: TrackPoint[];
   anomalyTimestamps?: number[];
 }
 
-export const MapComponent: React.FC<MapComponentProps> = ({ points, anomalyTimestamps = [] }) => {
+export const MapComponent: React.FC<MapComponentProps> = ({ points, secondaryPoints = [], anomalyTimestamps = [] }) => {
   const mapContainer = useRef<HTMLDivElement>(null);
   const map = useRef<maplibregl.Map | null>(null);
   const apiKey = 'r7kaQpfNDVZdaVp23F1r';
@@ -62,6 +63,45 @@ export const MapComponent: React.FC<MapComponentProps> = ({ points, anomalyTimes
         },
       });
 
+      // Secondary Route (Proximity)
+      map.current.addSource('secondary-route', {
+        type: 'geojson',
+        data: { type: 'FeatureCollection', features: [] }
+      });
+
+      map.current.addLayer({
+        id: 'secondary-route-line',
+        type: 'line',
+        source: 'secondary-route',
+        layout: {
+          'line-join': 'round',
+          'line-cap': 'round'
+        },
+        paint: {
+          'line-color': '#fb923c', // Orange-400
+          'line-width': 3,
+          'line-dasharray': [2, 2]
+        },
+      });
+
+      // Secondary Points (for hover tooltip)
+      map.current.addSource('secondary-points', {
+        type: 'geojson',
+        data: { type: 'FeatureCollection', features: [] }
+      });
+
+      map.current.addLayer({
+        id: 'secondary-route-points',
+        type: 'circle',
+        source: 'secondary-points',
+        paint: {
+          'circle-radius': 3,
+          'circle-color': '#fb923c',
+          'circle-stroke-width': 1,
+          'circle-stroke-color': '#ffffff'
+        }
+      });
+
       map.current.addSource('points', {
         type: 'geojson',
         data: {
@@ -87,7 +127,7 @@ export const MapComponent: React.FC<MapComponentProps> = ({ points, anomalyTimes
         closeOnClick: false
       });
 
-      map.current.on('mouseenter', 'route-points', (e) => {
+      const showPopup = (e: any) => {
         if (!map.current) return;
         map.current.getCanvas().style.cursor = 'pointer';
 
@@ -109,13 +149,19 @@ export const MapComponent: React.FC<MapComponentProps> = ({ points, anomalyTimes
                 </div>
             `)
             .addTo(map.current);
-      });
+      };
 
-      map.current.on('mouseleave', 'route-points', () => {
+      const hidePopup = () => {
         if (!map.current) return;
         map.current.getCanvas().style.cursor = '';
         popup.remove();
-      });
+      };
+
+      map.current.on('mouseenter', 'route-points', showPopup);
+      map.current.on('mouseleave', 'route-points', hidePopup);
+      
+      map.current.on('mouseenter', 'secondary-route-points', showPopup);
+      map.current.on('mouseleave', 'secondary-route-points', hidePopup);
     });
 
     return () => {
@@ -229,6 +275,8 @@ export const MapComponent: React.FC<MapComponentProps> = ({ points, anomalyTimes
 
     const source = map.current.getSource('route') as maplibregl.GeoJSONSource;
     const pointsSource = map.current.getSource('points') as maplibregl.GeoJSONSource;
+    const secondarySource = map.current.getSource('secondary-route') as maplibregl.GeoJSONSource;
+    const secondaryPointsSource = map.current.getSource('secondary-points') as maplibregl.GeoJSONSource;
     
     // Reset markers
     const markers = document.getElementsByClassName('maplibregl-marker');
@@ -247,12 +295,74 @@ export const MapComponent: React.FC<MapComponentProps> = ({ points, anomalyTimes
                 features: []
             });
         }
+        if (secondarySource) {
+            secondarySource.setData({
+                type: 'FeatureCollection',
+                features: []
+            });
+        }
+        if (secondaryPointsSource) {
+            secondaryPointsSource.setData({
+                type: 'FeatureCollection',
+                features: []
+            });
+        }
         return;
     }
 
-    // Fit bounds
+    // Update Secondary Track
+    if (secondarySource) {
+        if (secondaryPoints && secondaryPoints.length > 0) {
+            secondarySource.setData({
+                type: 'FeatureCollection',
+                features: [{
+                    type: 'Feature',
+                    properties: {},
+                    geometry: {
+                        type: 'LineString',
+                        coordinates: secondaryPoints.map(p => [p.lon, p.lat])
+                    }
+                }] as any
+            });
+
+            if (secondaryPointsSource) {
+                 secondaryPointsSource.setData({
+                    type: 'FeatureCollection',
+                    features: secondaryPoints.map(p => ({
+                        type: 'Feature',
+                        properties: {
+                            timestamp: p.timestamp,
+                            alt: p.alt,
+                            track: p.track ?? 0
+                        },
+                        geometry: {
+                            type: 'Point',
+                            coordinates: [p.lon, p.lat]
+                        }
+                    })) as any
+                });
+            }
+
+        } else {
+            secondarySource.setData({
+                type: 'FeatureCollection',
+                features: []
+            });
+            if (secondaryPointsSource) {
+                secondaryPointsSource.setData({
+                    type: 'FeatureCollection',
+                    features: []
+                });
+            }
+        }
+    }
+
+    // Fit bounds (include secondary points if available)
     const bounds = new maplibregl.LngLatBounds();
     points.forEach((p) => bounds.extend([p.lon, p.lat]));
+    if (secondaryPoints && secondaryPoints.length > 0) {
+        secondaryPoints.forEach((p) => bounds.extend([p.lon, p.lat]));
+    }
     map.current.fitBounds(bounds, { padding: 50 });
 
     // Add Start Marker
@@ -325,7 +435,7 @@ export const MapComponent: React.FC<MapComponentProps> = ({ points, anomalyTimes
         });
     }
 
-  }, [points, anomalyTimestamps]);
+  }, [points, secondaryPoints, anomalyTimestamps]);
 
   return (
     <div className="relative w-full h-full">

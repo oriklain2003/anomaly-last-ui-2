@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { ChevronLeft, ChevronRight, Search, Radio, Filter, Beaker, Calendar } from 'lucide-react';
-import { fetchLiveAnomalies, fetchResearchAnomalies } from '../api';
+import { ChevronLeft, ChevronRight, Search, Radio, Filter, Beaker, Calendar, List, ArrowLeft } from 'lucide-react';
+import { fetchLiveAnomalies, fetchResearchAnomalies, fetchRules, fetchFlightsByRule } from '../api';
 import type { AnomalyReport } from '../types';
 import clsx from 'clsx';
 import { ALERT_AUDIO_SRC, SOUND_COOLDOWN_MS } from '../constants';
@@ -8,15 +8,20 @@ import { ALERT_AUDIO_SRC, SOUND_COOLDOWN_MS } from '../constants';
 interface SidebarProps {
     onSelectAnomaly: (anomaly: AnomalyReport) => void;
     selectedAnomalyId?: string;
-    mode: 'historical' | 'realtime' | 'research';
-    setMode: (mode: 'historical' | 'realtime' | 'research') => void;
+    mode: 'historical' | 'realtime' | 'research' | 'rules';
+    setMode: (mode: 'historical' | 'realtime' | 'research' | 'rules') => void;
+    className?: string;
 }
 
-export const Sidebar: React.FC<SidebarProps> = ({ onSelectAnomaly, selectedAnomalyId, mode, setMode }) => {
+export const Sidebar: React.FC<SidebarProps> = ({ onSelectAnomaly, selectedAnomalyId, mode, setMode, className }) => {
     const [selectedDate, setSelectedDate] = useState(new Date());
     const [anomalies, setAnomalies] = useState<AnomalyReport[]>([]);
     const [loading, setLoading] = useState(false);
     const [filter, setFilter] = useState('');
+    
+    // Rules State
+    const [rules, setRules] = useState<{ id: number; name: string; description: string }[]>([]);
+    const [selectedRuleId, setSelectedRuleId] = useState<number | null>(null);
     
     // Filters
     const [minScore, setMinScore] = useState(0);
@@ -39,7 +44,9 @@ export const Sidebar: React.FC<SidebarProps> = ({ onSelectAnomaly, selectedAnoma
             intervalRef.current = null;
         }
 
-        if (mode === 'historical' || mode === 'research') {
+        if (mode === 'rules') {
+            fetchRulesList();
+        } else if (mode === 'historical' || mode === 'research') {
             fetchHistoricalOrResearch();
         } else {
             fetchRealtimeInitial();
@@ -50,6 +57,38 @@ export const Sidebar: React.FC<SidebarProps> = ({ onSelectAnomaly, selectedAnoma
             if (intervalRef.current) clearInterval(intervalRef.current);
         };
     }, [mode, selectedDate]);
+
+    // Effect for fetching flights when a rule is selected
+    useEffect(() => {
+        if (mode === 'rules' && selectedRuleId !== null) {
+            fetchRuleFlights(selectedRuleId);
+        }
+    }, [mode, selectedRuleId]);
+
+    const fetchRulesList = async () => {
+        setLoading(true);
+        try {
+            const data = await fetchRules();
+            setRules(data);
+        } catch (error) {
+            console.error("Error fetching rules:", error);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const fetchRuleFlights = async (ruleId: number) => {
+        setLoading(true);
+        try {
+            const data = await fetchFlightsByRule(ruleId);
+            setAnomalies(data);
+        } catch (error) {
+            console.error("Error fetching flights for rule:", error);
+            setAnomalies([]);
+        } finally {
+            setLoading(false);
+        }
+    };
 
     const fetchHistoricalOrResearch = async () => {
         setLoading(true);
@@ -190,7 +229,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ onSelectAnomaly, selectedAnoma
     };
 
     return (
-        <aside className="col-span-3 flex flex-col gap-6 overflow-y-auto h-full pr-2">
+        <aside className={clsx("flex flex-col gap-6 overflow-y-auto h-full pr-2", className || "col-span-3")}>
             
             {/* Mode Switcher */}
             <div className="bg-[#2C2F33] rounded-xl p-1 flex gap-1">
@@ -212,6 +251,16 @@ export const Sidebar: React.FC<SidebarProps> = ({ onSelectAnomaly, selectedAnoma
                 >
                     <Beaker className="size-4" />
                     Research
+                </button>
+                <button 
+                    onClick={() => { setMode('rules'); setSelectedRuleId(null); }}
+                    className={clsx(
+                        "flex-1 py-2 rounded-lg text-sm font-bold transition-all flex items-center justify-center gap-2",
+                        mode === 'rules' ? "bg-blue-500 text-white" : "text-white/60 hover:text-white"
+                    )}
+                >
+                    <List className="size-4" />
+                    Rules
                 </button>
                 <button 
                     onClick={() => setMode('realtime')}
@@ -274,8 +323,52 @@ export const Sidebar: React.FC<SidebarProps> = ({ onSelectAnomaly, selectedAnoma
 
             {/* Search & List */}
             <div className="bg-[#2C2F33] rounded-xl p-4 flex flex-col gap-4 flex-1 min-h-0">
-                {/* Search Bar with Filter Toggle */}
-                <div className="flex items-center gap-2">
+                
+                {/* Rule List View */}
+                {mode === 'rules' && selectedRuleId === null ? (
+                    <div className="flex flex-col gap-2 overflow-y-auto pr-2 -mr-2 flex-1">
+                        {loading ? (
+                            <p className="text-white/60 text-center py-4">Loading rules...</p>
+                        ) : (
+                            rules.map(rule => (
+                                <div 
+                                    key={rule.id}
+                                    onClick={() => setSelectedRuleId(rule.id)}
+                                    className="flex flex-col gap-1 p-3 rounded-lg cursor-pointer hover:bg-white/5 border border-transparent transition-colors"
+                                >
+                                    <div className="flex justify-between items-center">
+                                        <p className="text-sm font-bold text-white">{rule.name}</p>
+                                        <span className="text-xs text-white/40">ID: {rule.id}</span>
+                                    </div>
+                                    <p className="text-xs text-white/60">{rule.description}</p>
+                                </div>
+                            ))
+                        )}
+                    </div>
+                ) : (
+                    <>
+                        {/* Header for Rule Details */}
+                        {mode === 'rules' && selectedRuleId !== null && (
+                            <div className="flex items-center gap-2 border-b border-white/5 pb-2">
+                                <button 
+                                    onClick={() => { setSelectedRuleId(null); setAnomalies([]); }}
+                                    className="p-1 hover:bg-white/10 rounded transition-colors"
+                                >
+                                    <ArrowLeft className="size-5 text-white" />
+                                </button>
+                                <div>
+                                    <p className="text-sm font-bold text-white">
+                                        {rules.find(r => r.id === selectedRuleId)?.name || 'Rule Details'}
+                                    </p>
+                                    <p className="text-[10px] text-white/40">
+                                        {anomalies.length} flights found
+                                    </p>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Search Bar with Filter Toggle */}
+                        <div className="flex items-center gap-2">
                     <label className="flex flex-col w-full h-12 flex-1">
                         <div className="flex w-full flex-1 items-stretch rounded-lg h-full bg-background-dark">
                             <div className="text-white/60 flex items-center justify-center pl-4">
@@ -365,6 +458,10 @@ export const Sidebar: React.FC<SidebarProps> = ({ onSelectAnomaly, selectedAnoma
                              const displayTitle = anomaly.callsign || anomaly.flight_id;
                              const subTitle = anomaly.callsign ? `ID: ${anomaly.flight_id}` : '';
 
+                             // Version Badge Logic
+                             const cutoffTimestamp = new Date('2024-07-07T00:00:00Z').getTime() / 1000;
+                             const isV2 = anomaly.timestamp >= cutoffTimestamp;
+
                              return (
                                 <div 
                                     key={`${anomaly.flight_id}-${anomaly.timestamp}`}
@@ -377,7 +474,17 @@ export const Sidebar: React.FC<SidebarProps> = ({ onSelectAnomaly, selectedAnoma
                                     )}
                                 >
                                     <div className="flex justify-between items-center">
-                                        <p className="text-sm font-bold text-white">{displayTitle}</p>
+                                        <div className="flex items-center gap-2">
+                                            <p className="text-sm font-bold text-white">{displayTitle}</p>
+                                            <span className={clsx(
+                                                "text-[10px] font-bold px-1.5 py-0.5 rounded border select-none",
+                                                isV2 
+                                                    ? "badge-v2 animate-gradient-x" 
+                                                    : "bg-zinc-800 text-zinc-500 border-zinc-700"
+                                            )}>
+                                                {isV2 ? 'v2 NEW' : 'v1 OLD'}
+                                            </span>
+                                        </div>
                                         <span className={`h-2.5 w-2.5 rounded-full ${severityColor}`}></span>
                                     </div>
                                     <p className="text-xs text-white/80 truncate">{type}</p>
@@ -390,6 +497,8 @@ export const Sidebar: React.FC<SidebarProps> = ({ onSelectAnomaly, selectedAnoma
                         })
                     )}
                 </div>
+                </>
+            )}
             </div>
         </aside>
     );

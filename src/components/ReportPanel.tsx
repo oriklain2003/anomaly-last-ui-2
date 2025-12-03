@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { X, AlertTriangle, CheckCircle, ThumbsUp } from 'lucide-react';
 import type { AnomalyReport } from '../types';
 import { submitFeedback } from '../api';
@@ -7,6 +7,7 @@ import clsx from 'clsx';
 interface ReportPanelProps {
     anomaly: AnomalyReport | null;
     onClose: () => void;
+    className?: string;
 }
 
 const LayerCard: React.FC<{ title: string; data: any; type: 'rules' | 'model' }> = ({ title, data, type }) => {
@@ -153,10 +154,38 @@ const LayerCard: React.FC<{ title: string; data: any; type: 'rules' | 'model' }>
     );
 };
 
-export const ReportPanel: React.FC<ReportPanelProps> = ({ anomaly, onClose }) => {
+export const ReportPanel: React.FC<ReportPanelProps> = ({ anomaly, onClose, className }) => {
     const [feedbackStatus, setFeedbackStatus] = useState<'idle' | 'submitting' | 'success' | 'error'>('idle');
     const [comment, setComment] = useState('');
     const [copied, setCopied] = useState(false);
+    const [frStatus, setFrStatus] = useState<'checking' | 'valid' | 'invalid'>('checking');
+
+    useEffect(() => {
+        if (!anomaly?.callsign || !anomaly?.flight_id) {
+            setFrStatus('invalid');
+            return;
+        }
+
+        let callsignForUrl = anomaly.callsign;
+        // If callsign starts with RJA, remove the 'A' (e.g., RJA524 -> RJ524)
+        if (callsignForUrl.toUpperCase().startsWith('RJA')) {
+            callsignForUrl = 'RJ' + callsignForUrl.substring(3);
+        }
+
+        const checkFR = async () => {
+            setFrStatus('checking');
+            const url = `https://www.flightradar24.com/data/flights/${callsignForUrl}`;
+            try {
+                const res = await fetch(url, { method: 'HEAD' });
+                if (res.ok) setFrStatus('valid');
+                else setFrStatus('invalid');
+            } catch (e) {
+                setFrStatus('invalid');
+            }
+        };
+
+        checkFR();
+    }, [anomaly?.callsign, anomaly?.flight_id]);
 
     if (!anomaly) return null;
 
@@ -165,6 +194,11 @@ export const ReportPanel: React.FC<ReportPanelProps> = ({ anomaly, onClose }) =>
         setCopied(true);
         setTimeout(() => setCopied(false), 2000);
     };
+
+    let frCallsign = anomaly.callsign || '';
+    if (frCallsign.toUpperCase().startsWith('RJA')) {
+        frCallsign = 'RJ' + frCallsign.substring(3);
+    }
 
     const handleFeedback = async (isAnomaly: boolean) => {
         setFeedbackStatus('submitting');
@@ -202,7 +236,7 @@ export const ReportPanel: React.FC<ReportPanelProps> = ({ anomaly, onClose }) =>
     const confidenceColor = getConfidenceColor(summary.confidence_score || 0);
 
     return (
-        <aside className="col-span-3 bg-[#2C2F33] rounded-xl flex flex-col h-full overflow-hidden border border-white/5 animate-in slide-in-from-right-4">
+        <aside className={clsx("bg-[#2C2F33] rounded-xl flex flex-col h-full overflow-hidden border border-white/5 animate-in slide-in-from-right-4", className || "col-span-3")}>
             {/* Header */}
             <div className="p-4 border-b border-white/10 flex items-center justify-between bg-white/5">
                 <div>
@@ -214,17 +248,32 @@ export const ReportPanel: React.FC<ReportPanelProps> = ({ anomaly, onClose }) =>
                             <p className="text-[10px] text-pink-300 mb-0.5 animate-pulse font-medium">
                                 ✨ click me to copy
                             </p>
-                            <button 
-                                onClick={() => handleCopy(anomaly.callsign!)}
-                                className={clsx(
-                                    "text-sm font-mono font-bold px-3 py-1 rounded border transition-all duration-200",
-                                    copied 
-                                        ? "bg-green-500/20 text-green-300 border-green-500/30" 
-                                        : "bg-white/10 text-white hover:bg-white/20 border-white/10 hover:border-white/30"
-                                )}
-                            >
-                                {copied ? "Copied!" : anomaly.callsign}
-                            </button>
+                            <div className="flex items-center gap-2">
+                                <button 
+                                    onClick={() => handleCopy(anomaly.callsign!)}
+                                    className={clsx(
+                                        "text-sm font-mono font-bold px-3 py-1 rounded border transition-all duration-200",
+                                        copied 
+                                            ? "bg-green-500/20 text-green-300 border-green-500/30" 
+                                            : "bg-white/10 text-white hover:bg-white/20 border-white/10 hover:border-white/30"
+                                    )}
+                                >
+                                    {copied ? "Copied!" : anomaly.callsign}
+                                </button>
+                                <a 
+                                    href={`https://www.flightradar24.com/data/flights/${frCallsign}`}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className={clsx(
+                                        "text-sm font-mono font-bold px-3 py-1 rounded border transition-all duration-200 no-underline flex items-center",
+                                        frStatus === 'valid' 
+                                            ? "bg-green-500/20 text-green-300 border-green-500/30 hover:bg-green-500/30" 
+                                            : "bg-red-500/20 text-red-300 border-red-500/30 hover:bg-red-500/30"
+                                    )}
+                                >
+                                    Open in FR
+                                </a>
+                            </div>
                         </div>
                     )}
                 </div>

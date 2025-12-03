@@ -5,141 +5,15 @@ import type { ChatMessage } from '../chatTypes';
 import type { TrackPoint } from '../types';
 
 /* ============================================================
-   SYSTEM PROMPT (FINAL VERSION)
+   SYSTEM PROMPT MOVED TO BACKEND
    ============================================================ */
-const SYSTEM_PROMPT = `
-You are Flight Analyst AI — an expert aviation operations assistant specializing in:
-- flight path interpretation
-- anomaly detection (multi-layer models)
-- ADS-B / Mode-S reasoning
-- location inference from coordinates
-- explaining flight behavior in simple, human terms
-
-You receive:
-1. JSON anomaly analysis from multiple AI models
-2. Flight path data: lat/lon/altitude/speed/heading/timestamps
-
-Your job is to explain the flight as a real flight operations analyst would.
-
-============================================================
-### LOCATION RULES
-============================================================
-
-• You ARE allowed to infer location from coordinates:
-  - country
-  - region
-  - nearby city
-  - likely airport area
-
-• If referring to airports:
-  - Use the airport name only.
-  - Do NOT invent or guess ICAO/IATA codes unless explicitly provided.
-
-• When the user asks ONLY about:
-  “start country”, “where is this”, “which region”, “starting point”
-  → Answer in **one short sentence**, no extra details.
-
-  Example:
-  “Egypt — the flight starts in the southern Sinai Peninsula.”
-
-============================================================
-### BEHAVIOR INTERPRETATION RULES
-============================================================
-
-Describe flight behavior ONLY when the user asks about:
-- what happened
-- abnormal behavior
-- turns, climb, descent
-- flight profile
-- stability
-- taxiing or ground movement
-
-When describing behavior:
-• Speak like an experienced flight ops analyst or pilot.
-• Prefer simple, human phrasing:
-  - “The aircraft eased into its climb…”
-  - “The heading change was smooth and intentional…”
-  - “Speed increased steadily as expected…”
-
-• Base every interpretation on:
-  - altitude trend
-  - speed trend
-  - heading direction
-  - climb/descent continuity
-  - spacing and timing of points
-  - ground vs airborne behavior
-
-Do NOT speculate beyond the data.
-
-============================================================
-### ANOMALY EXPLANATION RULES
-============================================================
-
-When the user asks “why is this an anomaly?” or similar:
-
-1. **NEVER give machine-learning jargon.**  
-   Do NOT say:  
-   - “movement pattern was unusual”  
-   - “the model detected a pattern difference”  
-   - “embedding / cluster / vector / threshold”  
-
-2. **Translate the anomaly into real operational terms**, such as:
-   - unusual heading changes
-   - inconsistent climb rate
-   - speed fluctuations
-   - irregular ground movement
-   - timing that doesn’t match typical flight flows
-
-3. ALWAYS anchor the explanation to something visible in the raw data.  
-   Example:
-   “The aircraft stayed at very low speed with small heading shifts for longer than typical before takeoff, then transitioned sharply into the climb.”
-
-4. If multiple models disagree:
-   • Explain this as a **subtle or borderline irregularity**, not a safety concern.
-
-5. If no operational anomaly is visible:
-   • Say so directly:
-     “There is no clear behavioral anomaly in the flight data; this is likely a statistical or pattern-based flag.”
-
-============================================================
-### ANSWER LENGTH RULES
-============================================================
-
-• Simple question → simple answer.
-• Location-only questions → **max 1–2 sentences**.
-• Behavior questions → **3–6 sentences**, concise and readable.
-• Detailed analysis is allowed ONLY if the user explicitly asks.
-• Never exceed ~120 words unless the user requests deep analysis.
-• Do NOT generate long multi-section breakdowns unless asked.
-
-============================================================
-### TONE & STYLE RULES
-============================================================
-
-• Sound human, confident, and professional — like a flight operations analyst.
-• Avoid robotic or overly formal phrasing.
-• Use clear, conversational language.
-• Be direct, helpful, and avoid unnecessary detail.
-• If uncertain, say:
-  “Based on the available data, the most likely interpretation is…”
-
-============================================================
-### CORE PRINCIPLES
-============================================================
-
-• No hallucinations.
-• No invented facts.
-• Always rely on the flight data provided.
-• Match depth to the user question.
-• Safety-critical statements must be cautious and grounded.
-
-
-`;
 
 interface ChatInterfaceProps {
   data: any | null;
   flightId: string;
   flightPoints: TrackPoint[];
+  embedded?: boolean;
+  className?: string;
 }
 
 const TypewriterText: React.FC<{ text: string; shouldAnimate: boolean }> = ({ text, shouldAnimate }) => {
@@ -171,7 +45,7 @@ const TypewriterText: React.FC<{ text: string; shouldAnimate: boolean }> = ({ te
   return <span>{displayedText}</span>;
 };
 
-export const ChatInterface: React.FC<ChatInterfaceProps> = ({ data, flightId, flightPoints }) => {
+export const ChatInterface: React.FC<ChatInterfaceProps> = ({ data, flightId, flightPoints, embedded, className }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([
     { role: 'assistant', content: '👋 Hi! I can help you analyze this flight. Ask me anything about the flight path or anomalies.' }
@@ -266,8 +140,8 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ data, flightId, fl
     setLoading(true);
   
     try {
-      const OPENAI_KEY = import.meta.env.VITE_OPENAI_API_KEY;
-  
+      const API_BASE = (import.meta.env.VITE_API_URL || '') + '/api/v2';
+
       // Compress flight points
       const pointsData = filterPoints(flightPoints);
   
@@ -289,47 +163,28 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ data, flightId, fl
       }
   
       // Build final payload
-      const response = await fetch("https://api.openai.com/v1/chat/completions", {
+      const response = await fetch(`${API_BASE}/chat`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "Authorization": `Bearer ${OPENAI_KEY}`,
         },
         body: JSON.stringify({
-          model: "gpt-4.1-mini",
-          temperature: 0.3,
-          max_tokens: 600,
-          messages: [
-            // 1) System prompt
-            { role: "system", content: SYSTEM_PROMPT },
-  
-            // 2) Chat history (already contains user message)
-            ...messages.map(m => ({ role: m.role, content: m.content })),
-  
-            // 3) Inject flight data WITH the question (critical!)
-            {
-              role: "user",
-              content: JSON.stringify({
-                flight_id: flightId,
-                analysis: slim,
-                points: pointsData
-              })
-            },
-  
-            // 4) The actual user question (you MUST keep this last)
-            { role: "user", content: userMsg.content }
-          ]
+          messages: messages.map(m => ({ role: m.role, content: m.content })),
+          flight_id: flightId,
+          analysis: slim,
+          points: pointsData,
+          user_question: userMsg.content
         })
       });
   
       if (!response.ok) {
-        throw new Error(`OpenAI API Error: ${response.statusText}`);
+        throw new Error(`API Error: ${response.statusText}`);
       }
   
       const json = await response.json();
-      const aiMsg = json.choices[0].message;
+      const aiContent = json.response;
   
-      setMessages(prev => [...prev, { role: "assistant", content: aiMsg.content }]);
+      setMessages(prev => [...prev, { role: "assistant", content: aiContent }]);
   
     } catch (err: any) {
       setMessages(prev => [...prev, {
@@ -341,11 +196,14 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ data, flightId, fl
     }
   };
 
-  if (!isOpen) {
+  if (!isOpen && !embedded) {
     return (
       <button
         onClick={() => setIsOpen(true)}
-        className="fixed bottom-6 right-6 h-16 w-16 bg-primary text-white rounded-full shadow-2xl flex items-center justify-center hover:bg-blue-700 transition-all z-50 hover:scale-110 backdrop-blur-sm"
+        className={clsx(
+            "fixed bottom-6 right-6 h-16 w-16 bg-primary text-white rounded-full shadow-2xl flex items-center justify-center hover:bg-blue-700 transition-all z-50 hover:scale-110 backdrop-blur-sm",
+            className
+        )}
       >
         <MessageSquare className="h-8 w-8" />
       </button>
@@ -353,17 +211,14 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ data, flightId, fl
   }
 
   return (
-    <div className="
-      fixed bottom-6 right-6 
-      w-[420px] h-[620px]
-      max-h-[80vh] max-w-[90vw]
-      rounded-3xl border border-white/20 shadow-2xl z-50 overflow-hidden
-      bg-white/80 dark:bg-gray-900/80 
-      backdrop-blur-xl
-      animate-in slide-in-from-bottom-4 fade-in duration-300
-      flex flex-col
-    ">
+    <div className={clsx(
+      embedded 
+        ? "w-full h-full flex flex-col bg-transparent" 
+        : "fixed bottom-6 right-6 w-[420px] h-[620px] max-h-[80vh] max-w-[90vw] rounded-3xl border border-white/20 shadow-2xl z-50 overflow-hidden bg-white/80 dark:bg-gray-900/80 backdrop-blur-xl animate-in slide-in-from-bottom-4 fade-in duration-300 flex flex-col",
+      className
+    )}>
       
+      {!embedded && (
       <div className="flex items-center justify-between p-4 bg-primary text-white shadow-lg">
         <div className="flex items-center gap-2">
           <Bot className="h-5 w-5" />
@@ -387,6 +242,7 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ data, flightId, fl
           </button>
         </div>
       </div>
+      )}
 
       <div className="flex-1 overflow-y-auto p-5 flex flex-col gap-5">
         {messages.map((msg, i) => (

@@ -9,6 +9,7 @@ export default defineConfig(({ mode }) => {
     plugins: [react()],
     server: {
       port: parseInt(env.PORT) || 3001,
+      host: true, // Listen on all addresses
     },
     resolve: {
       alias: {

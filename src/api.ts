@@ -26,6 +26,18 @@ export const fetchResearchAnomalies = async (startTs: number, endTs: number): Pr
     return response.json();
 };
 
+export const fetchAnalyzeFlight = async (flightId: string): Promise<FlightTrack> => {
+    const response = await fetch(`${API_BASE}/analyze/${flightId}`);
+    if (!response.ok) {
+        throw new Error('Failed to analyze flight');
+    }
+    const result = await response.json();
+    if (result.track) {
+        return result.track;
+    }
+    throw new Error('Track data missing in analysis result');
+};
+
 export const fetchResearchTrack = async (flightId: string): Promise<FlightTrack> => {
     const response = await fetch(`${API_BASE}/research/track/${flightId}`);
     if (!response.ok) {
@@ -38,6 +50,22 @@ export const fetchLearnedPaths = async (): Promise<any> => {
     const response = await fetch(`${API_BASE}/paths`);
     if (!response.ok) {
         throw new Error('Failed to fetch learned paths');
+    }
+    return response.json();
+};
+
+export const fetchRules = async (): Promise<{ id: number; name: string; description: string }[]> => {
+    const response = await fetch(`${API_BASE}/rules`);
+    if (!response.ok) {
+        throw new Error('Failed to fetch rules');
+    }
+    return response.json();
+};
+
+export const fetchFlightsByRule = async (ruleId: number): Promise<AnomalyReport[]> => {
+    const response = await fetch(`${API_BASE}/rules/${ruleId}/flights`);
+    if (!response.ok) {
+        throw new Error('Failed to fetch flights by rule');
     }
     return response.json();
 };
