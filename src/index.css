@@ -29,13 +29,25 @@
 
 .animate-gradient-x {
   background-size: 200% 100%;
-  animation: gradient-x 2s linear infinite;
+  animation: gradient-x 3s linear infinite;
 }
 
 .badge-v2 {
-  background-image: linear-gradient(90deg, #000000, #2dd9fe, #808080, #000000);
+  /* Double sequence for seamless looping: Black -> Neon -> Grey -> Black -> Neon -> Grey -> Black */
+  background-image: linear-gradient(
+    90deg, 
+    #000000, 
+    #2dd9fe, 
+    #808080, 
+    #000000, 
+    #2dd9fe, 
+    #808080, 
+    #000000
+  );
   color: white;
   border: 1px solid var(--neon-blue);
-  box-shadow: 0 0 5px var(--neon-blue-glow), inset 0 0 5px var(--neon-blue-glow);
+  box-shadow: 
+    0 0 10px var(--neon-blue-glow), 
+    inset 0 0 5px var(--neon-blue-glow);
   text-shadow: 0 0 2px black;
 }
