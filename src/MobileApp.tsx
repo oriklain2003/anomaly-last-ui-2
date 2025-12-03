@@ -3,7 +3,7 @@ import { Sidebar } from './components/Sidebar';
 import { MapComponent } from './components/MapComponent';
 import { ChatInterface } from './components/ChatInterface';
 import { ReportPanel } from './components/ReportPanel';
-import { fetchLiveTrack, fetchResearchTrack, fetchAnalyzeFlight } from './api';
+import { fetchLiveTrack, fetchResearchTrack, fetchUnifiedTrack } from './api';
 import type { AnomalyReport, FlightTrack } from './types';
 import { List, Map as MapIcon, FileText, Bot } from 'lucide-react';
 import clsx from 'clsx';
@@ -24,7 +24,7 @@ export function MobileApp() {
             // Switch to Map tab when an anomaly is selected
             setActiveTab('map');
             
-            const fetcher = mode === 'rules' ? fetchAnalyzeFlight : (mode === 'research' ? fetchResearchTrack : fetchLiveTrack);
+            const fetcher = mode === 'rules' ? fetchUnifiedTrack : (mode === 'research' ? fetchResearchTrack : fetchLiveTrack);
             
             fetcher(selectedAnomaly.flight_id)
                 .then(track => {

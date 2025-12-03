@@ -48,50 +48,82 @@ const LayerCard: React.FC<{ title: string; data: any; type: 'rules' | 'model' }>
 
     // Special handling for "Path Deviation" (ID 11)
     const renderPathDeviation = (rule: any) => {
-        if (!rule.details?.segments) return null;
+        const details = rule.details || {};
+        
         return (
             <div className="mt-2 space-y-2">
-                <p className="text-xs font-bold text-white/60">Segment Analysis:</p>
-                {Object.entries(rule.details.segments).map(([phase, data]: [string, any]) => {
-                    // Check if phase was skipped
-                    const isSkipped = data === "skipped_phase" || data === "skipped_short" || data === "skipped_resample";
-                    
-                    if (isSkipped) {
-                        return (
-                             <div key={phase} className="bg-white/5 p-2 rounded border border-white/10 text-[10px] text-white/60 opacity-50">
-                                <div className="flex justify-between mb-1">
-                                    <span className="font-bold uppercase text-white/40">{phase}</span>
-                                    <span className="text-white/40">SKIPPED</span>
+                {details.deviations && details.deviations.length > 0 && (
+                    <div className="space-y-1">
+                        <p className="text-xs font-bold text-white/60">Deviations ({details.deviations.length}):</p>
+                        <div className="max-h-40 overflow-y-auto space-y-1 pr-1">
+                             {details.deviations.slice(0, 50).map((dev: any, idx: number) => (
+                                <div key={idx} className="bg-red-500/10 p-2 rounded border border-red-500/20 text-[10px] text-red-200">
+                                    <div className="flex justify-between items-center">
+                                        <span className="font-mono opacity-70">
+                                            {new Date(dev.timestamp * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                                        </span>
+                                        <span className="font-bold">{dev.dist_nm} NM off</span>
+                                    </div>
+                                    <div className="flex justify-between items-center mt-1 opacity-60">
+                                        <span>Alt: {dev.alt} ft</span>
+                                        <span>{dev.lat.toFixed(2)}, {dev.lon.toFixed(2)}</span>
+                                    </div>
                                 </div>
-                                <span className="italic text-white/30">Not analyzed (not cruise or too short)</span>
-                             </div>
-                        );
-                    }
-
-                    return (
-                        <div key={phase} className="bg-white/5 p-2 rounded border border-white/10 text-[10px] text-white/60">
-                            <div className="flex justify-between mb-1">
-                                <span className="font-bold uppercase text-white/40">{phase}</span>
-                                <span className={data.match_found ? "text-green-400" : "text-red-400"}>
-                                    {data.match_found ? "MATCH" : "NO MATCH"}
-                                </span>
-                            </div>
-                            {data.match_found ? (
-                                <div className="flex flex-col gap-0.5">
-                                    <span>Flow: {data.flow_id} ({data.layer})</span>
-                                    <span>Dist: {data.dist_nm} NM</span>
-                                </div>
-                            ) : (
-                                <span className="italic">No matching path</span>
-                            )}
-                            {data.closest_loose_dist_nm !== undefined && (
-                                 <div className="mt-1 pt-1 border-t border-white/10 text-blue-300">
-                                     Loose Dist: {data.closest_loose_dist_nm} NM
-                                 </div>
+                            ))}
+                            {details.deviations.length > 50 && (
+                                <p className="text-[10px] text-center text-white/40 italic">
+                                    + {details.deviations.length - 50} more points...
+                                </p>
                             )}
                         </div>
-                    );
-                })}
+                    </div>
+                )}
+
+                {details.segments && (
+                    <div className="space-y-2">
+                        <p className="text-xs font-bold text-white/60">Segment Analysis:</p>
+                        {Object.entries(details.segments).map(([phase, data]: [string, any]) => {
+                            // Check if phase was skipped
+                            const isSkipped = data === "skipped_phase" || data === "skipped_short" || data === "skipped_resample";
+                            
+                            if (isSkipped) {
+                                return (
+                                     <div key={phase} className="bg-white/5 p-2 rounded border border-white/10 text-[10px] text-white/60 opacity-50">
+                                        <div className="flex justify-between mb-1">
+                                            <span className="font-bold uppercase text-white/40">{phase}</span>
+                                            <span className="text-white/40">SKIPPED</span>
+                                        </div>
+                                        <span className="italic text-white/30">Not analyzed (not cruise or too short)</span>
+                                     </div>
+                                );
+                            }
+
+                            return (
+                                <div key={phase} className="bg-white/5 p-2 rounded border border-white/10 text-[10px] text-white/60">
+                                    <div className="flex justify-between mb-1">
+                                        <span className="font-bold uppercase text-white/40">{phase}</span>
+                                        <span className={data.match_found ? "text-green-400" : "text-red-400"}>
+                                            {data.match_found ? "MATCH" : "NO MATCH"}
+                                        </span>
+                                    </div>
+                                    {data.match_found ? (
+                                        <div className="flex flex-col gap-0.5">
+                                            <span>Flow: {data.flow_id} ({data.layer})</span>
+                                            <span>Dist: {data.dist_nm} NM</span>
+                                        </div>
+                                    ) : (
+                                        <span className="italic">No matching path</span>
+                                    )}
+                                    {data.closest_loose_dist_nm !== undefined && (
+                                         <div className="mt-1 pt-1 border-t border-white/10 text-blue-300">
+                                             Loose Dist: {data.closest_loose_dist_nm} NM
+                                         </div>
+                                    )}
+                                </div>
+                            );
+                        })}
+                    </div>
+                )}
             </div>
         );
     };

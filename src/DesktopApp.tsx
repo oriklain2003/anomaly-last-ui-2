@@ -3,7 +3,7 @@ import { Sidebar } from './components/Sidebar';
 import { MapComponent } from './components/MapComponent';
 import { ChatInterface } from './components/ChatInterface';
 import { ReportPanel } from './components/ReportPanel';
-import { fetchLiveTrack, fetchResearchTrack, fetchAnalyzeFlight } from './api';
+import { fetchLiveTrack, fetchResearchTrack, fetchUnifiedTrack } from './api';
 import type { AnomalyReport, FlightTrack } from './types';
 import { Settings, Bell } from 'lucide-react';
 import clsx from 'clsx';
@@ -25,7 +25,7 @@ export function DesktopApp() {
         
         let fetcher: (id: string) => Promise<FlightTrack>;
         if (mode === 'rules') {
-            fetcher = fetchAnalyzeFlight;
+            fetcher = fetchUnifiedTrack;
         } else if (mode === 'research') {
             fetcher = fetchResearchTrack;
         } else {

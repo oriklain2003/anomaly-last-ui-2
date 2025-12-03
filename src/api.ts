@@ -38,6 +38,14 @@ export const fetchAnalyzeFlight = async (flightId: string): Promise<FlightTrack>
     throw new Error('Track data missing in analysis result');
 };
 
+export const fetchUnifiedTrack = async (flightId: string): Promise<FlightTrack> => {
+    const response = await fetch(`${API_BASE}/track/unified/${flightId}`);
+    if (!response.ok) {
+        throw new Error('Failed to fetch flight track');
+    }
+    return response.json();
+};
+
 export const fetchResearchTrack = async (flightId: string): Promise<FlightTrack> => {
     const response = await fetch(`${API_BASE}/research/track/${flightId}`);
     if (!response.ok) {
