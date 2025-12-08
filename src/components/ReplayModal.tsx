@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
-import { X, Play, Pause, SkipBack, SkipForward, AlertTriangle, MapPin } from 'lucide-react';
+import { X, Play, Pause, SkipBack, SkipForward, AlertTriangle, MapPin, Wrench, Check } from 'lucide-react';
 import { fetchUnifiedTrack } from '../api';
 import type { TrackPoint } from '../types';
 import clsx from 'clsx';
@@ -46,8 +46,25 @@ export const ReplayModal: React.FC<ReplayModalProps> = ({ mainFlightId, secondar
     const [minTime, setMinTime] = useState<number>(0);
     const [maxTime, setMaxTime] = useState<number>(0);
     
+    // Tools State
+    const [showTools, setShowTools] = useState(false);
+    const [distanceTool, setDistanceTool] = useState(true);
+
     const animationRef = useRef<number | undefined>(undefined);
     const lastFrameTime = useRef<number>(0);
+
+    // Helper: Haversine Distance in NM
+    const getDistanceNM = (lat1: number, lon1: number, lat2: number, lon2: number) => {
+        const R = 3440.065; // Earth radius in NM
+        const dLat = (lat2 - lat1) * Math.PI / 180;
+        const dLon = (lon2 - lon1) * Math.PI / 180;
+        const a = 
+            Math.sin(dLat/2) * Math.sin(dLat/2) +
+            Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * 
+            Math.sin(dLon/2) * Math.sin(dLon/2);
+        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+        return R * c;
+    };
 
     // Zoom to event handler
     const handleEventClick = (event: ReplayEvent) => {
@@ -413,6 +430,26 @@ export const ReplayModal: React.FC<ReplayModalProps> = ({ mainFlightId, secondar
         };
     };
 
+    // Calculate distances to all other flights if tool enabled
+    const getDistancesToOthers = (currentFlightId: string, currentLat: number, currentLon: number) => {
+        if (!distanceTool) return [];
+
+        return flights
+            .filter(f => f.id !== currentFlightId)
+            .map(f => {
+                const tel = getCurrentTelemetry(f);
+                if (tel.status === 'waiting' || tel.status === 'ended' || !('lat' in tel)) return null;
+                
+                return {
+                    id: f.id,
+                    dist: getDistanceNM(currentLat, currentLon, tel.lat, tel.lon),
+                    color: f.color
+                };
+            })
+            .filter((d): d is { id: string; dist: number; color: string } => d !== null)
+            .sort((a, b) => a.dist - b.dist);
+    };
+
     if (loading) {
         return (
             <div className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center backdrop-blur-sm">
@@ -477,6 +514,32 @@ export const ReplayModal: React.FC<ReplayModalProps> = ({ mainFlightId, secondar
                 
                 {/* Header / Close */}
                 <div className="absolute top-4 right-4 z-50 flex gap-2">
+                    <div className="relative">
+                        <button 
+                            onClick={() => setShowTools(!showTools)}
+                            className={clsx(
+                                "p-2 rounded-full transition-colors border",
+                                showTools ? "bg-primary text-white border-primary" : "bg-black/50 hover:bg-black/70 text-white border-transparent"
+                            )}
+                            title="Tools"
+                        >
+                            <Wrench className="size-6 p-1" />
+                        </button>
+                        
+                        {showTools && (
+                            <div className="absolute right-0 top-full mt-2 w-48 bg-[#2C2F33] border border-white/10 rounded-lg shadow-xl p-2 animate-in fade-in slide-in-from-top-2">
+                                <div className="text-xs font-bold text-white/40 uppercase mb-2 px-2">Replay Tools</div>
+                                <button 
+                                    onClick={() => setDistanceTool(!distanceTool)}
+                                    className="w-full flex items-center justify-between p-2 rounded hover:bg-white/5 text-sm text-white transition-colors"
+                                >
+                                    <span>Distance Calc</span>
+                                    {distanceTool && <Check className="size-4 text-primary" />}
+                                </button>
+                            </div>
+                        )}
+                    </div>
+
                     <button 
                         onClick={onClose}
                         className="bg-black/50 hover:bg-black/70 text-white p-2 rounded-full transition-colors"
@@ -538,6 +601,10 @@ export const ReplayModal: React.FC<ReplayModalProps> = ({ mainFlightId, secondar
                                 const tel = getCurrentTelemetry(f);
                                 if (!tel) return null;
 
+                                const distances = (tel.status !== 'waiting' && 'lat' in tel)
+                                    ? getDistancesToOthers(f.id, tel.lat, tel.lon)
+                                    : [];
+
                                 return (
                                     <div key={f.id} className="bg-black/60 backdrop-blur border border-white/10 p-3 rounded-lg text-xs w-48 shadow-lg transition-all pointer-events-auto">
                                         <div className="flex items-center gap-2 mb-2 border-b border-white/10 pb-1">
@@ -554,8 +621,28 @@ export const ReplayModal: React.FC<ReplayModalProps> = ({ mainFlightId, secondar
                                                 <span className="font-mono text-right">{tel.track}°</span>
                                                 <span>Speed:</span>
                                                 <span className="font-mono text-right">{tel.gspeed || 0} kts</span>
-                                                <span>Lat/Lon:</span>
-                                                <span className="font-mono text-right text-[10px]">{tel.lat.toFixed(3)}, {tel.lon.toFixed(3)}</span>
+                                                
+                                                <span className="col-span-2 border-t border-white/5 mt-1 pt-1 flex justify-between opacity-60">
+                                                     <span>Lat/Lon:</span>
+                                                     <span className="font-mono text-[10px]">{tel.lat.toFixed(3)}, {tel.lon.toFixed(3)}</span>
+                                                </span>
+
+                                                {distances.length > 0 && (
+                                                    <div className="col-span-2 mt-2">
+                                                        <div className="text-[10px] font-bold text-white/40 uppercase mb-1">Distances</div>
+                                                        <div className="space-y-0.5">
+                                                            {distances.map(d => (
+                                                                <div key={d.id} className="flex justify-between items-center bg-white/5 px-1.5 py-0.5 rounded">
+                                                                    <div className="flex items-center gap-1.5">
+                                                                        <div className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: d.color }} />
+                                                                        <span className="text-white/70">{d.id}</span>
+                                                                    </div>
+                                                                    <span className="font-mono font-bold text-primary">{d.dist.toFixed(1)} NM</span>
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    </div>
+                                                )}
                                             </div>
                                         )}
                                     </div>

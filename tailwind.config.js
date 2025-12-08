@@ -7,11 +7,11 @@ export default {
   theme: {
     extend: {
       colors: {
-        "primary": "#00E5FF",
+        "primary": "rgb(var(--color-primary) / <alpha-value>)",
         "background-light": "#f6f6f8",
-        "background-dark": "#09090b",
-        "surface": "#18181b",
-        "surface-highlight": "#27272a",
+        "background-dark": "rgb(var(--color-background) / <alpha-value>)",
+        "surface": "rgb(var(--color-surface) / <alpha-value>)",
+        "surface-highlight": "color-mix(in srgb, rgb(var(--color-surface)), white 5%)",
       },
       fontFamily: {
         "display": ["Space Grotesk", "sans-serif"]
@@ -20,4 +20,3 @@ export default {
   },
   plugins: [],
 }
-
