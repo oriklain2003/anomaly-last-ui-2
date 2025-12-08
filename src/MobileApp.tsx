@@ -11,6 +11,7 @@ import { ALERT_AUDIO_SRC } from './constants';
 
 export function MobileApp() {
     const [mode, setMode] = useState<'historical' | 'realtime' | 'research' | 'rules'>('historical');
+    const [selectedDate, setSelectedDate] = useState<Date>(new Date());
     const [selectedAnomaly, setSelectedAnomaly] = useState<AnomalyReport | null>(null);
     const [flightData, setFlightData] = useState<FlightTrack | null>(null);
     const [loadingTrack, setLoadingTrack] = useState(false);
@@ -117,6 +118,8 @@ export function MobileApp() {
                         selectedAnomalyId={selectedAnomaly?.flight_id} 
                         mode={mode}
                         setMode={setMode}
+                        selectedDate={selectedDate}
+                        setSelectedDate={setSelectedDate}
                         className="col-span-12 w-full h-full"
                     />
                 </div>
