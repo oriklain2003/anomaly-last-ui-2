@@ -26,12 +26,14 @@ export const Sidebar: React.FC<SidebarProps> = ({ onSelectAnomaly, selectedAnoma
     // Filters
     const [minScore, setMinScore] = useState(0);
     const [selectedTrigger, setSelectedTrigger] = useState('All');
+    const [selectedVersion, setSelectedVersion] = useState('All');
     const [showFilters, setShowFilters] = useState(false);
 
     const audioRef = useRef<HTMLAudioElement | null>(null);
     const lastSoundTimeRef = useRef(0);
 
     const triggerOptions = ['All', 'Rules', 'XGBoost', 'DeepDense', 'DeepCNN', 'Transformer', 'Hybrid'];
+    const versionOptions = ['All', 'v1', 'v2', 'v3'];
 
     // Realtime tracking
     const lastFetchTimeRef = useRef<number>(0);
@@ -203,9 +205,21 @@ export const Sidebar: React.FC<SidebarProps> = ({ onSelectAnomaly, selectedAnoma
         const triggers = a.full_report?.summary?.triggers || [];
         const matchesTrigger = selectedTrigger === 'All' || triggers.includes(selectedTrigger);
 
+        const cutoffTimestampV2 = new Date('2025-07-08T20:00:00Z').getTime() / 1000;
+        const cutoffTimestampV3 = new Date('2025-07-17T00:00:00Z').getTime() / 1000;
+        
+        let version = 'v1';
+        if (a.timestamp >= cutoffTimestampV3) {
+            version = 'v3';
+        } else if (a.timestamp >= cutoffTimestampV2) {
+            version = 'v2';
+        }
+
+        const matchesVersion = selectedVersion === 'All' || version === selectedVersion;
+
         const matchesScore = score >= minScore;
         
-        return matchesSearch && matchesScore && matchesTrigger;
+        return matchesSearch && matchesScore && matchesTrigger && matchesVersion;
     });
 
     const changeDate = (days: number) => {
@@ -434,6 +448,27 @@ export const Sidebar: React.FC<SidebarProps> = ({ onSelectAnomaly, selectedAnoma
                                 ))}
                             </div>
                         </div>
+
+                        {/* Version Filter */}
+                        <div>
+                            <p className="text-xs text-white/60 font-bold uppercase mb-2">Filter by Version</p>
+                            <div className="grid grid-cols-4 gap-2">
+                                {versionOptions.map((option) => (
+                                    <button
+                                        key={option}
+                                        onClick={() => setSelectedVersion(option)}
+                                        className={clsx(
+                                            "px-2 py-1.5 rounded-md text-xs font-medium transition-colors",
+                                            selectedVersion === option
+                                                ? "bg-primary text-background-dark"
+                                                : "bg-white/5 text-white/60 hover:bg-white/10 hover:text-white"
+                                        )}
+                                    >
+                                        {option}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
                     </div>
                 )}
 
@@ -459,8 +494,19 @@ export const Sidebar: React.FC<SidebarProps> = ({ onSelectAnomaly, selectedAnoma
                              const subTitle = anomaly.callsign ? `ID: ${anomaly.flight_id}` : '';
 
                              // Version Badge Logic
-                             const cutoffTimestamp = new Date('2025-07-08T20:00:00Z').getTime() / 1000;
-                             const isV2 = anomaly.timestamp >= cutoffTimestamp;
+                             const cutoffTimestampV2 = new Date('2025-07-08T20:00:00Z').getTime() / 1000;
+                             const cutoffTimestampV3 = new Date('2025-07-21T00:00:00Z').getTime() / 1000;
+                             
+                             let versionLabel = 'v1 OLD';
+                             let versionStyle = "bg-zinc-800 text-zinc-500 border-zinc-700";
+
+                             if (anomaly.timestamp >= cutoffTimestampV3) {
+                                 versionLabel = 'v3 NEW';
+                                 versionStyle = "badge-v2 animate-gradient-x";
+                             } else if (anomaly.timestamp >= cutoffTimestampV2) {
+                                 versionLabel = 'v2 OLD';
+                                 versionStyle = "bg-zinc-800 text-zinc-500 border-zinc-700";
+                             }
 
                              return (
                                 <div 
@@ -478,11 +524,9 @@ export const Sidebar: React.FC<SidebarProps> = ({ onSelectAnomaly, selectedAnoma
                                             <p className="text-sm font-bold text-white">{displayTitle}</p>
                                             <span className={clsx(
                                                 "text-[10px] font-bold px-1.5 py-0.5 rounded border select-none",
-                                                isV2 
-                                                    ? "badge-v2 animate-gradient-x" 
-                                                    : "bg-zinc-800 text-zinc-500 border-zinc-700"
+                                                versionStyle
                                             )}>
-                                                {isV2 ? 'v2 NEW' : 'v1 OLD'}
+                                                {versionLabel}
                                             </span>
                                         </div>
                                         <span className={`h-2.5 w-2.5 rounded-full ${severityColor}`}></span>

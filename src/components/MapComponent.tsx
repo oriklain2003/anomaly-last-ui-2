@@ -30,6 +30,7 @@ export const MapComponent: React.FC<MapComponentProps> = ({ points, secondaryPoi
   const [learnedPaths, setLearnedPaths] = useState<any>(null);
   const [showStrict, setShowStrict] = useState(false);
   const [showLoose, setShowLoose] = useState(false);
+  const [showTurns, setShowTurns] = useState(false);
 
   useEffect(() => {
     fetchLearnedPaths()
@@ -194,7 +195,7 @@ export const MapComponent: React.FC<MapComponentProps> = ({ points, secondaryPoi
         return;
     }
 
-    const addLayerSafe = (id: string, color: string, dashArray: number[]) => {
+    const addLayerSafe = (id: string, color: string, dashArray: number[], type: 'line' | 'fill' = 'line') => {
         if (!map.current!.getSource(id)) {
             try {
                 console.log(`[MapComponent] Adding source and layer: ${id}`);
@@ -206,23 +207,27 @@ export const MapComponent: React.FC<MapComponentProps> = ({ points, secondaryPoi
                 const beforeId = map.current!.getLayer('route-line') ? 'route-line' : undefined;
                 console.log(`[MapComponent] Inserting layer ${id} before: ${beforeId}`);
                 
-                const paint: any = {
+                const paint: any = type === 'line' ? {
                     'line-color': color,
                     'line-width': 2,
                     'line-opacity': 0.7,
+                } : {
+                    'fill-color': color,
+                    'fill-opacity': 0.2,
+                    'fill-outline-color': color
                 };
 
-                if (dashArray && dashArray.length > 0) {
+                if (type === 'line' && dashArray && dashArray.length > 0) {
                     paint['line-dasharray'] = dashArray;
                 }
 
                 map.current!.addLayer({
-                    id: `${id}-line`,
-                    type: 'line',
+                    id: `${id}-layer`,
+                    type: type,
                     source: id,
-                    layout: { 'line-join': 'round', 'line-cap': 'round', 'visibility': 'visible' },
+                    layout: { 'visibility': 'visible' },
                     paint: paint
-                }, beforeId);
+                } as any, beforeId);
             } catch (e) {
                 console.error(`[MapComponent] Error adding ${id} layer`, e);
             }
@@ -231,27 +236,65 @@ export const MapComponent: React.FC<MapComponentProps> = ({ points, secondaryPoi
         }
     };
 
-    addLayerSafe('paths-loose', '#a78bfa', [2, 2]);    // Purple dashed for loose
-    addLayerSafe('paths-strict', '#10b981', []);       // Green solid for strict
+    addLayerSafe('paths-loose', '#a78bfa', [2, 2], 'line');    // Purple dashed for loose
+    addLayerSafe('paths-strict', '#10b981', [], 'line');       // Green solid for strict
+    addLayerSafe('learned-turns', '#facc15', [], 'fill');      // Yellow fill for turns
 
-    const updateSource = (id: string, visible: boolean, flows: any[]) => {
+    const updateSource = (id: string, visible: boolean, data: any[]) => {
         const source = map.current!.getSource(id) as maplibregl.GeoJSONSource;
         if (!source) {
             console.warn(`[MapComponent] Source ${id} not found during update.`);
             return;
         }
 
-        console.log(`[MapComponent] Updating ${id}: Visible=${visible}, Flows=${flows?.length}`);
+        console.log(`[MapComponent] Updating ${id}: Visible=${visible}, Count=${data?.length}`);
 
-        if (visible && flows) {
-            const features = flows.map((flow: any) => ({
-                type: 'Feature',
-                properties: { flow_id: flow.flow_id },
-                geometry: {
-                    type: 'LineString',
-                    coordinates: flow.centroid_path.map((p: any) => [p.lon, p.lat])
-                }
-            })) as any[];
+        if (visible && data) {
+            let features: any[] = [];
+            
+            if (id === 'learned-turns') {
+                 // Create circles for turns
+                 features = data.map((turn: any) => {
+                    // Simple circle approximation
+                    const center = [turn.centroid_lon, turn.centroid_lat];
+                    const radiusKm = (turn.radius_nm || 1) * 1.852;
+                    const points = 32;
+                    const coords = [];
+                    const distanceX = radiusKm / (111.320 * Math.cos(center[1] * Math.PI / 180));
+                    const distanceY = radiusKm / 110.574;
+
+                    for (let i = 0; i < points; i++) {
+                        const theta = (i / points) * (2 * Math.PI);
+                        const x = distanceX * Math.cos(theta);
+                        const y = distanceY * Math.sin(theta);
+                        coords.push([center[0] + x, center[1] + y]);
+                    }
+                    coords.push(coords[0]);
+
+                    return {
+                        type: 'Feature',
+                        properties: { 
+                            cluster_id: turn.cluster_id,
+                            avg_alt: turn.avg_alt
+                        },
+                        geometry: {
+                            type: 'Polygon',
+                            coordinates: [coords]
+                        }
+                    };
+                 });
+            } else {
+                // Lines for paths
+                features = data.map((flow: any) => ({
+                    type: 'Feature',
+                    properties: { flow_id: flow.flow_id },
+                    geometry: {
+                        type: 'LineString',
+                        coordinates: flow.centroid_path.map((p: any) => [p.lon, p.lat])
+                    }
+                }));
+            }
+
             console.log(`[MapComponent] Setting ${features.length} features for ${id}`);
             source.setData({ type: 'FeatureCollection', features: features });
         } else {
@@ -269,14 +312,16 @@ export const MapComponent: React.FC<MapComponentProps> = ({ points, secondaryPoi
 
         const strictFlows = getFlows(learnedPaths.layers.strict);
         const looseFlows = getFlows(learnedPaths.layers.loose);
+        const turnsData = learnedPaths.layers.turns || [];
         
         updateSource('paths-strict', showStrict, strictFlows);
         updateSource('paths-loose', showLoose, looseFlows);
+        updateSource('learned-turns', showTurns, turnsData);
     } else {
         console.log("[MapComponent] No learned paths data structure found.");
     }
 
-  }, [showStrict, showLoose, learnedPaths]);
+  }, [showStrict, showLoose, showTurns, learnedPaths]);
 
   useEffect(() => {
     if (!map.current) return;
@@ -468,6 +513,14 @@ export const MapComponent: React.FC<MapComponentProps> = ({ points, secondaryPoi
                 }`}
             >
                 {showLoose ? "Hide Loose Paths" : "Show Loose Paths"}
+            </button>
+            <button 
+                onClick={() => setShowTurns(!showTurns)}
+                className={`px-3 py-2 rounded shadow text-xs font-medium opacity-90 transition-colors ${
+                    showTurns ? 'bg-yellow-600 text-white' : 'bg-gray-800 text-gray-300 hover:bg-gray-700'
+                }`}
+            >
+                {showTurns ? "Hide Turns" : "Show Turns"}
             </button>
         </div>
     </div>

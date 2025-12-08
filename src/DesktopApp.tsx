@@ -152,6 +152,11 @@ export function DesktopApp() {
                         }
                     });
                 }
+
+                // 4. Path Learning (Rule 11) - Off Course Points
+                if (rule.id === 11 && rule.details?.off_course_timestamps && Array.isArray(rule.details.off_course_timestamps)) {
+                    rule.details.off_course_timestamps.forEach((ts: number) => timestamps.add(ts));
+                }
             });
         }
 
