@@ -10,13 +10,58 @@ import clsx from 'clsx';
 import { ALERT_AUDIO_SRC } from './constants';
 
 export function DesktopApp() {
-  const [mode, setMode] = useState<'historical' | 'realtime' | 'research' | 'rules'>('historical');
+  // Parse URL parameters for initial state
+  const getInitialState = () => {
+    const params = new URLSearchParams(window.location.search);
+    const modeParam = params.get('mode');
+    const dateParam = params.get('date');
+    
+    const validModes = ['historical', 'realtime', 'research', 'rules'];
+    const initialMode = validModes.includes(modeParam || '') ? (modeParam as 'historical' | 'realtime' | 'research' | 'rules') : 'historical';
+    
+    // Parse date safely
+    let initialDate = new Date();
+    if (dateParam) {
+        const parts = dateParam.split('-');
+        if (parts.length === 3) {
+            initialDate = new Date(
+                parseInt(parts[0]),
+                parseInt(parts[1]) - 1,
+                parseInt(parts[2])
+            );
+        }
+    }
+    
+    return { mode: initialMode, date: initialDate };
+  };
+
+  const initialState = getInitialState();
+
+  const [mode, setMode] = useState<'historical' | 'realtime' | 'research' | 'rules'>(initialState.mode);
+  const [selectedDate, setSelectedDate] = useState<Date>(initialState.date);
   const [selectedAnomaly, setSelectedAnomaly] = useState<AnomalyReport | null>(null);
   const [flightData, setFlightData] = useState<FlightTrack | null>(null);
   const [secondaryFlightData, setSecondaryFlightData] = useState<FlightTrack | null>(null);
   const [, setLoadingTrack] = useState(false);
   const [showReport, setShowReport] = useState(false);
   const bellAudioRef = useRef<HTMLAudioElement | null>(null);
+
+  // Sync state to URL
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    params.set('mode', mode);
+    
+    // Format date as YYYY-MM-DD
+    const year = selectedDate.getFullYear();
+    const month = String(selectedDate.getMonth() + 1).padStart(2, '0');
+    const day = String(selectedDate.getDate()).padStart(2, '0');
+    const dateStr = `${year}-${month}-${day}`;
+    
+    params.set('date', dateStr);
+    
+    const newUrl = `${window.location.pathname}?${params.toString()}`;
+    window.history.replaceState({}, '', newUrl);
+  }, [mode, selectedDate]);
 
   useEffect(() => {
     if (selectedAnomaly) {
@@ -158,9 +203,9 @@ export function DesktopApp() {
     }, [selectedAnomaly, flightData]);
 
     return (
-    <div className="flex h-screen w-full flex-col bg-background-light dark:bg-background-dark text-white overflow-hidden">
+    <div className="flex h-screen w-full flex-col bg-background-dark text-white overflow-hidden">
       {/* Header */}
-      <header className="flex items-center justify-between whitespace-nowrap border-b border-solid border-white/10 px-6 py-3 shrink-0 bg-[#1A1A1D]">
+      <header className="flex items-center justify-between whitespace-nowrap border-b border-solid border-white/5 px-6 py-3 shrink-0 bg-background-dark">
         <div className="flex items-center gap-4 text-white">
             <div className="size-6 text-primary">
                 <svg fill="none" viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg">
@@ -171,16 +216,16 @@ export function DesktopApp() {
             <h2 className="text-white text-xl font-bold leading-tight tracking-[-0.015em]">Onyx Anomaly Explorer</h2>
         </div>
         <div className="flex flex-1 justify-end gap-2">
-            <button className="flex h-10 w-10 items-center justify-center rounded-lg bg-[#2C2F33] text-white/80 hover:text-white transition-colors">
+            <button className="flex h-10 w-10 items-center justify-center rounded-lg bg-surface text-white/80 hover:text-white transition-colors">
                 <Settings className="h-5 w-5" />
             </button>
             <button 
-                className="flex h-10 w-10 items-center justify-center rounded-lg bg-[#2C2F33] text-white/80 hover:text-white transition-colors"
+                className="flex h-10 w-10 items-center justify-center rounded-lg bg-surface text-white/80 hover:text-white transition-colors"
                 onClick={handleBellClick}
             >
                 <Bell className="h-5 w-5" />
             </button>
-            <div className="ml-2 size-10 rounded-full bg-gray-600" />
+            <div className="ml-2 size-10 rounded-full bg-surface-highlight" />
         </div>
       </header>
 
@@ -192,11 +237,13 @@ export function DesktopApp() {
             selectedAnomalyId={selectedAnomaly?.flight_id} 
             mode={mode}
             setMode={setMode}
+            selectedDate={selectedDate}
+            setSelectedDate={setSelectedDate}
         />
 
         {/* Map Area */}
         <section className={clsx(
-            "bg-[#2C2F33] rounded-xl relative overflow-hidden border border-white/5 transition-all duration-300",
+            "bg-surface rounded-xl relative overflow-hidden border border-white/5 transition-all duration-300",
             showReport ? "col-span-6" : "col-span-9"
         )}>
             <MapComponent 
@@ -206,7 +253,7 @@ export function DesktopApp() {
             />
             
             {/* Legend Overlay */}
-            <div className="absolute bottom-4 right-4 bg-background-dark/80 backdrop-blur-sm p-3 rounded-lg border border-white/10 text-white z-10">
+            <div className="absolute bottom-4 right-4 bg-surface/80 backdrop-blur-sm p-3 rounded-lg border border-white/10 text-white z-10">
                 <p className="text-sm font-bold mb-2">Legend</p>
                 <div className="flex flex-col gap-2 text-xs">
                     <div className="flex items-center gap-2">

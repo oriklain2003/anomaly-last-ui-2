@@ -9,7 +9,9 @@ export default {
       colors: {
         "primary": "#00E5FF",
         "background-light": "#f6f6f8",
-        "background-dark": "#1A1A1D",
+        "background-dark": "#09090b",
+        "surface": "#18181b",
+        "surface-highlight": "#27272a",
       },
       fontFamily: {
         "display": ["Space Grotesk", "sans-serif"]

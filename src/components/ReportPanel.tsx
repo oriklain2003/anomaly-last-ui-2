@@ -204,6 +204,8 @@ export const ReportPanel: React.FC<ReportPanelProps> = ({ anomaly, onClose, clas
             callsignForUrl = 'RJ' + callsignForUrl.substring(3);
         } else if (upperCallsign.startsWith('ELY')) {
             callsignForUrl = 'LY' + callsignForUrl.substring(3);
+        }else if (upperCallsign.startsWith('ISR')) {
+            callsignForUrl = '6H' + callsignForUrl.substring(4);
         }
         
         return `https://www.flightradar24.com/data/flights/${callsignForUrl}#${anomaly.flight_id}`;

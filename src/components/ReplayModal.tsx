@@ -372,7 +372,63 @@ export const ReplayModal: React.FC<ReplayModalProps> = ({ mainFlightId, secondar
         };
     };
 
-    if (loading) return null; // Or a loader
+    if (loading) {
+        return (
+            <div className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center backdrop-blur-sm">
+                <style>{`
+                    .u-loading {
+                        width: 128px;
+                        height: 128px;
+                        display: block;
+                    }
+                    .u-loading__symbol {
+                        background-color: #000000; /* primary: black */
+                        padding: 8px;
+                        animation: loading 3s infinite;
+                        border-radius: 5px;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        width: 100%;
+                        height: 100%;
+                    }
+                    .u-loading__content {
+                         display: block;
+                         width: 100%;
+                         animation: loading-icon 3s infinite;
+                    }
+                    @keyframes loading {
+                        0% { transform: perspective(250px) rotateX(0deg) rotateY(0deg); }
+                        15% { background-color: #000000; }
+                        16% { background-color: #3b82f6; } /* secondary: blue */
+                        50% { transform: perspective(250px) rotateX(180deg) rotateY(0deg); background-color: #3b82f6; }
+                        65% { background-color: #3b82f6; }
+                        66% { background-color: #000000; }
+                        100% { transform: perspective(250px) rotateX(180deg) rotateY(-180deg); }
+                    }
+                    @keyframes loading-icon {
+                        0% { transform: perspective(250px) rotateX(0deg) rotateY(0deg); }
+                        15% { transform: perspective(250px) rotateX(0deg) rotateY(0deg); }
+                        16% { transform: perspective(250px) rotateX(180deg) rotateY(0deg); }
+                        50% { transform: perspective(250px) rotateX(180deg) rotateY(0deg); }
+                        65% { transform: perspective(250px) rotateX(180deg) rotateY(0deg); }
+                        66% { transform: perspective(250px) rotateX(180deg) rotateY(180deg); }
+                        100% { transform: perspective(250px) rotateX(180deg) rotateY(180deg); }
+                    }
+                `}</style>
+                
+                <div className="u-loading">
+                    <div className="u-loading__symbol shadow-[0_0_30px_rgba(59,130,246,0.6)]">
+                        <div className="u-loading__content">
+                             <svg viewBox="0 0 100 40" className="w-full h-full" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                <text x="50" y="28" textAnchor="middle" fontFamily="sans-serif" fontWeight="900" fontSize="28" fill="white" letterSpacing="2">ONYX</text>
+                             </svg>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        );
+    }
 
     return (
         <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-8 backdrop-blur-sm animate-in fade-in">

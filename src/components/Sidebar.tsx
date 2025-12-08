@@ -10,11 +10,20 @@ interface SidebarProps {
     selectedAnomalyId?: string;
     mode: 'historical' | 'realtime' | 'research' | 'rules';
     setMode: (mode: 'historical' | 'realtime' | 'research' | 'rules') => void;
+    selectedDate: Date;
+    setSelectedDate: (date: Date) => void;
     className?: string;
 }
 
-export const Sidebar: React.FC<SidebarProps> = ({ onSelectAnomaly, selectedAnomalyId, mode, setMode, className }) => {
-    const [selectedDate, setSelectedDate] = useState(new Date());
+export const Sidebar: React.FC<SidebarProps> = ({ 
+    onSelectAnomaly, 
+    selectedAnomalyId, 
+    mode, 
+    setMode, 
+    selectedDate, 
+    setSelectedDate, 
+    className 
+}) => {
     const [anomalies, setAnomalies] = useState<AnomalyReport[]>([]);
     const [loading, setLoading] = useState(false);
     const [filter, setFilter] = useState('');
@@ -246,7 +255,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ onSelectAnomaly, selectedAnoma
         <aside className={clsx("flex flex-col gap-6 overflow-y-auto h-full pr-2", className || "col-span-3")}>
             
             {/* Mode Switcher */}
-            <div className="bg-[#2C2F33] rounded-xl p-1 flex gap-1">
+            <div className="bg-surface rounded-xl p-1 flex gap-1">
                 <button 
                     onClick={() => setMode('historical')}
                     className={clsx(
@@ -290,7 +299,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ onSelectAnomaly, selectedAnoma
 
             {/* Date Filter (Only visible in Historical/Research Mode) */}
             {(mode === 'historical' || mode === 'research') && (
-                <div className="bg-[#2C2F33] rounded-xl p-4 flex flex-col gap-4 shrink-0 animate-in fade-in slide-in-from-top-2">
+                <div className="bg-surface rounded-xl p-4 flex flex-col gap-4 shrink-0 animate-in fade-in slide-in-from-top-2">
                     <p className="text-white text-base font-bold leading-tight">Filter by Date</p>
                     <div className="flex items-center p-1 justify-between">
                         <button onClick={() => changeDate(-1)} className="text-white/80 hover:text-white p-1 rounded hover:bg-white/10 transition-colors">
@@ -336,7 +345,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ onSelectAnomaly, selectedAnoma
             )}
 
             {/* Search & List */}
-            <div className="bg-[#2C2F33] rounded-xl p-4 flex flex-col gap-4 flex-1 min-h-0">
+            <div className="bg-surface rounded-xl p-4 flex flex-col gap-4 flex-1 min-h-0">
                 
                 {/* Rule List View */}
                 {mode === 'rules' && selectedRuleId === null ? (
