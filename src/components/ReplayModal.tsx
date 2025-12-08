@@ -1,7 +1,7 @@
-import React, { useEffect, useRef, useState, useMemo } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
-import { X, Play, Pause, FastForward, SkipBack, SkipForward } from 'lucide-react';
+import { X, Play, Pause, SkipBack, SkipForward } from 'lucide-react';
 import { fetchUnifiedTrack } from '../api';
 import type { TrackPoint } from '../types';
 import clsx from 'clsx';
@@ -18,6 +18,10 @@ interface FlightData {
     color: string;
 }
 
+type TelemetryData = 
+    | { status: 'waiting' }
+    | ({ status: 'active' | 'ended' } & TrackPoint);
+
 const COLORS = ['#3b82f6', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6'];
 
 export const ReplayModal: React.FC<ReplayModalProps> = ({ mainFlightId, secondaryFlightIds = [], onClose }) => {
@@ -33,7 +37,7 @@ export const ReplayModal: React.FC<ReplayModalProps> = ({ mainFlightId, secondar
     const [minTime, setMinTime] = useState<number>(0);
     const [maxTime, setMaxTime] = useState<number>(0);
     
-    const animationRef = useRef<number>();
+    const animationRef = useRef<number | undefined>(undefined);
     const lastFrameTime = useRef<number>(0);
 
     // Fetch data
@@ -240,9 +244,9 @@ export const ReplayModal: React.FC<ReplayModalProps> = ({ mainFlightId, secondar
                     popupRef.current.remove();
                 };
 
-                map.current.on('mouseenter', `layer-${flight.id}-pos`, showPopup);
-                map.current.on('mouseleave', `layer-${flight.id}-pos`, hidePopup);
-                map.current.on('click', `layer-${flight.id}-pos`, showPopup); // Also work on click
+                map.current?.on('mouseenter', `layer-${flight.id}-pos`, showPopup);
+                map.current?.on('mouseleave', `layer-${flight.id}-pos`, hidePopup);
+                map.current?.on('click', `layer-${flight.id}-pos`, showPopup); // Also work on click
             });
         });
 
@@ -350,7 +354,7 @@ export const ReplayModal: React.FC<ReplayModalProps> = ({ mainFlightId, secondar
     };
 
     // Helper to get current telemetry for display in UI overlay
-    const getCurrentTelemetry = (flight: FlightData) => {
+    const getCurrentTelemetry = (flight: FlightData): TelemetryData => {
         const started = flight.points[0].timestamp <= currentTime;
         // Check if we are past the last point
         const ended = currentTime > flight.points[flight.points.length - 1].timestamp;
@@ -398,7 +402,7 @@ export const ReplayModal: React.FC<ReplayModalProps> = ({ mainFlightId, secondar
                                     {tel.status === 'waiting' && <span className="text-[10px] text-yellow-500 ml-auto italic">Waiting...</span>}
                                     {tel.status === 'ended' && <span className="text-[10px] text-red-400 ml-auto italic">Ended</span>}
                                 </div>
-                                {tel.status !== 'waiting' && tel.lat !== undefined && (
+                                {tel.status !== 'waiting' && (
                                     <div className={clsx("grid grid-cols-2 gap-1 text-white/80", tel.status === 'ended' && "opacity-50")}>
                                         <span>Alt:</span>
                                         <span className="font-mono text-right">{tel.alt} ft</span>
