@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { X, AlertTriangle, CheckCircle, ThumbsUp } from 'lucide-react';
+import { X, AlertTriangle, CheckCircle, ThumbsUp, PlayCircle } from 'lucide-react';
 import type { AnomalyReport } from '../types';
 import { submitFeedback } from '../api';
 import clsx from 'clsx';
+import { ReplayModal } from './ReplayModal';
 
 interface ReportPanelProps {
     anomaly: AnomalyReport | null;
@@ -191,24 +192,33 @@ export const ReportPanel: React.FC<ReportPanelProps> = ({ anomaly, onClose, clas
     const [comment, setComment] = useState('');
     const [copied, setCopied] = useState(false);
     const [frStatus, setFrStatus] = useState<'checking' | 'valid' | 'invalid'>('checking');
+    const [showReplay, setShowReplay] = useState(false);
+
+    const frUrl = React.useMemo(() => {
+        if (!anomaly?.callsign || !anomaly?.flight_id) return '';
+        
+        let callsignForUrl = anomaly.callsign;
+        const upperCallsign = callsignForUrl.toUpperCase();
+
+        if (upperCallsign.startsWith('RJA')) {
+            callsignForUrl = 'RJ' + callsignForUrl.substring(3);
+        } else if (upperCallsign.startsWith('ELY')) {
+            callsignForUrl = 'LY' + callsignForUrl.substring(3);
+        }
+        
+        return `https://www.flightradar24.com/data/flights/${callsignForUrl}#${anomaly.flight_id}`;
+    }, [anomaly?.callsign, anomaly?.flight_id]);
 
     useEffect(() => {
-        if (!anomaly?.callsign || !anomaly?.flight_id) {
+        if (!frUrl) {
             setFrStatus('invalid');
             return;
         }
 
-        let callsignForUrl = anomaly.callsign;
-        // If callsign starts with RJA, remove the 'A' (e.g., RJA524 -> RJ524)
-        if (callsignForUrl.toUpperCase().startsWith('RJA')) {
-            callsignForUrl = 'RJ' + callsignForUrl.substring(3);
-        }
-
         const checkFR = async () => {
             setFrStatus('checking');
-            const url = `https://www.flightradar24.com/data/flights/${callsignForUrl}`;
             try {
-                const res = await fetch(url, { method: 'HEAD' });
+                const res = await fetch(frUrl, { method: 'HEAD' });
                 if (res.ok) setFrStatus('valid');
                 else setFrStatus('invalid');
             } catch (e) {
@@ -217,7 +227,7 @@ export const ReportPanel: React.FC<ReportPanelProps> = ({ anomaly, onClose, clas
         };
 
         checkFR();
-    }, [anomaly?.callsign, anomaly?.flight_id]);
+    }, [frUrl]);
 
     if (!anomaly) return null;
 
@@ -227,10 +237,6 @@ export const ReportPanel: React.FC<ReportPanelProps> = ({ anomaly, onClose, clas
         setTimeout(() => setCopied(false), 2000);
     };
 
-    let frCallsign = anomaly.callsign || '';
-    if (frCallsign.toUpperCase().startsWith('RJA')) {
-        frCallsign = 'RJ' + frCallsign.substring(3);
-    }
 
     const handleFeedback = async (isAnomaly: boolean) => {
         setFeedbackStatus('submitting');
@@ -267,7 +273,22 @@ export const ReportPanel: React.FC<ReportPanelProps> = ({ anomaly, onClose, clas
 
     const confidenceColor = getConfidenceColor(summary.confidence_score || 0);
 
+    // Extract secondary flight IDs for proximity rule (ID 4)
+    const getSecondaryFlightIds = () => {
+        // Look in both the main report and layer 1 rules
+        const rules = anomaly.full_report?.matched_rules || 
+                     anomaly.full_report?.layer_1_rules?.report?.matched_rules || [];
+                     
+        const proximityRule = rules.find((r: any) => r.id === 4);
+        
+        if (!proximityRule?.details?.events) return [];
+        return proximityRule.details.events
+            .map((e: any) => e.other_flight)
+            .filter((id: string) => id && id !== anomaly.flight_id);
+    };
+
     return (
+        <>
         <aside className={clsx("bg-[#2C2F33] rounded-xl flex flex-col h-full overflow-hidden border border-white/5 animate-in slide-in-from-right-4", className || "col-span-3")}>
             {/* Header */}
             <div className="p-4 border-b border-white/10 flex items-center justify-between bg-white/5">
@@ -280,7 +301,7 @@ export const ReportPanel: React.FC<ReportPanelProps> = ({ anomaly, onClose, clas
                             <p className="text-[10px] text-pink-300 mb-0.5 animate-pulse font-medium">
                                 ✨ click me to copy
                             </p>
-                            <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-2 flex-wrap">
                                 <button 
                                     onClick={() => handleCopy(anomaly.callsign!)}
                                     className={clsx(
@@ -293,7 +314,7 @@ export const ReportPanel: React.FC<ReportPanelProps> = ({ anomaly, onClose, clas
                                     {copied ? "Copied!" : anomaly.callsign}
                                 </button>
                                 <a 
-                                    href={`https://www.flightradar24.com/data/flights/${frCallsign}`}
+                                    href={frUrl}
                                     target="_blank"
                                     rel="noopener noreferrer"
                                     className={clsx(
@@ -305,6 +326,13 @@ export const ReportPanel: React.FC<ReportPanelProps> = ({ anomaly, onClose, clas
                                 >
                                     Open in FR
                                 </a>
+                                <button 
+                                    onClick={() => setShowReplay(true)}
+                                    className="text-sm font-mono font-bold px-3 py-1 rounded border bg-blue-500/20 text-blue-300 border-blue-500/30 hover:bg-blue-500/30 transition-all duration-200 flex items-center gap-1"
+                                >
+                                    <PlayCircle className="size-3" />
+                                    Replay
+                                </button>
                             </div>
                         </div>
                     )}
@@ -426,6 +454,15 @@ export const ReportPanel: React.FC<ReportPanelProps> = ({ anomaly, onClose, clas
                 </div>
             </div>
         </aside>
+
+        {showReplay && (
+            <ReplayModal 
+                mainFlightId={anomaly.flight_id}
+                secondaryFlightIds={getSecondaryFlightIds()}
+                onClose={() => setShowReplay(false)} 
+            />
+        )}
+        </>
     );
 };
 

@@ -53,13 +53,7 @@ export function DesktopApp() {
                 console.log("Found Proximity Alert, fetching secondary flight:", otherFlightId);
                 fetcher(otherFlightId)
                     .then(track => {
-                        // Fix: Adjust secondary flight timestamp by -3 hours (offset issue reported by user)
-                        // The user observed the secondary flight is 3 hours ahead of the main flight.
-                        const adjustedPoints = track.points.map(p => ({
-                            ...p,
-                            timestamp: p.timestamp - (3 * 60 * 60)
-                        }));
-                        setSecondaryFlightData({ ...track, points: adjustedPoints });
+                        setSecondaryFlightData(track);
                     })
                     .catch(err => {
                         console.error("Failed to load secondary track", err);
