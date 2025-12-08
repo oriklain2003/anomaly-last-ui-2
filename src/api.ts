@@ -78,6 +78,17 @@ export const fetchFlightsByRule = async (ruleId: number): Promise<AnomalyReport[
     return response.json();
 };
 
+export const fetchCallsignFromResearch = async (flightId: string): Promise<string | null> => {
+    try {
+        const response = await fetch(`${API_BASE}/research/callsign/${flightId}`);
+        if (!response.ok) return null;
+        const data = await response.json();
+        return data.callsign;
+    } catch (e) {
+        return null;
+    }
+};
+
 export const submitFeedback = async (flightId: string, isAnomaly: boolean, comments: string = ""): Promise<void> => {
     const response = await fetch(`${API_BASE}/feedback`, {
         method: 'POST',

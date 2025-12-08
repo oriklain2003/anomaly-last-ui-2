@@ -1,14 +1,23 @@
 import React, { useEffect, useRef, useState } from 'react';
 import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
-import { X, Play, Pause, SkipBack, SkipForward } from 'lucide-react';
+import { X, Play, Pause, SkipBack, SkipForward, AlertTriangle, MapPin } from 'lucide-react';
 import { fetchUnifiedTrack } from '../api';
 import type { TrackPoint } from '../types';
 import clsx from 'clsx';
 
+export interface ReplayEvent {
+    timestamp: number;
+    description: string;
+    type: 'proximity' | 'deviation' | 'other';
+    lat?: number;
+    lon?: number;
+}
+
 interface ReplayModalProps {
     mainFlightId: string;
     secondaryFlightIds?: string[];
+    events?: ReplayEvent[];
     onClose: () => void;
 }
 
@@ -24,7 +33,7 @@ type TelemetryData =
 
 const COLORS = ['#3b82f6', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6'];
 
-export const ReplayModal: React.FC<ReplayModalProps> = ({ mainFlightId, secondaryFlightIds = [], onClose }) => {
+export const ReplayModal: React.FC<ReplayModalProps> = ({ mainFlightId, secondaryFlightIds = [], events = [], onClose }) => {
     const mapContainer = useRef<HTMLDivElement>(null);
     const map = useRef<maplibregl.Map | null>(null);
     const popupRef = useRef<maplibregl.Popup | null>(null);
@@ -39,6 +48,38 @@ export const ReplayModal: React.FC<ReplayModalProps> = ({ mainFlightId, secondar
     
     const animationRef = useRef<number | undefined>(undefined);
     const lastFrameTime = useRef<number>(0);
+
+    // Zoom to event handler
+    const handleEventClick = (event: ReplayEvent) => {
+        setCurrentTime(event.timestamp);
+        
+        // Find the flight position at this time if lat/lon not provided in event
+        let targetLat = event.lat;
+        let targetLon = event.lon;
+
+        if ((!targetLat || !targetLon) && flights.length > 0) {
+            // Try to find position of main flight at this time
+            const mainFlight = flights.find(f => f.id === mainFlightId);
+            if (mainFlight) {
+                // Find closest point
+                const point = mainFlight.points.reduce((prev, curr) => 
+                    Math.abs(curr.timestamp - event.timestamp) < Math.abs(prev.timestamp - event.timestamp) ? curr : prev
+                );
+                if (point) {
+                    targetLat = point.lat;
+                    targetLon = point.lon;
+                }
+            }
+        }
+
+        if (targetLat && targetLon && map.current) {
+            map.current.flyTo({
+                center: [targetLon, targetLat],
+                zoom: 14,
+                speed: 1.5
+            });
+        }
+    };
 
     // Fetch data
     useEffect(() => {
@@ -435,7 +476,7 @@ export const ReplayModal: React.FC<ReplayModalProps> = ({ mainFlightId, secondar
             <div className="bg-[#1e2124] w-full h-full rounded-2xl overflow-hidden flex flex-col border border-white/10 shadow-2xl relative">
                 
                 {/* Header / Close */}
-                <div className="absolute top-4 right-4 z-20 flex gap-2">
+                <div className="absolute top-4 right-4 z-50 flex gap-2">
                     <button 
                         onClick={onClose}
                         className="bg-black/50 hover:bg-black/70 text-white p-2 rounded-full transition-colors"
@@ -444,42 +485,91 @@ export const ReplayModal: React.FC<ReplayModalProps> = ({ mainFlightId, secondar
                     </button>
                 </div>
 
-                {/* Live Telemetry Overlay */}
-                <div className="absolute top-4 left-4 z-20 flex flex-col gap-2">
-                    {flights.map(f => {
-                        const tel = getCurrentTelemetry(f);
-                        if (!tel) return null;
-
-                        return (
-                            <div key={f.id} className="bg-black/60 backdrop-blur border border-white/10 p-3 rounded-lg text-xs w-48 shadow-lg transition-all">
-                                <div className="flex items-center gap-2 mb-2 border-b border-white/10 pb-1">
-                                    <div className="w-2 h-2 rounded-full" style={{ backgroundColor: f.color }} />
-                                    <span className="font-bold text-white">{f.id}</span>
-                                    {tel.status === 'waiting' && <span className="text-[10px] text-yellow-500 ml-auto italic">Waiting...</span>}
-                                    {tel.status === 'ended' && <span className="text-[10px] text-red-400 ml-auto italic">Ended</span>}
+                <div className="flex-1 flex overflow-hidden relative">
+                    {/* Events Sidebar */}
+                    <div className="w-72 bg-[#2C2F33] border-r border-white/10 flex flex-col z-30 shrink-0">
+                        <div className="p-4 border-b border-white/10 bg-white/5">
+                            <h3 className="font-bold text-white text-sm flex items-center gap-2">
+                                <AlertTriangle className="size-4 text-primary" />
+                                Event Log
+                            </h3>
+                        </div>
+                        <div className="flex-1 overflow-y-auto p-2 space-y-2">
+                            {events.length === 0 ? (
+                                <div className="text-white/40 text-xs text-center mt-10 p-4 border border-dashed border-white/10 rounded-lg mx-2">
+                                    No anomaly events logged for this replay.
                                 </div>
-                                {tel.status !== 'waiting' && (
-                                    <div className={clsx("grid grid-cols-2 gap-1 text-white/80", tel.status === 'ended' && "opacity-50")}>
-                                        <span>Alt:</span>
-                                        <span className="font-mono text-right">{tel.alt} ft</span>
-                                        <span>Hdg:</span>
-                                        <span className="font-mono text-right">{tel.track}°</span>
-                                        <span>Speed:</span>
-                                        <span className="font-mono text-right">{tel.gspeed || 0} kts</span>
-                                        <span>Lat/Lon:</span>
-                                        <span className="font-mono text-right text-[10px]">{tel.lat.toFixed(3)}, {tel.lon.toFixed(3)}</span>
+                            ) : (
+                                events.map((ev, i) => (
+                                    <button 
+                                        key={i}
+                                        onClick={() => handleEventClick(ev)}
+                                        className="w-full text-left bg-black/20 hover:bg-white/5 border border-white/5 hover:border-white/10 p-3 rounded-lg transition-all group"
+                                    >
+                                        <div className="flex items-center justify-between mb-1">
+                                            <span className={clsx(
+                                                "text-[10px] font-bold uppercase px-1.5 py-0.5 rounded",
+                                                ev.type === 'proximity' ? "bg-red-500/20 text-red-300" :
+                                                ev.type === 'deviation' ? "bg-orange-500/20 text-orange-300" :
+                                                "bg-blue-500/20 text-blue-300"
+                                            )}>
+                                                {ev.type}
+                                            </span>
+                                            <span className="font-mono text-[10px] text-white/40">
+                                                {formatTime(ev.timestamp)}
+                                            </span>
+                                        </div>
+                                        <p className="text-xs text-white/80 line-clamp-2 mb-2">{ev.description}</p>
+                                        <div className="flex items-center gap-1 text-[10px] text-primary opacity-0 group-hover:opacity-100 transition-opacity">
+                                            <MapPin className="size-3" />
+                                            Jump to event
+                                        </div>
+                                    </button>
+                                ))
+                            )}
+                        </div>
+                    </div>
+
+                    {/* Map Area */}
+                    <div className="flex-1 relative">
+                        {/* Live Telemetry Overlay */}
+                        <div className="absolute top-4 left-4 z-20 flex flex-col gap-2 pointer-events-none">
+                            {flights.map(f => {
+                                const tel = getCurrentTelemetry(f);
+                                if (!tel) return null;
+
+                                return (
+                                    <div key={f.id} className="bg-black/60 backdrop-blur border border-white/10 p-3 rounded-lg text-xs w-48 shadow-lg transition-all pointer-events-auto">
+                                        <div className="flex items-center gap-2 mb-2 border-b border-white/10 pb-1">
+                                            <div className="w-2 h-2 rounded-full" style={{ backgroundColor: f.color }} />
+                                            <span className="font-bold text-white">{f.id}</span>
+                                            {tel.status === 'waiting' && <span className="text-[10px] text-yellow-500 ml-auto italic">Waiting...</span>}
+                                            {tel.status === 'ended' && <span className="text-[10px] text-red-400 ml-auto italic">Ended</span>}
+                                        </div>
+                                        {tel.status !== 'waiting' && (
+                                            <div className={clsx("grid grid-cols-2 gap-1 text-white/80", tel.status === 'ended' && "opacity-50")}>
+                                                <span>Alt:</span>
+                                                <span className="font-mono text-right">{tel.alt} ft</span>
+                                                <span>Hdg:</span>
+                                                <span className="font-mono text-right">{tel.track}°</span>
+                                                <span>Speed:</span>
+                                                <span className="font-mono text-right">{tel.gspeed || 0} kts</span>
+                                                <span>Lat/Lon:</span>
+                                                <span className="font-mono text-right text-[10px]">{tel.lat.toFixed(3)}, {tel.lon.toFixed(3)}</span>
+                                            </div>
+                                        )}
                                     </div>
-                                )}
-                            </div>
-                        );
-                    })}
+                                );
+                            })}
+                        </div>
+
+                        {/* Map */}
+                        <div ref={mapContainer} className="w-full h-full bg-gray-900" />
+                    </div>
                 </div>
 
-                {/* Map */}
-                <div ref={mapContainer} className="flex-1 bg-gray-900" />
-
                 {/* Controls */}
-                <div className="bg-[#2C2F33] border-t border-white/10 p-4">
+                <div className="bg-[#2C2F33] border-t border-white/10 p-4 z-40">
                     
                     {/* Time Slider */}
                     <div className="flex items-center gap-4 mb-4">

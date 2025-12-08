@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { X, AlertTriangle, CheckCircle, ThumbsUp, PlayCircle } from 'lucide-react';
 import type { AnomalyReport } from '../types';
-import { submitFeedback } from '../api';
+import { submitFeedback, fetchCallsignFromResearch } from '../api';
 import clsx from 'clsx';
-import { ReplayModal } from './ReplayModal';
+import { ReplayModal, ReplayEvent } from './ReplayModal';
 
 interface ReportPanelProps {
     anomaly: AnomalyReport | null;
@@ -11,7 +11,7 @@ interface ReportPanelProps {
     className?: string;
 }
 
-const LayerCard: React.FC<{ title: string; data: any; type: 'rules' | 'model' }> = ({ title, data, type }) => {
+const LayerCard: React.FC<{ title: string; data: any; type: 'rules' | 'model'; resolvedCallsigns?: Record<string, string> }> = ({ title, data, type, resolvedCallsigns }) => {
     if (!data) return null;
 
     const isAnomaly = type === 'rules' ? data.status === 'ANOMALY' : data.is_anomaly;
@@ -29,20 +29,23 @@ const LayerCard: React.FC<{ title: string; data: any; type: 'rules' | 'model' }>
         return (
             <div className="mt-2 space-y-2">
                 <p className="text-xs font-bold text-red-300">Conflict Details:</p>
-                {rule.details.events.map((ev: any, idx: number) => (
-                    <div key={idx} className="bg-red-500/10 p-2 rounded border border-red-500/20 text-[10px] text-red-200">
-                        <div className="flex justify-between">
-                            <span>Other Flight: <span className="font-bold font-mono">{ev.other_flight}</span></span>
-                            <span className="font-mono text-white/60">
-                                {new Date(ev.timestamp * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
-                            </span>
+                {rule.details.events.map((ev: any, idx: number) => {
+                    const callsign = ev.other_callsign || (resolvedCallsigns && resolvedCallsigns[ev.other_flight]);
+                    return (
+                        <div key={idx} className="bg-red-500/10 p-2 rounded border border-red-500/20 text-[10px] text-red-200">
+                            <div className="flex justify-between">
+                                <span>Other Flight: <span className="font-bold font-mono">{callsign ? `${callsign} (${ev.other_flight})` : ev.other_flight}</span></span>
+                                <span className="font-mono text-white/60">
+                                    {new Date(ev.timestamp * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                                </span>
+                            </div>
+                            <div className="flex justify-between mt-1 text-white/40">
+                                <span>Dist: {ev.distance_nm} NM</span>
+                                <span>Alt Diff: {ev.altitude_diff_ft} ft</span>
+                            </div>
                         </div>
-                        <div className="flex justify-between mt-1 text-white/40">
-                             <span>Dist: {ev.distance_nm} NM</span>
-                             <span>Alt Diff: {ev.altitude_diff_ft} ft</span>
-                        </div>
-                    </div>
-                ))}
+                    );
+                })}
             </div>
         );
     };
@@ -193,6 +196,45 @@ export const ReportPanel: React.FC<ReportPanelProps> = ({ anomaly, onClose, clas
     const [copied, setCopied] = useState(false);
     const [frStatus, setFrStatus] = useState<'checking' | 'valid' | 'invalid'>('checking');
     const [showReplay, setShowReplay] = useState(false);
+    const [resolvedCallsigns, setResolvedCallsigns] = useState<Record<string, string>>({});
+
+    useEffect(() => {
+        if (!anomaly) return;
+
+        // Find missing callsigns for proximity rules
+        const checkAndFetchCallsigns = async () => {
+            const rules = anomaly.full_report?.matched_rules || 
+                          anomaly.full_report?.layer_1_rules?.report?.matched_rules || [];
+            
+            const missingIds = new Set<string>();
+            
+            rules.forEach((rule: any) => {
+                if (rule.id === 4 && rule.details?.events) {
+                     rule.details.events.forEach((ev: any) => {
+                         if (!ev.other_callsign && ev.other_flight && !resolvedCallsigns[ev.other_flight]) {
+                             missingIds.add(ev.other_flight);
+                         }
+                     });
+                }
+            });
+
+            if (missingIds.size > 0) {
+                const newResolved: Record<string, string> = {};
+                await Promise.all(Array.from(missingIds).map(async (fid) => {
+                    const callsign = await fetchCallsignFromResearch(fid);
+                    if (callsign) {
+                        newResolved[fid] = callsign;
+                    }
+                }));
+                
+                if (Object.keys(newResolved).length > 0) {
+                    setResolvedCallsigns(prev => ({ ...prev, ...newResolved }));
+                }
+            }
+        };
+
+        checkAndFetchCallsigns();
+    }, [anomaly]);
 
     const frUrl = React.useMemo(() => {
         if (!anomaly?.callsign || !anomaly?.flight_id) return '';
@@ -289,6 +331,48 @@ export const ReportPanel: React.FC<ReportPanelProps> = ({ anomaly, onClose, clas
             .filter((id: string) => id && id !== anomaly.flight_id);
     };
 
+    const getReplayEvents = (): ReplayEvent[] => {
+        const events: ReplayEvent[] = [];
+        const rules = anomaly.full_report?.matched_rules || 
+                     anomaly.full_report?.layer_1_rules?.report?.matched_rules || [];
+
+        rules.forEach((rule: any) => {
+            if (rule.id === 4 && rule.details?.events) {
+                // Dangerous Proximity
+                rule.details.events.forEach((ev: any) => {
+                    events.push({
+                        timestamp: ev.timestamp,
+                        type: 'proximity',
+                        description: `Conflict with ${ev.other_callsign || ev.other_flight}. Dist: ${ev.distance_nm} NM, Alt Diff: ${ev.altitude_diff_ft} ft`,
+                        // Lat/Lon might not be in the event record for proximity, but timestamp is key
+                    });
+                });
+            } else if (rule.id === 11 && rule.details?.deviations) {
+                // Path Deviation
+                rule.details.deviations.forEach((dev: any) => {
+                    events.push({
+                        timestamp: dev.timestamp,
+                        type: 'deviation',
+                        description: `Path deviation: ${dev.dist_nm} NM off course.`,
+                        lat: dev.lat,
+                        lon: dev.lon
+                    });
+                });
+            }
+        });
+
+        // Also add the main anomaly timestamp as a generic event if not covered
+        if (!events.find(e => Math.abs(e.timestamp - anomaly.timestamp) < 5)) {
+             events.push({
+                timestamp: anomaly.timestamp,
+                type: 'other',
+                description: 'Anomaly Detection Time',
+            });
+        }
+
+        return events.sort((a, b) => a.timestamp - b.timestamp);
+    };
+
     return (
         <>
         <aside className={clsx("bg-[#2C2F33] rounded-xl flex flex-col h-full overflow-hidden border border-white/5 animate-in slide-in-from-right-4", className || "col-span-3")}>
@@ -373,6 +457,7 @@ export const ReportPanel: React.FC<ReportPanelProps> = ({ anomaly, onClose, clas
                         title="Layer 1: Rule Engine" 
                         data={report.layer_1_rules} 
                         type="rules" 
+                        resolvedCallsigns={resolvedCallsigns}
                     />
                     
                     <LayerCard 
@@ -461,6 +546,7 @@ export const ReportPanel: React.FC<ReportPanelProps> = ({ anomaly, onClose, clas
             <ReplayModal 
                 mainFlightId={anomaly.flight_id}
                 secondaryFlightIds={getSecondaryFlightIds()}
+                events={getReplayEvents()}
                 onClose={() => setShowReplay(false)} 
             />
         )}
