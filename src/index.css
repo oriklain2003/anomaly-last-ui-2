@@ -24,6 +24,27 @@
   --neon-blue-glow: #00a3d5; /* Keep static or derive? Keeping static for now or could match primary */
 }
 
+@layer utilities {
+  .bg-primary {
+    background-color: rgb(var(--color-primary) / var(--tw-bg-opacity, 1));
+  }
+  .text-primary {
+    color: rgb(var(--color-primary) / var(--tw-text-opacity, 1));
+  }
+  .border-primary {
+    border-color: rgb(var(--color-primary) / var(--tw-border-opacity, 1));
+  }
+  .bg-surface {
+    background-color: rgb(var(--color-surface) / var(--tw-bg-opacity, 1));
+  }
+  .bg-background-dark {
+    background-color: rgb(var(--color-background) / var(--tw-bg-opacity, 1));
+  }
+  .bg-surface-highlight {
+    background-color: color-mix(in srgb, rgb(var(--color-surface)), white 5%);
+  }
+}
+
 @keyframes gradient-x {
   0% {
     background-position: 0% 50%;

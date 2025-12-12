@@ -21,7 +21,7 @@ const LayerCard: React.FC<{ title: string; data: any; type: 'rules' | 'model'; r
     // Distinct styling for anomalies
     const cardStyle = isAnomaly 
         ? "bg-red-500/10 border-red-500/30" 
-        : "bg-white/5 border-white/10";
+        : "bg-surface border-white/10";
 
     // Special handling for "Dangerous Proximity" (ID 4)
     const renderProximityEvents = (rule: any) => {
@@ -375,9 +375,9 @@ export const ReportPanel: React.FC<ReportPanelProps> = ({ anomaly, onClose, clas
 
     return (
         <>
-        <aside className={clsx("bg-[#2C2F33] rounded-xl flex flex-col h-full overflow-hidden border border-white/5 animate-in slide-in-from-right-4", className || "col-span-3")}>
+        <aside className={clsx("bg-surface rounded-xl flex flex-col h-full overflow-hidden border border-white/5 animate-in slide-in-from-right-4", className || "col-span-3")}>
             {/* Header */}
-            <div className="p-4 border-b border-white/10 flex items-center justify-between bg-white/5">
+            <div className="p-4 border-b border-white/10 flex items-center justify-between bg-surface-highlight/50">
                 <div>
                     <h3 className="text-white font-bold">Analysis Report</h3>
                     <p className="text-xs text-white/60">{anomaly.flight_id}</p>
@@ -492,7 +492,7 @@ export const ReportPanel: React.FC<ReportPanelProps> = ({ anomaly, onClose, clas
                 </div>
 
                 {/* Feedback Section */}
-                <div className="bg-white/5 rounded-lg p-3 border border-white/10 mt-4">
+                <div className="bg-surface-highlight rounded-lg p-3 border border-white/10 mt-4">
                     <p className="text-xs text-white/40 font-bold uppercase tracking-wider mb-3">Human Feedback</p>
                     
                     {feedbackStatus === 'success' ? (

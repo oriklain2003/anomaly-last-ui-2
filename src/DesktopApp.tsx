@@ -45,39 +45,8 @@ export function DesktopApp() {
   const [secondaryFlightData, setSecondaryFlightData] = useState<FlightTrack | null>(null);
   const [, setLoadingTrack] = useState(false);
   const [showReport, setShowReport] = useState(false);
-  const [showSettings, setShowSettings] = useState(false);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const bellAudioRef = useRef<HTMLAudioElement | null>(null);
-
-  // Load theme on mount
-  useEffect(() => {
-    const savedConfig = localStorage.getItem('app-theme-colors');
-    if (savedConfig) {
-        try {
-            const { primary, surface, background } = JSON.parse(savedConfig);
-            const root = document.documentElement;
-            
-            const hexToRgb = (hex: string) => {
-                 const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
-                 return result ? `${parseInt(result[1], 16)} ${parseInt(result[2], 16)} ${parseInt(result[3], 16)}` : null;
-            };
-
-            if (primary) {
-                const rgb = hexToRgb(primary);
-                if (rgb) root.style.setProperty('--color-primary', rgb);
-            }
-            if (surface) {
-                const rgb = hexToRgb(surface);
-                if (rgb) root.style.setProperty('--color-surface', rgb);
-            }
-            if (background) {
-                const rgb = hexToRgb(background);
-                if (rgb) root.style.setProperty('--color-background', rgb);
-            }
-        } catch (e) {
-            console.error("Failed to load theme", e);
-        }
-    }
-  }, []);
 
   // Sync state to URL
   useEffect(() => {
@@ -236,9 +205,9 @@ export function DesktopApp() {
     }, [selectedAnomaly, flightData]);
 
     return (
-    <div className="flex h-screen w-full flex-col bg-background-dark text-white overflow-hidden">
+    <div className="flex h-screen w-full flex-col bg-background-light dark:bg-background-dark text-white overflow-hidden">
       {/* Header */}
-      <header className="flex items-center justify-between whitespace-nowrap border-b border-solid border-white/5 px-6 py-3 shrink-0 bg-background-dark">
+      <header className="flex items-center justify-between whitespace-nowrap border-b border-solid border-white/10 px-6 py-3 shrink-0 bg-surface">
         <div className="flex items-center gap-4 text-white">
             <div className="size-6 text-primary">
                 <svg fill="none" viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg">
@@ -249,26 +218,24 @@ export function DesktopApp() {
             <h2 className="text-white text-xl font-bold leading-tight tracking-[-0.015em]">Onyx Anomaly Explorer</h2>
         </div>
         <div className="flex flex-1 justify-end gap-2">
-            <button 
-                onClick={() => setShowSettings(true)}
-                className="flex h-10 w-10 items-center justify-center rounded-lg bg-surface text-white/80 hover:text-white transition-colors"
+            <button
+                onClick={() => setIsSettingsOpen(true)}
+                className="flex h-10 w-10 items-center justify-center rounded-lg bg-surface-highlight text-white/80 hover:text-white transition-colors border border-white/10"
             >
                 <Settings className="h-5 w-5" />
             </button>
             <button 
-                className="flex h-10 w-10 items-center justify-center rounded-lg bg-surface text-white/80 hover:text-white transition-colors"
+                className="flex h-10 w-10 items-center justify-center rounded-lg bg-surface-highlight text-white/80 hover:text-white transition-colors border border-white/10"
                 onClick={handleBellClick}
             >
                 <Bell className="h-5 w-5" />
             </button>
-            <div className="ml-2 size-10 rounded-full bg-surface-highlight" />
+            <div className="ml-2 size-10 rounded-full bg-gray-600" />
         </div>
       </header>
 
       <main className="flex-1 grid grid-cols-12 gap-6 p-6 overflow-hidden h-[calc(100vh-65px)]">
         
-        <SettingsModal isOpen={showSettings} onClose={() => setShowSettings(false)} />
-
         {/* Sidebar */}
         <Sidebar 
             onSelectAnomaly={setSelectedAnomaly} 
@@ -291,7 +258,7 @@ export function DesktopApp() {
             />
             
             {/* Legend Overlay */}
-            <div className="absolute bottom-4 right-4 bg-surface/80 backdrop-blur-sm p-3 rounded-lg border border-white/10 text-white z-10">
+            <div className="absolute bottom-4 right-4 bg-background-dark/80 backdrop-blur-sm p-3 rounded-lg border border-white/10 text-white z-10">
                 <p className="text-sm font-bold mb-2">Legend</p>
                 <div className="flex flex-col gap-2 text-xs">
                     <div className="flex items-center gap-2">
@@ -335,6 +302,11 @@ export function DesktopApp() {
         data={selectedAnomaly?.full_report} 
         flightId={selectedAnomaly?.flight_id || "No Flight Selected"} 
         flightPoints={flightData?.points || []}
+      />
+
+      <SettingsModal 
+        isOpen={isSettingsOpen} 
+        onClose={() => setIsSettingsOpen(false)} 
       />
     </div>
   )

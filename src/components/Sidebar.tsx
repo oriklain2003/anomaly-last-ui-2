@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { ChevronLeft, ChevronRight, Search, Radio, Filter, Beaker, Calendar, List, ArrowLeft } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Search, Radio, Filter, Beaker, Calendar, List, ArrowLeft, Plane } from 'lucide-react';
 import { fetchLiveAnomalies, fetchResearchAnomalies, fetchRules, fetchFlightsByRule } from '../api';
 import type { AnomalyReport } from '../types';
 import clsx from 'clsx';
@@ -14,6 +14,19 @@ interface SidebarProps {
     setSelectedDate: (date: Date) => void;
     className?: string;
 }
+
+const LoadingPlane: React.FC<{ message?: string }> = ({ message = 'Searching anomalies...' }) => (
+    <div className="flex flex-col items-center justify-center py-6 text-white/70 gap-3">
+        <div className="relative w-16 h-16">
+            <div className="absolute inset-0 rounded-full border-4 border-white/10 border-t-primary animate-spin" />
+            <div className="absolute inset-2 rounded-full border-2 border-dashed border-primary/60 animate-spin" />
+            <div className="absolute inset-0 flex items-center justify-center text-primary">
+                <Plane className="w-6 h-6" />
+            </div>
+        </div>
+        <p className="text-sm font-semibold text-white/70">{message}</p>
+    </div>
+);
 
 export const Sidebar: React.FC<SidebarProps> = ({ 
     onSelectAnomaly, 
@@ -35,18 +48,36 @@ export const Sidebar: React.FC<SidebarProps> = ({
     // Filters
     const [minScore, setMinScore] = useState(0);
     const [selectedTrigger, setSelectedTrigger] = useState('All');
+    const [selectedLayerCombo, setSelectedLayerCombo] = useState<string[]>([]);
     const [selectedVersion, setSelectedVersion] = useState('All');
     const [showFilters, setShowFilters] = useState(false);
 
     const audioRef = useRef<HTMLAudioElement | null>(null);
     const lastSoundTimeRef = useRef(0);
 
-    const triggerOptions = ['All', 'Rules', 'XGBoost', 'DeepDense', 'DeepCNN', 'Transformer', 'Hybrid'];
+    const triggerOptions = ['All', 'Combination', 'Rules', 'XGBoost', 'DeepDense', 'DeepCNN', 'Transformer', 'Hybrid'];
     const versionOptions = ['All', 'v1', 'v2', 'v3'];
 
     // Realtime tracking
     const lastFetchTimeRef = useRef<number>(0);
     const intervalRef = useRef<any>(null);
+    const searchAbortRef = useRef<AbortController | null>(null);
+
+    const startNewSearch = () => {
+        if (searchAbortRef.current) {
+            searchAbortRef.current.abort();
+        }
+        const controller = new AbortController();
+        searchAbortRef.current = controller;
+        return controller;
+    };
+
+    const finishSearch = (controller: AbortController) => {
+        if (searchAbortRef.current === controller) {
+            setLoading(false);
+            searchAbortRef.current = null;
+        }
+    };
 
     // Effect for fetching anomalies based on mode
     useEffect(() => {
@@ -54,6 +85,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
             clearInterval(intervalRef.current);
             intervalRef.current = null;
         }
+
+        if (searchAbortRef.current) {
+            searchAbortRef.current.abort();
+            searchAbortRef.current = null;
+        }
+
+        setAnomalies([]);
 
         if (mode === 'rules') {
             fetchRulesList();
@@ -66,6 +104,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
         return () => {
             if (intervalRef.current) clearInterval(intervalRef.current);
+            if (searchAbortRef.current) {
+                searchAbortRef.current.abort();
+                searchAbortRef.current = null;
+            }
         };
     }, [mode, selectedDate]);
 
@@ -89,20 +131,26 @@ export const Sidebar: React.FC<SidebarProps> = ({
     };
 
     const fetchRuleFlights = async (ruleId: number) => {
+        const controller = startNewSearch();
         setLoading(true);
+        setAnomalies([]);
         try {
-            const data = await fetchFlightsByRule(ruleId);
+            const data = await fetchFlightsByRule(ruleId, controller.signal);
+            if (controller.signal.aborted) return;
             setAnomalies(data);
-        } catch (error) {
+        } catch (error: any) {
+            if (error?.name === 'AbortError') return;
             console.error("Error fetching flights for rule:", error);
             setAnomalies([]);
         } finally {
-            setLoading(false);
+            finishSearch(controller);
         }
     };
 
     const fetchHistoricalOrResearch = async () => {
+        const controller = startNewSearch();
         setLoading(true);
+        setAnomalies([]);
         try {
             const start = new Date(selectedDate);
             start.setHours(0, 0, 0, 0);
@@ -113,13 +161,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
             const data = await apiFunc(
                 Math.floor(start.getTime() / 1000),
-                Math.floor(end.getTime() / 1000)
+                Math.floor(end.getTime() / 1000),
+                controller.signal
             );
+            if (controller.signal.aborted) return;
             setAnomalies(data);
-        } catch (error) {
+        } catch (error: any) {
+            if (error?.name === 'AbortError') return;
             console.error("Error fetching data:", error);
+            setAnomalies([]);
         } finally {
-            setLoading(false);
+            finishSearch(controller);
         }
     };
 
@@ -154,19 +206,23 @@ export const Sidebar: React.FC<SidebarProps> = ({
     };
 
     const fetchRealtimeInitial = async () => {
+        const controller = startNewSearch();
         setLoading(true);
         setAnomalies([]);
         try {
             const now = Math.floor(Date.now() / 1000);
             const start = now - 3600; 
             
-            const data = await fetchLiveAnomalies(start, now);
+            const data = await fetchLiveAnomalies(start, now, controller.signal);
+            if (controller.signal.aborted) return;
             setAnomalies(data);
             lastFetchTimeRef.current = now;
-        } catch (error) {
+        } catch (error: any) {
+            if (error?.name === 'AbortError') return;
             console.error("Error fetching initial realtime data:", error);
+            setAnomalies([]);
         } finally {
-            setLoading(false);
+            finishSearch(controller);
         }
     };
 
@@ -212,7 +268,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
             (a.full_report?.summary?.triggers?.join(' ') || '').toLowerCase().includes(filter.toLowerCase());
         
         const triggers = a.full_report?.summary?.triggers || [];
-        const matchesTrigger = selectedTrigger === 'All' || triggers.includes(selectedTrigger);
+        const matchesTrigger = selectedTrigger === 'All' 
+            ? true 
+            : selectedTrigger === 'Combination'
+                ? (selectedLayerCombo.length === 0 
+                    ? triggers.length > 1 
+                    : selectedLayerCombo.every(layer => triggers.includes(layer)))
+                : triggers.includes(selectedTrigger);
 
         const cutoffTimestampV2 = new Date('2025-07-08T20:00:00Z').getTime() / 1000;
         const cutoffTimestampV3 = new Date('2025-07-17T00:00:00Z').getTime() / 1000;
@@ -269,7 +331,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     onClick={() => setMode('research')}
                     className={clsx(
                         "flex-1 py-2 rounded-lg text-sm font-bold transition-all flex items-center justify-center gap-2",
-                        mode === 'research' ? "bg-purple-500 text-white" : "text-white/60 hover:text-white"
+                        mode === 'research' ? "bg-primary text-background-dark" : "text-white/60 hover:text-white"
                     )}
                 >
                     <Beaker className="size-4" />
@@ -279,7 +341,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     onClick={() => { setMode('rules'); setSelectedRuleId(null); }}
                     className={clsx(
                         "flex-1 py-2 rounded-lg text-sm font-bold transition-all flex items-center justify-center gap-2",
-                        mode === 'rules' ? "bg-blue-500 text-white" : "text-white/60 hover:text-white"
+                        mode === 'rules' ? "bg-primary text-background-dark" : "text-white/60 hover:text-white"
                     )}
                 >
                     <List className="size-4" />
@@ -289,7 +351,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     onClick={() => setMode('realtime')}
                     className={clsx(
                         "flex-1 py-2 rounded-lg text-sm font-bold transition-all flex items-center justify-center gap-2",
-                        mode === 'realtime' ? "bg-red-500 text-white" : "text-white/60 hover:text-white"
+                        mode === 'realtime' ? "bg-primary text-background-dark" : "text-white/60 hover:text-white"
                     )}
                 >
                     <Radio className={clsx("size-4", mode === 'realtime' && "animate-pulse")} />
@@ -456,6 +518,45 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                     </button>
                                 ))}
                             </div>
+                            <p className="text-[10px] text-white/40 mt-1">
+                                Select Combination to choose multiple layers that must all appear on a flight.
+                            </p>
+                            {selectedTrigger === 'Combination' && (
+                                <div className="mt-2 space-y-2">
+                                    <p className="text-[11px] text-white/60 font-semibold">Choose layers to combine</p>
+                                    <div className="flex flex-wrap gap-2">
+                                        {triggerOptions
+                                            .filter(option => option !== 'All' && option !== 'Combination')
+                                            .map(layer => {
+                                                const isActive = selectedLayerCombo.includes(layer);
+                                                return (
+                                                    <button
+                                                        key={layer}
+                                                        onClick={() => {
+                                                            setSelectedLayerCombo(prev => {
+                                                                if (prev.includes(layer)) {
+                                                                    return prev.filter(l => l !== layer);
+                                                                }
+                                                                return [...prev, layer];
+                                                            });
+                                                        }}
+                                                        className={clsx(
+                                                            "px-2 py-1 rounded-md text-xs font-medium border transition-colors",
+                                                            isActive 
+                                                                ? "bg-primary/20 border-primary text-white" 
+                                                                : "bg-white/5 border-white/10 text-white/70 hover:bg-white/10"
+                                                        )}
+                                                    >
+                                                        {layer}
+                                                    </button>
+                                                );
+                                            })}
+                                    </div>
+                                    <p className="text-[10px] text-white/40">
+                                        No selection = any flight triggered by 2+ layers.
+                                    </p>
+                                </div>
+                            )}
                         </div>
 
                         {/* Version Filter */}
@@ -483,7 +584,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
                 <div className="flex flex-col gap-2 overflow-y-auto pr-2 -mr-2 flex-1">
                     {loading && anomalies.length === 0 ? (
-                        <p className="text-white/60 text-center py-4">Loading anomalies...</p>
+                        <LoadingPlane message={mode === 'realtime' ? "Scanning for live anomalies..." : "Searching anomalies..."} />
                     ) : filteredAnomalies.length === 0 ? (
                         <p className="text-white/60 text-center py-4">
                             {mode === 'realtime' ? "No anomalies detected recently." : "No anomalies match criteria."}

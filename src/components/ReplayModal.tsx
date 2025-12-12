@@ -460,7 +460,7 @@ export const ReplayModal: React.FC<ReplayModalProps> = ({ mainFlightId, secondar
                         display: block;
                     }
                     .u-loading__symbol {
-                        background-color: #000000; /* primary: black */
+                        background-color: var(--color-background); /* primary: background */
                         padding: 8px;
                         animation: loading 3s infinite;
                         border-radius: 5px;
@@ -477,11 +477,11 @@ export const ReplayModal: React.FC<ReplayModalProps> = ({ mainFlightId, secondar
                     }
                     @keyframes loading {
                         0% { transform: perspective(250px) rotateX(0deg) rotateY(0deg); }
-                        15% { background-color: #000000; }
-                        16% { background-color: #3b82f6; } /* secondary: blue */
-                        50% { transform: perspective(250px) rotateX(180deg) rotateY(0deg); background-color: #3b82f6; }
-                        65% { background-color: #3b82f6; }
-                        66% { background-color: #000000; }
+                        15% { background-color: var(--color-background); }
+                        16% { background-color: rgb(var(--color-primary)); } /* secondary: accent */
+                        50% { transform: perspective(250px) rotateX(180deg) rotateY(0deg); background-color: rgb(var(--color-primary)); }
+                        65% { background-color: rgb(var(--color-primary)); }
+                        66% { background-color: var(--color-background); }
                         100% { transform: perspective(250px) rotateX(180deg) rotateY(-180deg); }
                     }
                     @keyframes loading-icon {
@@ -510,7 +510,7 @@ export const ReplayModal: React.FC<ReplayModalProps> = ({ mainFlightId, secondar
 
     return (
         <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-8 backdrop-blur-sm animate-in fade-in">
-            <div className="bg-[#1e2124] w-full h-full rounded-2xl overflow-hidden flex flex-col border border-white/10 shadow-2xl relative">
+            <div className="bg-surface w-full h-full rounded-2xl overflow-hidden flex flex-col border border-white/10 shadow-2xl relative">
                 
                 {/* Header / Close */}
                 <div className="absolute top-4 right-4 z-50 flex gap-2">
@@ -527,7 +527,7 @@ export const ReplayModal: React.FC<ReplayModalProps> = ({ mainFlightId, secondar
                         </button>
                         
                         {showTools && (
-                            <div className="absolute right-0 top-full mt-2 w-48 bg-[#2C2F33] border border-white/10 rounded-lg shadow-xl p-2 animate-in fade-in slide-in-from-top-2">
+                            <div className="absolute right-0 top-full mt-2 w-48 bg-surface border border-white/10 rounded-lg shadow-xl p-2 animate-in fade-in slide-in-from-top-2">
                                 <div className="text-xs font-bold text-white/40 uppercase mb-2 px-2">Replay Tools</div>
                                 <button 
                                     onClick={() => setDistanceTool(!distanceTool)}
@@ -550,7 +550,7 @@ export const ReplayModal: React.FC<ReplayModalProps> = ({ mainFlightId, secondar
 
                 <div className="flex-1 flex overflow-hidden relative">
                     {/* Events Sidebar */}
-                    <div className="w-72 bg-[#2C2F33] border-r border-white/10 flex flex-col z-30 shrink-0">
+                    <div className="w-72 bg-surface border-r border-white/10 flex flex-col z-30 shrink-0">
                         <div className="p-4 border-b border-white/10 bg-white/5">
                             <h3 className="font-bold text-white text-sm flex items-center gap-2">
                                 <AlertTriangle className="size-4 text-primary" />
@@ -656,7 +656,7 @@ export const ReplayModal: React.FC<ReplayModalProps> = ({ mainFlightId, secondar
                 </div>
 
                 {/* Controls */}
-                <div className="bg-[#2C2F33] border-t border-white/10 p-4 z-40">
+                <div className="bg-surface border-t border-white/10 p-4 z-40">
                     
                     {/* Time Slider */}
                     <div className="flex items-center gap-4 mb-4">

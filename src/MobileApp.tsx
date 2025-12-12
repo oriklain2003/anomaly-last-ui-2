@@ -11,10 +11,10 @@ import { ALERT_AUDIO_SRC } from './constants';
 
 export function MobileApp() {
     const [mode, setMode] = useState<'historical' | 'realtime' | 'research' | 'rules'>('historical');
-    const [selectedDate, setSelectedDate] = useState<Date>(new Date());
     const [selectedAnomaly, setSelectedAnomaly] = useState<AnomalyReport | null>(null);
     const [flightData, setFlightData] = useState<FlightTrack | null>(null);
     const [loadingTrack, setLoadingTrack] = useState(false);
+    const [selectedDate, setSelectedDate] = useState<Date>(new Date());
     const [activeTab, setActiveTab] = useState<'list' | 'map' | 'report' | 'chat'>('list');
 
     const bellAudioRef = useRef<HTMLAudioElement | null>(null);
@@ -96,7 +96,7 @@ export function MobileApp() {
     return (
         <div className="flex h-screen w-full flex-col bg-background-dark text-white overflow-hidden">
              {/* Mobile Header */}
-            <header className="flex items-center justify-between px-3 py-2 shrink-0 bg-[#1A1A1D] border-b border-white/10">
+            <header className="flex items-center justify-between px-3 py-2 shrink-0 bg-surface border-b border-white/10">
                 <div className="flex items-center gap-2 text-white">
                     <div className="size-4 text-primary">
                        {/* SVG Logo */}
@@ -167,7 +167,7 @@ export function MobileApp() {
             </main>
 
             {/* Bottom Tab Bar */}
-            <nav className="shrink-0 bg-[#1A1A1D] border-t border-white/10 px-2 py-1 pb-2 safe-area-pb">
+            <nav className="shrink-0 bg-surface border-t border-white/10 px-2 py-1 pb-2 safe-area-pb">
                 <ul className="flex items-center justify-around">
                     <li>
                         <button 

@@ -140,7 +140,7 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ data, flightId, fl
     setLoading(true);
   
     try {
-      const API_BASE = (import.meta.env.VITE_API_URL || '') + '/api/v2';
+      const API_BASE = (import.meta.env.VITE_API_URL || '') + '/api';
 
       // Compress flight points
       const pointsData = filterPoints(flightPoints);
@@ -172,7 +172,8 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ data, flightId, fl
           messages: messages.map(m => ({ role: m.role, content: m.content })),
           flight_id: flightId,
           analysis: slim,
-          points: pointsData,
+          flight_time: flightPoints.length > 0 ? flightPoints[0].timestamp : undefined,
+          points: pointsData,  // Send points for map image generation
           user_question: userMsg.content
         })
       });

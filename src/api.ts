@@ -70,8 +70,8 @@ export const fetchRules = async (): Promise<{ id: number; name: string; descript
     return response.json();
 };
 
-export const fetchFlightsByRule = async (ruleId: number): Promise<AnomalyReport[]> => {
-    const response = await fetch(`${API_BASE}/rules/${ruleId}/flights`);
+export const fetchFlightsByRule = async (ruleId: number, signal?: AbortSignal): Promise<AnomalyReport[]> => {
+    const response = await fetch(`${API_BASE}/rules/${ruleId}/flights`, { signal });
     if (!response.ok) {
         throw new Error('Failed to fetch flights by rule');
     }
@@ -83,8 +83,9 @@ export const fetchCallsignFromResearch = async (flightId: string): Promise<strin
         const response = await fetch(`${API_BASE}/research/callsign/${flightId}`);
         if (!response.ok) return null;
         const data = await response.json();
-        return data.callsign;
-    } catch (e) {
+        return data?.callsign || null;
+    } catch (error) {
+        console.warn('Failed to fetch callsign', error);
         return null;
     }
 };
