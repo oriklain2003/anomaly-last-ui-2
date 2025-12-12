@@ -161,8 +161,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
             const data = await apiFunc(
                 Math.floor(start.getTime() / 1000),
-                Math.floor(end.getTime() / 1000),
-                controller.signal
+                Math.floor(end.getTime() / 1000)
             );
             if (controller.signal.aborted) return;
             setAnomalies(data);
@@ -213,7 +212,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             const now = Math.floor(Date.now() / 1000);
             const start = now - 3600; 
             
-            const data = await fetchLiveAnomalies(start, now, controller.signal);
+            const data = await fetchLiveAnomalies(start, now);
             if (controller.signal.aborted) return;
             setAnomalies(data);
             lastFetchTimeRef.current = now;
