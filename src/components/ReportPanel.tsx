@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { X, AlertTriangle, CheckCircle, ThumbsUp, PlayCircle, Radio, Plane, Navigation, MapPin, TrendingDown, RotateCcw, Compass, ShieldAlert, Wifi, RefreshCw, Sparkles, Loader2, ExternalLink, ChevronDown } from 'lucide-react';
+import { X, AlertTriangle, CheckCircle, ThumbsUp, PlayCircle, Radio, Plane, Navigation, MapPin, TrendingDown, RotateCcw, Compass, ShieldAlert, Wifi, RefreshCw, Loader2, ExternalLink, ChevronDown } from 'lucide-react';
 import type { AnomalyReport } from '../types';
 import { submitFeedback, fetchCallsignFromResearch, fetchRules, reanalyzeFeedbackFlight } from '../api';
 import clsx from 'clsx';
@@ -563,8 +563,6 @@ export const ReportPanel: React.FC<ReportPanelProps> = ({ anomaly, onClose, clas
 
         return events.sort((a, b) => a.timestamp - b.timestamp);
     };
-
-    const isFeedbackMode = mode === 'feedback';
 
     return (
         <>

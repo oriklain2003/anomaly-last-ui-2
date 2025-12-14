@@ -162,10 +162,10 @@ const FlightsExplorer: React.FC = () => {
         <Stack spacing={3}>
             {/* Aggregation Graphs */}
             <Grid container spacing={3}>
-                <Grid item xs={12} md={6}>
+                <Grid size={{ xs: 12, md: 6 }}>
                     <SimpleBarChart data={aggregations.sourceData} title="Flights by Source" color="#10b981" />
                 </Grid>
-                <Grid item xs={12} md={6}>
+                <Grid size={{ xs: 12, md: 6 }}>
                     <SimpleBarChart data={aggregations.callsignData} title="Top 10 Callsigns" color="#6366f1" />
                 </Grid>
             </Grid>

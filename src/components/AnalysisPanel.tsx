@@ -266,7 +266,6 @@ export const AnalysisPanel: React.FC<AnalysisPanelProps> = ({
         try {
             // Send full conversation history (excluding the message we just added)
             const historyToSend = messages
-                .filter(m => m.role !== 'system')
                 .map(m => ({ role: m.role, content: m.content }));
 
             const response = await analyzeWithAI({
