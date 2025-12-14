@@ -1,8 +1,8 @@
-import React, { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useImperativeHandle, forwardRef } from 'react';
 import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import type { TrackPoint } from '../types';
-import { fetchLearnedPaths } from '../api';
+import { fetchLearnedLayers, type LearnedLayers } from '../api';
 
 // Fix for Hebrew text rendering (RTL)
 try {
@@ -16,29 +16,277 @@ try {
   console.error('Failed to set RTL text plugin', err);
 }
 
+// ============================================================
+// AI Highlight Types
+// ============================================================
+
+export interface AIHighlightedPoint {
+    lat: number;
+    lon: number;
+    label?: string;
+}
+
+export interface AIHighlightedSegment {
+    startIndex: number;
+    endIndex: number;
+}
+
+// ============================================================
+// Component Props and Ref Handle
+// ============================================================
+
+// ML Anomaly Point for map display
+export interface MLAnomalyPoint {
+    lat: number;
+    lon: number;
+    timestamp: number;
+    point_score: number;
+    layer: string;  // e.g., 'Deep Dense', 'CNN', 'Transformer', 'Hybrid'
+}
+
 interface MapComponentProps {
   points: TrackPoint[];
   secondaryPoints?: TrackPoint[];
   anomalyTimestamps?: number[];
+  mlAnomalyPoints?: MLAnomalyPoint[];
+  aiHighlightedPoint?: AIHighlightedPoint | null;
+  aiHighlightedSegment?: AIHighlightedSegment | null;
+  onClearAIHighlights?: () => void;
 }
 
-export const MapComponent: React.FC<MapComponentProps> = ({ points, secondaryPoints = [], anomalyTimestamps = [] }) => {
+export interface MapComponentHandle {
+    getContainer: () => HTMLDivElement | null;
+    flyTo: (lat: number, lon: number, zoom?: number) => void;
+    fitBounds: (north: number, south: number, east: number, west: number) => void;
+    highlightPoint: (lat: number, lon: number, label?: string) => void;
+    highlightSegment: (startIndex: number, endIndex: number) => void;
+    clearHighlights: () => void;
+    captureScreenshot: () => Promise<string | null>;
+}
+
+// ============================================================
+// Component Implementation
+// ============================================================
+
+export const MapComponent = forwardRef<MapComponentHandle, MapComponentProps>(({ 
+    points, 
+    secondaryPoints = [], 
+    anomalyTimestamps = [],
+    mlAnomalyPoints = [],
+    aiHighlightedPoint,
+    aiHighlightedSegment,
+    onClearAIHighlights
+}, ref) => {
   const mapContainer = useRef<HTMLDivElement>(null);
   const map = useRef<maplibregl.Map | null>(null);
+  const aiMarkerRef = useRef<maplibregl.Marker | null>(null);
+  const mlMarkersRef = useRef<maplibregl.Marker[]>([]);
   const apiKey = 'r7kaQpfNDVZdaVp23F1r';
 
-  const [learnedPaths, setLearnedPaths] = useState<any>(null);
-  const [showStrict, setShowStrict] = useState(false);
-  const [showLoose, setShowLoose] = useState(false);
+  const [learnedLayers, setLearnedLayers] = useState<LearnedLayers | null>(null);
+  const [showPaths, setShowPaths] = useState(false);
   const [showTurns, setShowTurns] = useState(false);
+  const [showSids, setShowSids] = useState(false);
+  const [showStars, setShowStars] = useState(false);
+  const [showMLPoints, setShowMLPoints] = useState(true);
+
+  // Expose imperative handle for parent components
+  useImperativeHandle(ref, () => ({
+    getContainer: () => mapContainer.current,
+    
+    captureScreenshot: async (): Promise<string | null> => {
+        if (!map.current || !mapContainer.current) return null;
+        
+        try {
+            // Wait for any pending renders to complete
+            await new Promise<void>(resolve => {
+                if (map.current!.loaded()) {
+                    resolve();
+                } else {
+                    map.current!.once('idle', () => resolve());
+                }
+            });
+            
+            // Force a render
+            map.current.triggerRepaint();
+            
+            // Wait a frame for the repaint
+            await new Promise(resolve => requestAnimationFrame(resolve));
+            
+            // Get the WebGL canvas
+            const mapCanvas = map.current.getCanvas();
+            
+            // Create a combined canvas with the map and overlays
+            const rect = mapContainer.current.getBoundingClientRect();
+            const combinedCanvas = document.createElement('canvas');
+            combinedCanvas.width = rect.width;
+            combinedCanvas.height = rect.height;
+            const ctx = combinedCanvas.getContext('2d');
+            
+            if (!ctx) return null;
+            
+            // Draw the map canvas
+            try {
+                ctx.drawImage(mapCanvas, 0, 0, rect.width, rect.height);
+            } catch (e) {
+                console.error('Failed to draw map canvas (CORS issue?):', e);
+                // Fill with dark background as fallback
+                ctx.fillStyle = '#1a1a2e';
+                ctx.fillRect(0, 0, rect.width, rect.height);
+            }
+            
+            // Draw markers manually since they're DOM elements
+            // Get all marker elements and draw them
+            const markers = mapContainer.current.querySelectorAll('.maplibregl-marker');
+            markers.forEach(marker => {
+                const markerEl = marker as HTMLElement;
+                const markerRect = markerEl.getBoundingClientRect();
+                const containerRect = mapContainer.current!.getBoundingClientRect();
+                
+                // Calculate position relative to container
+                const x = markerRect.left - containerRect.left + markerRect.width / 2;
+                const y = markerRect.top - containerRect.top + markerRect.height;
+                
+                // Draw a simple marker representation
+                ctx.beginPath();
+                ctx.arc(x, y - 15, 10, 0, Math.PI * 2);
+                
+                // Check marker color (green for start, red for end)
+                const svg = markerEl.querySelector('svg');
+                if (svg) {
+                    const fill = svg.getAttribute('fill') || '#ef4444';
+                    ctx.fillStyle = fill;
+                } else {
+                    ctx.fillStyle = '#ef4444';
+                }
+                ctx.fill();
+                ctx.strokeStyle = 'white';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+            });
+            
+            return combinedCanvas.toDataURL('image/png');
+        } catch (e) {
+            console.error('Screenshot capture failed:', e);
+            return null;
+        }
+    },
+    
+    flyTo: (lat: number, lon: number, zoom?: number) => {
+        if (map.current) {
+            map.current.flyTo({
+                center: [lon, lat],
+                zoom: zoom ?? map.current.getZoom(),
+                duration: 1000
+            });
+        }
+    },
+    
+    fitBounds: (north: number, south: number, east: number, west: number) => {
+        if (map.current) {
+            map.current.fitBounds(
+                [[west, south], [east, north]],
+                { padding: 50, duration: 1000 }
+            );
+        }
+    },
+    
+    highlightPoint: (lat: number, lon: number, label?: string) => {
+        if (!map.current) return;
+        
+        // Remove existing AI marker
+        if (aiMarkerRef.current) {
+            aiMarkerRef.current.remove();
+        }
+        
+        // Create pulsing marker element
+        const el = document.createElement('div');
+        el.className = 'ai-highlight-marker';
+        el.innerHTML = `
+            <div class="ai-marker-pulse"></div>
+            <div class="ai-marker-center"></div>
+        `;
+        
+        const marker = new maplibregl.Marker({ element: el })
+            .setLngLat([lon, lat]);
+        
+        if (label) {
+            marker.setPopup(new maplibregl.Popup({ offset: 25 }).setHTML(
+                `<div class="text-gray-900 p-2 text-sm font-sans font-bold">${label}</div>`
+            ));
+        }
+        
+        marker.addTo(map.current);
+        aiMarkerRef.current = marker;
+        
+        // Fly to the point
+        map.current.flyTo({
+            center: [lon, lat],
+            zoom: Math.max(map.current.getZoom(), 10),
+            duration: 1000
+        });
+    },
+    
+    highlightSegment: (startIndex: number, endIndex: number) => {
+        if (!map.current || !points || points.length === 0) return;
+        
+        const source = map.current.getSource('ai-highlight-segment') as maplibregl.GeoJSONSource;
+        if (!source) return;
+        
+        const start = Math.max(0, startIndex);
+        const end = Math.min(points.length - 1, endIndex);
+        
+        const segmentPoints = points.slice(start, end + 1);
+        
+        source.setData({
+            type: 'FeatureCollection',
+            features: [{
+                type: 'Feature',
+                properties: {},
+                geometry: {
+                    type: 'LineString',
+                    coordinates: segmentPoints.map(p => [p.lon, p.lat])
+                }
+            }]
+        });
+        
+        // Fit to segment bounds
+        if (segmentPoints.length > 0) {
+            const bounds = new maplibregl.LngLatBounds();
+            segmentPoints.forEach(p => bounds.extend([p.lon, p.lat]));
+            map.current.fitBounds(bounds, { padding: 100, duration: 1000 });
+        }
+    },
+    
+    clearHighlights: () => {
+        // Remove AI marker
+        if (aiMarkerRef.current) {
+            aiMarkerRef.current.remove();
+            aiMarkerRef.current = null;
+        }
+        
+        // Clear AI segment highlight
+        if (map.current) {
+            const source = map.current.getSource('ai-highlight-segment') as maplibregl.GeoJSONSource;
+            if (source) {
+                source.setData({ type: 'FeatureCollection', features: [] });
+            }
+        }
+    }
+  }), [points]);
 
   useEffect(() => {
-    fetchLearnedPaths()
+    fetchLearnedLayers()
         .then(data => {
-            console.log("[MapComponent] Fetched learned paths:", data);
-            setLearnedPaths(data);
+            setLearnedLayers(data);
+            console.log("[MapComponent] Loaded learned layers:", {
+                paths: data.paths?.length || 0,
+                turns: data.turns?.length || 0,
+                sids: data.sids?.length || 0,
+                stars: data.stars?.length || 0
+            });
         })
-        .catch(err => console.error("[MapComponent] Failed to load learned paths", err));
+        .catch(err => console.error("[MapComponent] Failed to load learned layers", err));
   }, []);
 
   useEffect(() => {
@@ -49,6 +297,8 @@ export const MapComponent: React.FC<MapComponentProps> = ({ points, secondaryPoi
       style: `https://api.maptiler.com/maps/darkmatter/style.json?key=${apiKey}`,
       center: [34.8516, 31.0461], // Israel center
       zoom: 6,
+      // @ts-expect-error - preserveDrawingBuffer is a valid WebGL option for screenshot capture
+      preserveDrawingBuffer: true
     });
 
     map.current.on('load', () => {
@@ -135,6 +385,44 @@ export const MapComponent: React.FC<MapComponentProps> = ({ points, secondaryPoi
         }
       });
 
+      // AI Highlight Segment Layer
+      map.current.addSource('ai-highlight-segment', {
+        type: 'geojson',
+        data: { type: 'FeatureCollection', features: [] }
+      });
+
+      map.current.addLayer({
+        id: 'ai-highlight-segment-line',
+        type: 'line',
+        source: 'ai-highlight-segment',
+        layout: {
+          'line-join': 'round',
+          'line-cap': 'round'
+        },
+        paint: {
+          'line-color': '#f59e0b', // Amber-500
+          'line-width': 8,
+          'line-opacity': 0.8
+        }
+      });
+
+      // AI Highlight Segment Glow (underneath)
+      map.current.addLayer({
+        id: 'ai-highlight-segment-glow',
+        type: 'line',
+        source: 'ai-highlight-segment',
+        layout: {
+          'line-join': 'round',
+          'line-cap': 'round'
+        },
+        paint: {
+          'line-color': '#fbbf24',
+          'line-width': 16,
+          'line-opacity': 0.3,
+          'line-blur': 4
+        }
+      }, 'ai-highlight-segment-line'); // Insert below the main line
+
       const popup = new maplibregl.Popup({
         closeButton: false,
         closeOnClick: false
@@ -182,31 +470,155 @@ export const MapComponent: React.FC<MapComponentProps> = ({ points, secondaryPoi
     };
   }, []);
 
-  // Learned Paths Visualization
+  // Effect to handle AI highlighted point from props
   useEffect(() => {
     if (!map.current) return;
     
-    console.log("[MapComponent] Updating layers. ShowStrict:", showStrict, "ShowLoose:", showLoose, "Data Available:", !!learnedPaths);
-
-    // Ideally we wait for style load, but simple check if getSource works usually suffices or we wrap in try-catch
-    // or check map.current.loaded()
-    if (!map.current.isStyleLoaded()) {
-        console.log("[MapComponent] Map style not loaded yet, skipping layer update.");
-        return;
+    if (aiHighlightedPoint) {
+        // Remove existing AI marker
+        if (aiMarkerRef.current) {
+            aiMarkerRef.current.remove();
+        }
+        
+        // Create pulsing marker element
+        const el = document.createElement('div');
+        el.className = 'ai-highlight-marker';
+        el.innerHTML = `
+            <div class="ai-marker-pulse"></div>
+            <div class="ai-marker-center"></div>
+        `;
+        
+        const marker = new maplibregl.Marker({ element: el })
+            .setLngLat([aiHighlightedPoint.lon, aiHighlightedPoint.lat]);
+        
+        if (aiHighlightedPoint.label) {
+            marker.setPopup(new maplibregl.Popup({ offset: 25 }).setHTML(
+                `<div class="text-gray-900 p-2 text-sm font-sans font-bold">${aiHighlightedPoint.label}</div>`
+            ));
+        }
+        
+        marker.addTo(map.current);
+        aiMarkerRef.current = marker;
+        
+        // Fly to the point
+        map.current.flyTo({
+            center: [aiHighlightedPoint.lon, aiHighlightedPoint.lat],
+            zoom: Math.max(map.current.getZoom(), 10),
+            duration: 1000
+        });
+    } else {
+        // Clear marker
+        if (aiMarkerRef.current) {
+            aiMarkerRef.current.remove();
+            aiMarkerRef.current = null;
+        }
     }
+  }, [aiHighlightedPoint]);
 
+  // Effect to handle AI highlighted segment from props
+  useEffect(() => {
+    if (!map.current || !map.current.isStyleLoaded()) return;
+    
+    const source = map.current.getSource('ai-highlight-segment') as maplibregl.GeoJSONSource;
+    if (!source) return;
+    
+    if (aiHighlightedSegment && points && points.length > 0) {
+        const start = Math.max(0, aiHighlightedSegment.startIndex);
+        const end = Math.min(points.length - 1, aiHighlightedSegment.endIndex);
+        
+        const segmentPoints = points.slice(start, end + 1);
+        
+        source.setData({
+            type: 'FeatureCollection',
+            features: [{
+                type: 'Feature',
+                properties: {},
+                geometry: {
+                    type: 'LineString',
+                    coordinates: segmentPoints.map(p => [p.lon, p.lat])
+                }
+            }]
+        });
+        
+        // Fit to segment bounds
+        if (segmentPoints.length > 0) {
+            const bounds = new maplibregl.LngLatBounds();
+            segmentPoints.forEach(p => bounds.extend([p.lon, p.lat]));
+            map.current.fitBounds(bounds, { padding: 100, duration: 1000 });
+        }
+    } else {
+        // Clear segment
+        source.setData({ type: 'FeatureCollection', features: [] });
+    }
+  }, [aiHighlightedSegment, points]);
+
+  // Effect to display ML anomaly point markers
+  useEffect(() => {
+    if (!map.current || !map.current.isStyleLoaded()) return;
+
+    // Remove existing ML markers
+    mlMarkersRef.current.forEach(marker => marker.remove());
+    mlMarkersRef.current = [];
+
+    if (!showMLPoints || !mlAnomalyPoints || mlAnomalyPoints.length === 0) return;
+
+    // Layer color mapping
+    const layerColors: Record<string, string> = {
+        'Deep Dense': '#8b5cf6',    // Purple
+        'Deep CNN': '#f97316',      // Orange
+        'Transformer': '#06b6d4',   // Cyan
+        'Hybrid': '#ec4899'         // Pink
+    };
+
+    mlAnomalyPoints.forEach((pt) => {
+        const color = layerColors[pt.layer] || '#f59e0b';
+        
+        // Create marker element
+        const el = document.createElement('div');
+        el.className = 'ml-anomaly-marker';
+        el.style.cssText = `
+            width: 16px;
+            height: 16px;
+            background: ${color};
+            border: 2px solid white;
+            border-radius: 50%;
+            box-shadow: 0 0 8px ${color}80;
+            cursor: pointer;
+        `;
+        
+        const marker = new maplibregl.Marker({ element: el })
+            .setLngLat([pt.lon, pt.lat])
+            .setPopup(new maplibregl.Popup({ offset: 15 }).setHTML(`
+                <div class="text-gray-900 p-2 text-xs font-sans">
+                    <div class="font-bold border-b border-gray-300 pb-1 mb-1" style="color: ${color}">
+                        ${pt.layer} Anomaly
+                    </div>
+                    <div>Time: <span class="font-mono">${new Date(pt.timestamp * 1000).toLocaleTimeString()}</span></div>
+                    <div>Score: <span class="font-mono font-bold">${pt.point_score.toFixed(4)}</span></div>
+                    <div class="text-gray-500 mt-1">${pt.lat.toFixed(4)}, ${pt.lon.toFixed(4)}</div>
+                </div>
+            `))
+            .addTo(map.current!);
+        
+        mlMarkersRef.current.push(marker);
+    });
+  }, [mlAnomalyPoints, showMLPoints]);
+
+  // Learned Layers Visualization (Paths, Turns, SIDs, STARs)
+  useEffect(() => {
+    if (!map.current) return;
+
+    // Helper to add a source and layer safely
     const addLayerSafe = (id: string, color: string, dashArray: number[], type: 'line' | 'fill' = 'line') => {
         if (!map.current!.getSource(id)) {
             try {
-                console.log(`[MapComponent] Adding source and layer: ${id}`);
                 map.current!.addSource(id, {
                     type: 'geojson',
                     data: { type: 'FeatureCollection', features: [] }
                 });
                 
                 const beforeId = map.current!.getLayer('route-line') ? 'route-line' : undefined;
-                console.log(`[MapComponent] Inserting layer ${id} before: ${beforeId}`);
-                
+
                 const paint: any = type === 'line' ? {
                     'line-color': color,
                     'line-width': 2,
@@ -229,99 +641,147 @@ export const MapComponent: React.FC<MapComponentProps> = ({ points, secondaryPoi
                     paint: paint
                 } as any, beforeId);
             } catch (e) {
-                console.error(`[MapComponent] Error adding ${id} layer`, e);
+                // Layer already exists or other error - ignore
             }
-        } else {
-             console.log(`[MapComponent] Source ${id} already exists.`);
-        }
+        } 
     };
 
-    addLayerSafe('paths-loose', '#a78bfa', [2, 2], 'line');    // Purple dashed for loose
-    addLayerSafe('paths-strict', '#10b981', [], 'line');       // Green solid for strict
-    addLayerSafe('learned-turns', '#facc15', [], 'fill');      // Yellow fill for turns
+    // Create all layer sources
+    addLayerSafe('learned-paths', '#4CAF50', [], 'line');           // Green solid for paths
+    addLayerSafe('learned-turns', '#FF9800', [], 'fill');           // Orange fill for turns
+    addLayerSafe('learned-sids', '#2196F3', [5, 5], 'line');        // Blue dashed for SIDs
+    addLayerSafe('learned-stars', '#E91E63', [5, 5], 'line');       // Pink dashed for STARs
 
-    const updateSource = (id: string, visible: boolean, data: any[]) => {
-        const source = map.current!.getSource(id) as maplibregl.GeoJSONSource;
-        if (!source) {
-            console.warn(`[MapComponent] Source ${id} not found during update.`);
-            return;
+    // Helper to create circle polygon from center and radius
+    const createCirclePolygon = (lat: number, lon: number, radiusNm: number) => {
+        const radiusKm = radiusNm * 1.852;
+        const numPoints = 32;
+        const coords: [number, number][] = [];
+        const distanceX = radiusKm / (111.320 * Math.cos(lat * Math.PI / 180));
+        const distanceY = radiusKm / 110.574;
+
+        for (let i = 0; i < numPoints; i++) {
+            const theta = (i / numPoints) * (2 * Math.PI);
+            const x = distanceX * Math.cos(theta);
+            const y = distanceY * Math.sin(theta);
+            coords.push([lon + x, lat + y]);
         }
+        coords.push(coords[0]); // Close the polygon
+        return coords;
+    };
 
-        console.log(`[MapComponent] Updating ${id}: Visible=${visible}, Count=${data?.length}`);
+    // Update paths source
+    const updatePaths = () => {
+        const source = map.current!.getSource('learned-paths') as maplibregl.GeoJSONSource;
+        if (!source) return;
 
-        if (visible && data) {
-            let features: any[] = [];
-            
-            if (id === 'learned-turns') {
-                 // Create circles for turns
-                 features = data.map((turn: any) => {
-                    // Simple circle approximation
-                    const center = [turn.centroid_lon, turn.centroid_lat];
-                    const radiusKm = (turn.radius_nm || 1) * 1.852;
-                    const points = 32;
-                    const coords = [];
-                    const distanceX = radiusKm / (111.320 * Math.cos(center[1] * Math.PI / 180));
-                    const distanceY = radiusKm / 110.574;
-
-                    for (let i = 0; i < points; i++) {
-                        const theta = (i / points) * (2 * Math.PI);
-                        const x = distanceX * Math.cos(theta);
-                        const y = distanceY * Math.sin(theta);
-                        coords.push([center[0] + x, center[1] + y]);
-                    }
-                    coords.push(coords[0]);
-
-                    return {
-                        type: 'Feature',
-                        properties: { 
-                            cluster_id: turn.cluster_id,
-                            avg_alt: turn.avg_alt
-                        },
-                        geometry: {
-                            type: 'Polygon',
-                            coordinates: [coords]
-                        }
-                    };
-                 });
-            } else {
-                // Lines for paths
-                features = data.map((flow: any) => ({
-                    type: 'Feature',
-                    properties: { flow_id: flow.flow_id },
+        if (showPaths && learnedLayers?.paths && learnedLayers.paths.length > 0) {
+            const features = learnedLayers.paths
+                .filter(path => path.centerline && path.centerline.length >= 2)
+                .map(path => ({
+                    type: 'Feature' as const,
+                    properties: { 
+                        id: path.id,
+                        origin: path.origin,
+                        destination: path.destination,
+                        member_count: path.member_count
+                    },
                     geometry: {
-                        type: 'LineString',
-                        coordinates: flow.centroid_path.map((p: any) => [p.lon, p.lat])
+                        type: 'LineString' as const,
+                        coordinates: path.centerline.map(p => [p.lon, p.lat])
                     }
                 }));
-            }
-
-            console.log(`[MapComponent] Setting ${features.length} features for ${id}`);
-            source.setData({ type: 'FeatureCollection', features: features });
+            source.setData({ type: 'FeatureCollection', features });
         } else {
-            console.log(`[MapComponent] Clearing features for ${id}`);
             source.setData({ type: 'FeatureCollection', features: [] });
         }
     };
 
-    if (learnedPaths && learnedPaths.layers) {
-        // Handle both old format (object with flows property) and new format (direct array)
-        const getFlows = (layer: any) => {
-            if (Array.isArray(layer)) return layer;
-            return layer?.flows || [];
-        };
+    // Update turns source
+    const updateTurns = () => {
+        const source = map.current!.getSource('learned-turns') as maplibregl.GeoJSONSource;
+        if (!source) return;
 
-        const strictFlows = getFlows(learnedPaths.layers.strict);
-        const looseFlows = getFlows(learnedPaths.layers.loose);
-        const turnsData = learnedPaths.layers.turns || [];
-        
-        updateSource('paths-strict', showStrict, strictFlows);
-        updateSource('paths-loose', showLoose, looseFlows);
-        updateSource('learned-turns', showTurns, turnsData);
-    } else {
-        console.log("[MapComponent] No learned paths data structure found.");
-    }
+        if (showTurns && learnedLayers?.turns && learnedLayers.turns.length > 0) {
+            const features = learnedLayers.turns.map(turn => ({
+                type: 'Feature' as const,
+                properties: { 
+                    id: turn.id,
+                    avg_alt_ft: turn.avg_alt_ft,
+                    radius_nm: turn.radius_nm,
+                    member_count: turn.member_count
+                },
+                geometry: {
+                    type: 'Polygon' as const,
+                    coordinates: [createCirclePolygon(turn.lat, turn.lon, turn.radius_nm)]
+                }
+            }));
+            source.setData({ type: 'FeatureCollection', features });
+        } else {
+            source.setData({ type: 'FeatureCollection', features: [] });
+        }
+    };
 
-  }, [showStrict, showLoose, showTurns, learnedPaths]);
+    // Update SIDs source
+    const updateSids = () => {
+        const source = map.current!.getSource('learned-sids') as maplibregl.GeoJSONSource;
+        if (!source) return;
+
+        if (showSids && learnedLayers?.sids && learnedLayers.sids.length > 0) {
+            const features = learnedLayers.sids
+                .filter(proc => proc.centerline && proc.centerline.length >= 2)
+                .map(proc => ({
+                    type: 'Feature' as const,
+                    properties: { 
+                        id: proc.id,
+                        airport: proc.airport,
+                        type: proc.type,
+                        member_count: proc.member_count
+                    },
+                    geometry: {
+                        type: 'LineString' as const,
+                        coordinates: proc.centerline.map(p => [p.lon, p.lat])
+                    }
+                }));
+            source.setData({ type: 'FeatureCollection', features });
+        } else {
+            source.setData({ type: 'FeatureCollection', features: [] });
+        }
+    };
+
+    // Update STARs source
+    const updateStars = () => {
+        const source = map.current!.getSource('learned-stars') as maplibregl.GeoJSONSource;
+        if (!source) return;
+
+        if (showStars && learnedLayers?.stars && learnedLayers.stars.length > 0) {
+            const features = learnedLayers.stars
+                .filter(proc => proc.centerline && proc.centerline.length >= 2)
+                .map(proc => ({
+                    type: 'Feature' as const,
+                    properties: { 
+                        id: proc.id,
+                        airport: proc.airport,
+                        type: proc.type,
+                        member_count: proc.member_count
+                    },
+                    geometry: {
+                        type: 'LineString' as const,
+                        coordinates: proc.centerline.map(p => [p.lon, p.lat])
+                    }
+                }));
+            source.setData({ type: 'FeatureCollection', features });
+        } else {
+            source.setData({ type: 'FeatureCollection', features: [] });
+        }
+    };
+
+    // Update all sources
+    updatePaths();
+    updateTurns();
+    updateSids();
+    updateStars();
+  }, [showPaths, showTurns, showSids, showStars, learnedLayers]);
 
   useEffect(() => {
     if (!map.current) return;
@@ -335,11 +795,16 @@ export const MapComponent: React.FC<MapComponentProps> = ({ points, secondaryPoi
     const secondarySource = map.current.getSource('secondary-route') as maplibregl.GeoJSONSource;
     const secondaryPointsSource = map.current.getSource('secondary-points') as maplibregl.GeoJSONSource;
     
-    // Reset markers
+    // Reset markers (but preserve AI marker)
     const markers = document.getElementsByClassName('maplibregl-marker');
-    while (markers.length > 0) {
-      markers[0].remove();
+    const markersToRemove: Element[] = [];
+    for (let i = 0; i < markers.length; i++) {
+        if (!markers[i].classList.contains('ai-highlight-marker') && 
+            !markers[i].querySelector('.ai-highlight-marker')) {
+            markersToRemove.push(markers[i]);
+        }
     }
+    markersToRemove.forEach(m => m.remove());
 
     if (points.length === 0) {
         source.setData({
@@ -495,34 +960,120 @@ export const MapComponent: React.FC<MapComponentProps> = ({ points, secondaryPoi
   }, [points, secondaryPoints, anomalyTimestamps]);
 
   return (
-    <div className="relative w-full h-full">
+    <div className="relative w-full h-full" id="map-root">
         <div ref={mapContainer} className="w-full h-full" />
+        
+        {/* Clear AI Highlights Button */}
+        {(aiHighlightedPoint || aiHighlightedSegment) && onClearAIHighlights && (
+            <button
+                onClick={onClearAIHighlights}
+                className="absolute top-4 left-4 z-10 px-3 py-2 rounded-lg shadow-lg text-xs font-medium 
+                           bg-amber-500 text-white hover:bg-amber-600 transition-colors
+                           flex items-center gap-2"
+            >
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                    <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
+                </svg>
+                Clear AI Highlight
+            </button>
+        )}
+        
         <div className="absolute top-4 right-4 z-10 flex flex-col gap-2">
             <button 
-                onClick={() => setShowStrict(!showStrict)}
+                onClick={() => setShowPaths(!showPaths)}
                 className={`px-3 py-2 rounded shadow text-xs font-medium opacity-90 transition-colors ${
-                    showStrict ? 'bg-green-600 text-white' : 'bg-gray-800 text-gray-300 hover:bg-gray-700'
+                    showPaths ? 'bg-green-600 text-white' : 'bg-gray-800 text-gray-300 hover:bg-gray-700'
                 }`}
+                title={`${learnedLayers?.paths?.length || 0} flight paths`}
             >
-                {showStrict ? "Hide Strict Paths" : "Show Strict Paths"}
-            </button>
-            <button 
-                onClick={() => setShowLoose(!showLoose)}
-                className={`px-3 py-2 rounded shadow text-xs font-medium opacity-90 transition-colors ${
-                    showLoose ? 'bg-purple-600 text-white' : 'bg-gray-800 text-gray-300 hover:bg-gray-700'
-                }`}
-            >
-                {showLoose ? "Hide Loose Paths" : "Show Loose Paths"}
+                {showPaths ? "Hide Paths" : "Show Paths"}
             </button>
             <button 
                 onClick={() => setShowTurns(!showTurns)}
                 className={`px-3 py-2 rounded shadow text-xs font-medium opacity-90 transition-colors ${
-                    showTurns ? 'bg-yellow-600 text-white' : 'bg-gray-800 text-gray-300 hover:bg-gray-700'
+                    showTurns ? 'bg-orange-600 text-white' : 'bg-gray-800 text-gray-300 hover:bg-gray-700'
                 }`}
+                title={`${learnedLayers?.turns?.length || 0} turn zones`}
             >
                 {showTurns ? "Hide Turns" : "Show Turns"}
             </button>
+            <button 
+                onClick={() => setShowSids(!showSids)}
+                className={`px-3 py-2 rounded shadow text-xs font-medium opacity-90 transition-colors ${
+                    showSids ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-300 hover:bg-gray-700'
+                }`}
+                title={`${learnedLayers?.sids?.length || 0} SID procedures`}
+            >
+                {showSids ? "Hide SIDs" : "Show SIDs"}
+            </button>
+            <button 
+                onClick={() => setShowStars(!showStars)}
+                className={`px-3 py-2 rounded shadow text-xs font-medium opacity-90 transition-colors ${
+                    showStars ? 'bg-pink-600 text-white' : 'bg-gray-800 text-gray-300 hover:bg-gray-700'
+                }`}
+                title={`${learnedLayers?.stars?.length || 0} STAR procedures`}
+            >
+                {showStars ? "Hide STARs" : "Show STARs"}
+            </button>
+            {mlAnomalyPoints && mlAnomalyPoints.length > 0 && (
+                <button 
+                    onClick={() => setShowMLPoints(!showMLPoints)}
+                    className={`px-3 py-2 rounded shadow text-xs font-medium opacity-90 transition-colors ${
+                        showMLPoints ? 'bg-purple-600 text-white' : 'bg-gray-800 text-gray-300 hover:bg-gray-700'
+                    }`}
+                >
+                    {showMLPoints ? "Hide ML Points" : "Show ML Points"}
+                </button>
+            )}
         </div>
+        
+        {/* CSS for AI Highlight Marker Animation */}
+        <style>{`
+            .ai-highlight-marker {
+                position: relative;
+                width: 24px;
+                height: 24px;
+            }
+            
+            .ai-marker-center {
+                position: absolute;
+                top: 50%;
+                left: 50%;
+                transform: translate(-50%, -50%);
+                width: 12px;
+                height: 12px;
+                background: #f59e0b;
+                border: 2px solid white;
+                border-radius: 50%;
+                box-shadow: 0 0 8px rgba(245, 158, 11, 0.8);
+            }
+            
+            .ai-marker-pulse {
+                position: absolute;
+                top: 50%;
+                left: 50%;
+                transform: translate(-50%, -50%);
+                width: 24px;
+                height: 24px;
+                background: rgba(245, 158, 11, 0.4);
+                border-radius: 50%;
+                animation: ai-pulse 1.5s ease-out infinite;
+            }
+            
+            @keyframes ai-pulse {
+                0% {
+                    transform: translate(-50%, -50%) scale(1);
+                    opacity: 1;
+                }
+                100% {
+                    transform: translate(-50%, -50%) scale(2.5);
+                    opacity: 0;
+                }
+            }
+        `}</style>
     </div>
   );
-};
+});
+
+// Display name for debugging
+MapComponent.displayName = 'MapComponent';

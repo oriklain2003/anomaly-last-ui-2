@@ -1,16 +1,16 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
-import { Sidebar } from './components/Sidebar';
-import { MapComponent } from './components/MapComponent';
+import { Sidebar, type SidebarMode } from './components/Sidebar';
+import { MapComponent, type MLAnomalyPoint } from './components/MapComponent';
 import { ChatInterface } from './components/ChatInterface';
 import { ReportPanel } from './components/ReportPanel';
-import { fetchLiveTrack, fetchResearchTrack, fetchUnifiedTrack } from './api';
+import { fetchLiveTrack, fetchResearchTrack, fetchUnifiedTrack, fetchFeedbackTrack } from './api';
 import type { AnomalyReport, FlightTrack } from './types';
 import { List, Map as MapIcon, FileText, Bot } from 'lucide-react';
 import clsx from 'clsx';
 import { ALERT_AUDIO_SRC } from './constants';
 
 export function MobileApp() {
-    const [mode, setMode] = useState<'historical' | 'realtime' | 'research' | 'rules'>('historical');
+    const [mode, setMode] = useState<SidebarMode>('historical');
     const [selectedAnomaly, setSelectedAnomaly] = useState<AnomalyReport | null>(null);
     const [flightData, setFlightData] = useState<FlightTrack | null>(null);
     const [loadingTrack, setLoadingTrack] = useState(false);
@@ -25,7 +25,11 @@ export function MobileApp() {
             // Switch to Map tab when an anomaly is selected
             setActiveTab('map');
             
-            const fetcher = mode === 'rules' ? fetchUnifiedTrack : (mode === 'research' ? fetchResearchTrack : fetchLiveTrack);
+            const fetcher = mode === 'feedback'
+                ? fetchFeedbackTrack
+                : (mode === 'rules' || mode === 'ai-results')
+                    ? fetchUnifiedTrack
+                    : (mode === 'research' ? fetchResearchTrack : fetchLiveTrack);
             
             fetcher(selectedAnomaly.flight_id)
                 .then(track => {
@@ -92,6 +96,37 @@ export function MobileApp() {
         return Array.from(timestamps);
     }, [selectedAnomaly, flightData]);
 
+    // Extract ML anomaly points for map visualization
+    const mlAnomalyPoints = useMemo((): MLAnomalyPoint[] => {
+        if (!selectedAnomaly || !selectedAnomaly.full_report) return [];
+
+        const points: MLAnomalyPoint[] = [];
+        const report = selectedAnomaly.full_report;
+
+        const layerMap: Record<string, string> = {
+            'layer_3_deep_dense': 'Deep Dense',
+            'layer_4_deep_cnn': 'Deep CNN',
+            'layer_5_transformer': 'Transformer',
+            'layer_6_hybrid': 'Hybrid'
+        };
+
+        Object.entries(layerMap).forEach(([key, layerName]) => {
+            const layerData = report[key];
+            if (layerData?.anomaly_points && layerData.is_anomaly) {
+                layerData.anomaly_points.forEach((pt: any) => {
+                    points.push({
+                        lat: pt.lat,
+                        lon: pt.lon,
+                        timestamp: pt.timestamp,
+                        point_score: pt.point_score,
+                        layer: layerName
+                    });
+                });
+            }
+        });
+
+        return points;
+    }, [selectedAnomaly]);
 
     return (
         <div className="flex h-screen w-full flex-col bg-background-dark text-white overflow-hidden">
@@ -129,6 +164,7 @@ export function MobileApp() {
                     <MapComponent 
                         points={flightData?.points || []} 
                         anomalyTimestamps={anomalyTimestamps}
+                        mlAnomalyPoints={mlAnomalyPoints}
                     />
                     {loadingTrack && (
                         <div className="absolute inset-0 flex items-center justify-center bg-black/50 z-50">
@@ -144,6 +180,7 @@ export function MobileApp() {
                             anomaly={selectedAnomaly} 
                             onClose={() => setActiveTab('map')} 
                             className="col-span-12 w-full h-full"
+                            mode={mode}
                         />
                     ) : (
                         <div className="flex flex-col items-center justify-center h-full text-white/60">

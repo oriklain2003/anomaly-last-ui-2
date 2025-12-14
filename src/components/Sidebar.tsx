@@ -1,18 +1,21 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { ChevronLeft, ChevronRight, Search, Radio, Filter, Beaker, Calendar, List, ArrowLeft, Plane } from 'lucide-react';
-import { fetchLiveAnomalies, fetchResearchAnomalies, fetchRules, fetchFlightsByRule } from '../api';
+import { ChevronLeft, ChevronRight, Search, Radio, Filter, Beaker, Calendar, List, ArrowLeft, Plane, History, Sparkles } from 'lucide-react';
+import { fetchLiveAnomalies, fetchResearchAnomalies, fetchRules, fetchFlightsByRule, fetchFeedbackHistory as apiFetchFeedbackHistory } from '../api';
 import type { AnomalyReport } from '../types';
 import clsx from 'clsx';
 import { ALERT_AUDIO_SRC, SOUND_COOLDOWN_MS } from '../constants';
 
+export type SidebarMode = 'historical' | 'realtime' | 'research' | 'rules' | 'feedback' | 'ai-results';
+
 interface SidebarProps {
     onSelectAnomaly: (anomaly: AnomalyReport) => void;
     selectedAnomalyId?: string;
-    mode: 'historical' | 'realtime' | 'research' | 'rules';
-    setMode: (mode: 'historical' | 'realtime' | 'research' | 'rules') => void;
+    mode: SidebarMode;
+    setMode: (mode: SidebarMode) => void;
     selectedDate: Date;
     setSelectedDate: (date: Date) => void;
     className?: string;
+    aiResultFlights?: AnomalyReport[];
 }
 
 const LoadingPlane: React.FC<{ message?: string }> = ({ message = 'Searching anomalies...' }) => (
@@ -35,7 +38,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
     setMode, 
     selectedDate, 
     setSelectedDate, 
-    className 
+    className,
+    aiResultFlights = []
 }) => {
     const [anomalies, setAnomalies] = useState<AnomalyReport[]>([]);
     const [loading, setLoading] = useState(false);
@@ -51,12 +55,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
     const [selectedLayerCombo, setSelectedLayerCombo] = useState<string[]>([]);
     const [selectedVersion, setSelectedVersion] = useState('All');
     const [showFilters, setShowFilters] = useState(false);
+    
+    // Feedback Mode Specific Filters
+    const [showNormalFeedback, setShowNormalFeedback] = useState(false);
 
     const audioRef = useRef<HTMLAudioElement | null>(null);
     const lastSoundTimeRef = useRef(0);
 
     const triggerOptions = ['All', 'Combination', 'Rules', 'XGBoost', 'DeepDense', 'DeepCNN', 'Transformer', 'Hybrid'];
-    const versionOptions = ['All', 'v1', 'v2', 'v3'];
+    const versionOptions = ['All', 'v1', 'v2', 'v3', 'v4'];
 
     // Realtime tracking
     const lastFetchTimeRef = useRef<number>(0);
@@ -95,6 +102,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
         if (mode === 'rules') {
             fetchRulesList();
+        } else if (mode === 'feedback') {
+            fetchFeedbackHistory();
+        } else if (mode === 'ai-results') {
+            // AI results are managed externally via props
+            setLoading(false);
         } else if (mode === 'historical' || mode === 'research') {
             fetchHistoricalOrResearch();
         } else {
@@ -168,6 +180,34 @@ export const Sidebar: React.FC<SidebarProps> = ({
         } catch (error: any) {
             if (error?.name === 'AbortError') return;
             console.error("Error fetching data:", error);
+            setAnomalies([]);
+        } finally {
+            finishSearch(controller);
+        }
+    };
+
+    const fetchFeedbackHistory = async () => {
+        const controller = startNewSearch();
+        setLoading(true);
+        setAnomalies([]);
+        try {
+            const start = new Date(selectedDate);
+            start.setHours(0, 0, 0, 0);
+            const end = new Date(selectedDate);
+            end.setHours(23, 59, 59, 999);
+
+            const data = await apiFetchFeedbackHistory(
+                Math.floor(start.getTime() / 1000),
+                Math.floor(end.getTime() / 1000),
+                100
+            );
+            if (controller.signal.aborted) return;
+            
+            // Data is already in AnomalyReport format from the API
+            setAnomalies(data);
+        } catch (error: any) {
+            if (error?.name === 'AbortError') return;
+            console.error("Error fetching feedback history:", error);
             setAnomalies([]);
         } finally {
             finishSearch(controller);
@@ -255,8 +295,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
         }
     };
 
+    // Use AI results when in ai-results mode, otherwise use fetched anomalies
+    const sourceAnomalies = mode === 'ai-results' ? aiResultFlights : anomalies;
+    
     const filteredAnomalies = Array.from(
-        anomalies.reduce((map, a) => {
+        sourceAnomalies.reduce((map, a) => {
             if (!map.has(a.flight_id)) map.set(a.flight_id, a);
             return map;
         }, new Map<string, AnomalyReport>()).values()
@@ -277,9 +320,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
         const cutoffTimestampV2 = new Date('2025-07-08T20:00:00Z').getTime() / 1000;
         const cutoffTimestampV3 = new Date('2025-07-17T00:00:00Z').getTime() / 1000;
+        const cutoffTimestampV4 = new Date('2025-11-01T00:00:00Z').getTime() / 1000;
         
         let version = 'v1';
-        if (a.timestamp >= cutoffTimestampV3) {
+        if (a.timestamp >= cutoffTimestampV4) {
+            version = 'v4';
+        } else if (a.timestamp >= cutoffTimestampV3) {
             version = 'v3';
         } else if (a.timestamp >= cutoffTimestampV2) {
             version = 'v2';
@@ -289,8 +335,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
         const matchesScore = score >= minScore;
         
-        return matchesSearch && matchesScore && matchesTrigger && matchesVersion;
+        // In feedback mode, only show confirmed anomalies (user_label = 1) unless showNormalFeedback is true
+        const matchesFeedback = mode === 'feedback' 
+            ? (showNormalFeedback ? true : (a.user_label === 1 || a.user_label === undefined)) 
+            : true;
+
+        return matchesSearch && matchesScore && matchesTrigger && matchesVersion && matchesFeedback;
     });
+
+    // Count hidden normal flights for feedback mode
+    const feedbackHiddenCount = mode === 'feedback' && !showNormalFeedback
+        ? sourceAnomalies.filter(a => a.user_label === 0).length
+        : 0;
 
     const changeDate = (days: number) => {
         const newDate = new Date(selectedDate);
@@ -315,7 +371,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     return (
         <aside className={clsx("flex flex-col gap-6 overflow-y-auto h-full pr-2", className || "col-span-3")}>
             
-            {/* Mode Switcher */}
+            {/* Mode Switcher - Top Row */}
             <div className="bg-surface rounded-xl p-1 flex gap-1">
                 <button 
                     onClick={() => setMode('historical')}
@@ -358,8 +414,40 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 </button>
             </div>
 
-            {/* Date Filter (Only visible in Historical/Research Mode) */}
-            {(mode === 'historical' || mode === 'research') && (
+            {/* Mode Switcher - Bottom Row */}
+            <div className="bg-surface rounded-xl p-1 flex gap-1 -mt-4">
+                <button 
+                    onClick={() => setMode('feedback')}
+                    className={clsx(
+                        "flex-1 py-2 rounded-lg text-sm font-bold transition-all flex items-center justify-center gap-2",
+                        mode === 'feedback' ? "bg-primary text-background-dark" : "text-white/60 hover:text-white"
+                    )}
+                >
+                    <History className="size-4" />
+                    Feedback
+                </button>
+                {/* AI Results tab - only shown when there are results */}
+                {aiResultFlights.length > 0 && (
+                    <button 
+                        onClick={() => setMode('ai-results')}
+                        className={clsx(
+                            "flex-1 py-2 rounded-lg text-sm font-bold transition-all flex items-center justify-center gap-2 animate-in slide-in-from-right-2 duration-300",
+                            mode === 'ai-results' 
+                                ? "bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white" 
+                                : "text-white/60 hover:text-white bg-gradient-to-r from-violet-500/20 to-fuchsia-500/20 border border-violet-500/30"
+                        )}
+                    >
+                        <Sparkles className={clsx("size-4", mode === 'ai-results' && "animate-pulse")} />
+                        AI Results
+                        <span className="ml-1 px-1.5 py-0.5 text-[10px] bg-white/20 rounded-full font-bold">
+                            {aiResultFlights.length}
+                        </span>
+                    </button>
+                )}
+            </div>
+
+            {/* Date Filter (Only visible in Historical/Research/Feedback Mode) */}
+            {(mode === 'historical' || mode === 'research' || mode === 'feedback') && (
                 <div className="bg-surface rounded-xl p-4 flex flex-col gap-4 shrink-0 animate-in fade-in slide-in-from-top-2">
                     <p className="text-white text-base font-bold leading-tight">Filter by Date</p>
                     <div className="flex items-center p-1 justify-between">
@@ -451,6 +539,21 @@ export const Sidebar: React.FC<SidebarProps> = ({
                             </div>
                         )}
 
+                        {/* Header for AI Results */}
+                        {mode === 'ai-results' && (
+                            <div className="flex items-center gap-2 border-b border-white/5 pb-2">
+                                <div className="p-1.5 rounded-lg bg-gradient-to-r from-violet-500/20 to-fuchsia-500/20">
+                                    <Sparkles className="size-4 text-violet-400" />
+                                </div>
+                                <div>
+                                    <p className="text-sm font-bold text-white">AI Search Results</p>
+                                    <p className="text-[10px] text-white/40">
+                                        {aiResultFlights.length} flight{aiResultFlights.length !== 1 ? 's' : ''} found by AI
+                                    </p>
+                                </div>
+                            </div>
+                        )}
+
                         {/* Search Bar with Filter Toggle */}
                         <div className="flex items-center gap-2">
                     <label className="flex flex-col w-full h-12 flex-1">
@@ -480,6 +583,24 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 {/* Advanced Filters */}
                 {showFilters && (
                     <div className="bg-background-dark rounded-lg p-3 animate-in slide-in-from-top-2 space-y-4">
+                        {/* Feedback Mode Filters */}
+                        {mode === 'feedback' && (
+                            <div>
+                                <p className="text-xs text-white/60 font-bold uppercase mb-2">Feedback View</p>
+                                <label className="flex items-center gap-2 cursor-pointer group">
+                                    <input 
+                                        type="checkbox"
+                                        checked={showNormalFeedback}
+                                        onChange={(e) => setShowNormalFeedback(e.target.checked)}
+                                        className="w-4 h-4 rounded border-white/20 bg-white/5 text-primary focus:ring-primary focus:ring-offset-background-dark"
+                                    />
+                                    <span className="text-sm text-white/80 group-hover:text-white transition-colors">
+                                        Show flights marked as Normal
+                                    </span>
+                                </label>
+                            </div>
+                        )}
+
                         {/* Confidence Score Filter */}
                         <div>
                             <p className="text-xs text-white/60 font-bold uppercase mb-2">Minimum Confidence Score: {minScore}%</p>
@@ -582,12 +703,26 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 )}
 
                 <div className="flex flex-col gap-2 overflow-y-auto pr-2 -mr-2 flex-1">
-                    {loading && anomalies.length === 0 ? (
+                    {loading && sourceAnomalies.length === 0 ? (
                         <LoadingPlane message={mode === 'realtime' ? "Scanning for live anomalies..." : "Searching anomalies..."} />
                     ) : filteredAnomalies.length === 0 ? (
-                        <p className="text-white/60 text-center py-4">
-                            {mode === 'realtime' ? "No anomalies detected recently." : "No anomalies match criteria."}
-                        </p>
+                        <div className="flex flex-col items-center justify-center text-center py-8 gap-2">
+                            <p className="text-white/60">
+                                {mode === 'ai-results' 
+                                    ? "Ask the AI to find flights. Try: \"Show me turn anomalies from yesterday\"" 
+                                    : mode === 'realtime' 
+                                        ? "No anomalies detected recently." 
+                                        : "No flights match criteria."}
+                            </p>
+                            {feedbackHiddenCount > 0 && (
+                                <button 
+                                    onClick={() => setShowNormalFeedback(true)}
+                                    className="text-xs text-primary hover:underline"
+                                >
+                                    Show {feedbackHiddenCount} hidden normal flights
+                                </button>
+                            )}
+                        </div>
                     ) : (
                         filteredAnomalies.map((anomaly) => {
                              // Determine severity color based on confidence score
@@ -605,13 +740,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
                              // Version Badge Logic
                              const cutoffTimestampV2 = new Date('2025-07-08T20:00:00Z').getTime() / 1000;
                              const cutoffTimestampV3 = new Date('2025-07-21T00:00:00Z').getTime() / 1000;
+                             const cutoffTimestampV4 = new Date('2025-11-01T00:00:00Z').getTime() / 1000;
                              
                              let versionLabel = 'v1 OLD';
                              let versionStyle = "bg-zinc-800 text-zinc-500 border-zinc-700";
 
-                             if (anomaly.timestamp >= cutoffTimestampV3) {
-                                 versionLabel = 'v3 NEW';
-                                 versionStyle = "badge-v2 animate-gradient-x";
+                             if (anomaly.timestamp >= cutoffTimestampV4) {
+                                 versionLabel = 'v4 NEW';
+                                 versionStyle = "badge-v4 animate-gradient-x";
+                             } else if (anomaly.timestamp >= cutoffTimestampV3) {
+                                 versionLabel = 'v3 OLD';
+                                 versionStyle = "bg-zinc-800 text-zinc-500 border-zinc-700";
                              } else if (anomaly.timestamp >= cutoffTimestampV2) {
                                  versionLabel = 'v2 OLD';
                                  versionStyle = "bg-zinc-800 text-zinc-500 border-zinc-700";

@@ -3,6 +3,7 @@ import { Send, Bot, User, X, MessageSquare, Trash2 } from 'lucide-react';
 import clsx from 'clsx';
 import type { ChatMessage } from '../chatTypes';
 import type { TrackPoint } from '../types';
+import { TypewriterMarkdown } from '../utils/markdown';
 
 /* ============================================================
    SYSTEM PROMPT MOVED TO BACKEND
@@ -16,34 +17,7 @@ interface ChatInterfaceProps {
   className?: string;
 }
 
-const TypewriterText: React.FC<{ text: string; shouldAnimate: boolean }> = ({ text, shouldAnimate }) => {
-  const [displayedText, setDisplayedText] = useState(shouldAnimate ? '' : text);
-  const hasAnimatedRef = useRef(false);
-
-  useEffect(() => {
-    if (!shouldAnimate) {
-        setDisplayedText(text);
-        return;
-    }
-    
-    if (hasAnimatedRef.current) return;
-
-    setDisplayedText('');
-    let i = 0;
-    const timer = setInterval(() => {
-      setDisplayedText((_prev) => text.slice(0, i + 1));
-      i++;
-      if (i >= text.length) {
-        clearInterval(timer);
-        hasAnimatedRef.current = true;
-      }
-    }, 15);
-
-    return () => clearInterval(timer);
-  }, [text, shouldAnimate]);
-
-  return <span>{displayedText}</span>;
-};
+// TypewriterText replaced by TypewriterMarkdown (also supports hidden <thinking> blocks)
 
 export const ChatInterface: React.FC<ChatInterfaceProps> = ({ data, flightId, flightPoints, embedded, className }) => {
   const [isOpen, setIsOpen] = useState(false);
@@ -274,9 +248,9 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ data, flightId, fl
               )}
             >
               {msg.role === 'assistant' ? (
-                <TypewriterText 
-                    text={msg.content} 
-                    shouldAnimate={i === messages.length - 1} 
+                <TypewriterMarkdown
+                  text={msg.content}
+                  shouldAnimate={i === messages.length - 1}
                 />
               ) : (
                 msg.content

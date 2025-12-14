@@ -9,7 +9,7 @@ import clsx from 'clsx';
 export interface ReplayEvent {
     timestamp: number;
     description: string;
-    type: 'proximity' | 'deviation' | 'other';
+    type: 'proximity' | 'deviation' | 'ml_anomaly' | 'other';
     lat?: number;
     lon?: number;
 }
@@ -33,6 +33,27 @@ type TelemetryData =
 
 const COLORS = ['#3b82f6', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6'];
 
+// Airports list from rule_config.json
+const AIRPORTS = [
+    { code: "LLBG", name: "Ben Gurion Intl", lat: 32.011389, lon: 34.886667, elevation_ft: 135 },
+    { code: "LLER", name: "Ramon Intl", lat: 29.723704, lon: 35.01145, elevation_ft: 648 },
+    { code: "LLHA", name: "Haifa", lat: 32.809444, lon: 35.043056, elevation_ft: 28 },
+    { code: "LLBS", name: "Beersheba", lat: 31.287, lon: 34.723, elevation_ft: 886 },
+    { code: "LLOV", name: "Ovda", lat: 29.940, lon: 34.935, elevation_ft: 1492 },
+    { code: "LLNV", name: "Nevatim AFB", lat: 31.207, lon: 35.012, elevation_ft: 1312 },
+    { code: "LLMG", name: "Megiddo", lat: 32.597, lon: 35.228, elevation_ft: 217 },
+    { code: "LLHZ", name: "Herzliya", lat: 32.186, lon: 34.835, elevation_ft: 121 },
+    { code: "LCRA", name: "RAF Akrotiri", lat: 34.5900, lon: 32.9870, elevation_ft: 76 },
+    { code: "OLBA", name: "Beirut Rafic Hariri Intl", lat: 33.820889, lon: 35.488389, elevation_ft: 89 },
+    { code: "OLKA", name: "Rayak Air Base", lat: 33.850, lon: 35.987, elevation_ft: 2953 },
+    { code: "OJAI", name: "Queen Alia Intl (Amman)", lat: 31.722556, lon: 35.993214, elevation_ft: 2395 },
+    { code: "OJAM", name: "Amman Civil Airport (Marka)", lat: 31.9697, lon: 35.9917, elevation_ft: 2555 },
+    { code: "OJAQ", name: "King Hussein Intl (Aqaba)", lat: 29.611, lon: 35.018, elevation_ft: 170 },
+    { code: "OJMF", name: "Mafraq", lat: 32.356, lon: 36.259, elevation_ft: 2240 },
+    { code: "HEGR", name: "El Gora Airport", lat: 31.0686, lon: 34.1296, elevation_ft: 295 },
+    { code: "OSDI", name: "Damascus Intl", lat: 33.411, lon: 36.516, elevation_ft: 2020 }
+];
+
 export const ReplayModal: React.FC<ReplayModalProps> = ({ mainFlightId, secondaryFlightIds = [], events = [], onClose }) => {
     const mapContainer = useRef<HTMLDivElement>(null);
     const map = useRef<maplibregl.Map | null>(null);
@@ -49,6 +70,7 @@ export const ReplayModal: React.FC<ReplayModalProps> = ({ mainFlightId, secondar
     // Tools State
     const [showTools, setShowTools] = useState(false);
     const [distanceTool, setDistanceTool] = useState(true);
+    const [airportDistanceTool, setAirportDistanceTool] = useState(true);
 
     const animationRef = useRef<number | undefined>(undefined);
     const lastFrameTime = useRef<number>(0);
@@ -450,6 +472,22 @@ export const ReplayModal: React.FC<ReplayModalProps> = ({ mainFlightId, secondar
             .sort((a, b) => a.dist - b.dist);
     };
 
+    // Calculate distance to nearest airport
+    const getNearestAirport = (lat: number, lon: number) => {
+        if (!airportDistanceTool) return null;
+
+        let nearest: { code: string; name: string; dist: number } | null = null;
+        
+        for (const airport of AIRPORTS) {
+            const dist = getDistanceNM(lat, lon, airport.lat, airport.lon);
+            if (!nearest || dist < nearest.dist) {
+                nearest = { code: airport.code, name: airport.name, dist };
+            }
+        }
+        
+        return nearest;
+    };
+
     if (loading) {
         return (
             <div className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center backdrop-blur-sm">
@@ -536,6 +574,13 @@ export const ReplayModal: React.FC<ReplayModalProps> = ({ mainFlightId, secondar
                                     <span>Distance Calc</span>
                                     {distanceTool && <Check className="size-4 text-primary" />}
                                 </button>
+                                <button 
+                                    onClick={() => setAirportDistanceTool(!airportDistanceTool)}
+                                    className="w-full flex items-center justify-between p-2 rounded hover:bg-white/5 text-sm text-white transition-colors"
+                                >
+                                    <span>Nearest Airport</span>
+                                    {airportDistanceTool && <Check className="size-4 text-primary" />}
+                                </button>
                             </div>
                         )}
                     </div>
@@ -574,9 +619,10 @@ export const ReplayModal: React.FC<ReplayModalProps> = ({ mainFlightId, secondar
                                                 "text-[10px] font-bold uppercase px-1.5 py-0.5 rounded",
                                                 ev.type === 'proximity' ? "bg-red-500/20 text-red-300" :
                                                 ev.type === 'deviation' ? "bg-orange-500/20 text-orange-300" :
+                                                ev.type === 'ml_anomaly' ? "bg-purple-500/20 text-purple-300" :
                                                 "bg-blue-500/20 text-blue-300"
                                             )}>
-                                                {ev.type}
+                                                {ev.type === 'ml_anomaly' ? 'ML' : ev.type}
                                             </span>
                                             <span className="font-mono text-[10px] text-white/40">
                                                 {formatTime(ev.timestamp)}
@@ -601,9 +647,13 @@ export const ReplayModal: React.FC<ReplayModalProps> = ({ mainFlightId, secondar
                                 const tel = getCurrentTelemetry(f);
                                 if (!tel) return null;
 
-                                const distances = (tel.status !== 'waiting' && 'lat' in tel)
-                                    ? getDistancesToOthers(f.id, tel.lat, tel.lon)
-                                    : [];
+                                                const distances = (tel.status !== 'waiting' && 'lat' in tel)
+                                                    ? getDistancesToOthers(f.id, tel.lat, tel.lon)
+                                                    : [];
+                                                
+                                                const nearestAirport = (tel.status !== 'waiting' && 'lat' in tel)
+                                                    ? getNearestAirport(tel.lat, tel.lon)
+                                                    : null;
 
                                 return (
                                     <div key={f.id} className="bg-black/60 backdrop-blur border border-white/10 p-3 rounded-lg text-xs w-48 shadow-lg transition-all pointer-events-auto">
@@ -640,6 +690,19 @@ export const ReplayModal: React.FC<ReplayModalProps> = ({ mainFlightId, secondar
                                                                     <span className="font-mono font-bold text-primary">{d.dist.toFixed(1)} NM</span>
                                                                 </div>
                                                             ))}
+                                                        </div>
+                                                    </div>
+                                                )}
+
+                                                {nearestAirport && (
+                                                    <div className="col-span-2 mt-2">
+                                                        <div className="text-[10px] font-bold text-white/40 uppercase mb-1">Nearest Airport</div>
+                                                        <div className="flex justify-between items-center bg-emerald-500/10 px-1.5 py-1 rounded border border-emerald-500/20">
+                                                            <div className="flex flex-col">
+                                                                <span className="font-mono font-bold text-emerald-400">{nearestAirport.code}</span>
+                                                                <span className="text-[9px] text-white/50 truncate max-w-[100px]">{nearestAirport.name}</span>
+                                                            </div>
+                                                            <span className="font-mono font-bold text-emerald-300">{nearestAirport.dist.toFixed(1)} NM</span>
                                                         </div>
                                                     </div>
                                                 )}

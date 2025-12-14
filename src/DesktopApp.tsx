@@ -1,11 +1,13 @@
-import { useState, useEffect, useMemo, useRef } from 'react';
-import { Sidebar } from './components/Sidebar';
-import { MapComponent } from './components/MapComponent';
-import { ChatInterface } from './components/ChatInterface';
-import { ReportPanel } from './components/ReportPanel';
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { Link } from 'react-router-dom';
+import { Sidebar, type SidebarMode } from './components/Sidebar';
+import { MapComponent, type MapComponentHandle, type AIHighlightedPoint, type AIHighlightedSegment, type MLAnomalyPoint } from './components/MapComponent';
+import { AnalysisPanel } from './components/AnalysisPanel';
 import { SettingsModal } from './components/SettingsModal';
-import { fetchLiveTrack, fetchResearchTrack, fetchUnifiedTrack } from './api';
+import { ReasoningChat } from './components/ReasoningChat';
+import { fetchLiveTrack, fetchResearchTrack, fetchUnifiedTrack, fetchFeedbackTrack } from './api';
 import type { AnomalyReport, FlightTrack } from './types';
+import type { ProcessedActions } from './utils/aiActions';
 import { Settings, Bell } from 'lucide-react';
 import clsx from 'clsx';
 import { ALERT_AUDIO_SRC } from './constants';
@@ -17,8 +19,8 @@ export function DesktopApp() {
     const modeParam = params.get('mode');
     const dateParam = params.get('date');
     
-    const validModes = ['historical', 'realtime', 'research', 'rules'];
-    const initialMode = validModes.includes(modeParam || '') ? (modeParam as 'historical' | 'realtime' | 'research' | 'rules') : 'historical';
+    const validModes = ['historical', 'realtime', 'research', 'rules', 'feedback', 'ai-results'];
+    const initialMode = validModes.includes(modeParam || '') ? (modeParam as SidebarMode) : 'historical';
     
     // Parse date safely
     let initialDate = new Date();
@@ -38,7 +40,7 @@ export function DesktopApp() {
 
   const initialState = getInitialState();
 
-  const [mode, setMode] = useState<'historical' | 'realtime' | 'research' | 'rules'>(initialState.mode);
+  const [mode, setMode] = useState<SidebarMode>(initialState.mode);
   const [selectedDate, setSelectedDate] = useState<Date>(initialState.date);
   const [selectedAnomaly, setSelectedAnomaly] = useState<AnomalyReport | null>(null);
   const [flightData, setFlightData] = useState<FlightTrack | null>(null);
@@ -47,6 +49,18 @@ export function DesktopApp() {
   const [showReport, setShowReport] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const bellAudioRef = useRef<HTMLAudioElement | null>(null);
+  
+  // AI Highlight State
+  const [aiHighlightedPoint, setAiHighlightedPoint] = useState<AIHighlightedPoint | null>(null);
+  const [aiHighlightedSegment, setAiHighlightedSegment] = useState<AIHighlightedSegment | null>(null);
+  
+  // AI Reasoning Panel State
+  const [isAIPanelOpen, setIsAIPanelOpen] = useState(true);
+  const [aiResultFlights, setAiResultFlights] = useState<AnomalyReport[]>([]);
+  
+  // Map refs
+  const mapRef = useRef<MapComponentHandle>(null);
+  const mapContainerRef = useRef<HTMLDivElement>(null);
 
   // Sync state to URL
   useEffect(() => {
@@ -65,13 +79,26 @@ export function DesktopApp() {
     window.history.replaceState({}, '', newUrl);
   }, [mode, selectedDate]);
 
+  // Auto-switch away from ai-results mode when results are cleared
+  useEffect(() => {
+    if (mode === 'ai-results' && aiResultFlights.length === 0) {
+      setMode('historical');
+    }
+  }, [mode, aiResultFlights.length]);
+
   useEffect(() => {
     if (selectedAnomaly) {
         setLoadingTrack(true);
         setShowReport(true); // Open report when anomaly selected
         
+        // Clear AI highlights when switching flights
+        setAiHighlightedPoint(null);
+        setAiHighlightedSegment(null);
+        
         let fetcher: (id: string) => Promise<FlightTrack>;
-        if (mode === 'rules') {
+        if (mode === 'feedback') {
+            fetcher = fetchFeedbackTrack;
+        } else if (mode === 'rules' || mode === 'ai-results') {
             fetcher = fetchUnifiedTrack;
         } else if (mode === 'research') {
             fetcher = fetchResearchTrack;
@@ -117,6 +144,8 @@ export function DesktopApp() {
         setFlightData(null);
         setSecondaryFlightData(null);
         setShowReport(false);
+        setAiHighlightedPoint(null);
+        setAiHighlightedSegment(null);
     }
   }, [selectedAnomaly, mode]);
 
@@ -147,7 +176,37 @@ export function DesktopApp() {
     const handleCloseReport = () => {
         setShowReport(false);
         setSelectedAnomaly(null); // Deselect
+        setAiHighlightedPoint(null);
+        setAiHighlightedSegment(null);
     };
+
+    // Handle AI actions from the AnalysisPanel
+    const handleAIActions = useCallback((actions: ProcessedActions) => {
+        setAiHighlightedPoint(actions.highlightedPoint);
+        setAiHighlightedSegment(actions.highlightedSegment);
+        
+        // Handle zoom bounds if specified
+        if (actions.zoomBounds && mapRef.current) {
+            mapRef.current.fitBounds(
+                actions.zoomBounds.north,
+                actions.zoomBounds.south,
+                actions.zoomBounds.east,
+                actions.zoomBounds.west
+            );
+        }
+    }, []);
+
+    // Clear AI highlights
+    const handleClearAIHighlights = useCallback(() => {
+        setAiHighlightedPoint(null);
+        setAiHighlightedSegment(null);
+    }, []);
+
+    // Handle flights received from AI reasoning
+    const handleAIFlightsReceived = useCallback((flights: AnomalyReport[]) => {
+        setAiResultFlights(flights);
+        setMode('ai-results'); // Switch to AI Results tab
+    }, []);
 
     // Extract anomaly timestamps for visualization
     const anomalyTimestamps = useMemo(() => {
@@ -204,6 +263,38 @@ export function DesktopApp() {
         return Array.from(timestamps);
     }, [selectedAnomaly, flightData]);
 
+    // Extract ML anomaly points for map visualization
+    const mlAnomalyPoints = useMemo((): MLAnomalyPoint[] => {
+        if (!selectedAnomaly || !selectedAnomaly.full_report) return [];
+
+        const points: MLAnomalyPoint[] = [];
+        const report = selectedAnomaly.full_report;
+
+        const layerMap: Record<string, string> = {
+            'layer_3_deep_dense': 'Deep Dense',
+            'layer_4_deep_cnn': 'Deep CNN',
+            'layer_5_transformer': 'Transformer',
+            'layer_6_hybrid': 'Hybrid'
+        };
+
+        Object.entries(layerMap).forEach(([key, layerName]) => {
+            const layerData = report[key];
+            if (layerData?.anomaly_points && layerData.is_anomaly) {
+                layerData.anomaly_points.forEach((pt: any) => {
+                    points.push({
+                        lat: pt.lat,
+                        lon: pt.lon,
+                        timestamp: pt.timestamp,
+                        point_score: pt.point_score,
+                        layer: layerName
+                    });
+                });
+            }
+        });
+
+        return points;
+    }, [selectedAnomaly]);
+
     return (
     <div className="flex h-screen w-full flex-col bg-background-light dark:bg-background-dark text-white overflow-hidden">
       {/* Header */}
@@ -218,6 +309,12 @@ export function DesktopApp() {
             <h2 className="text-white text-xl font-bold leading-tight tracking-[-0.015em]">Onyx Anomaly Explorer</h2>
         </div>
         <div className="flex flex-1 justify-end gap-2">
+            <Link
+                to="/explorer"
+                className="flex h-10 px-3 items-center justify-center rounded-lg bg-surface-highlight text-white/80 hover:text-white transition-colors border border-white/10 text-sm font-bold no-underline"
+            >
+                Explorer
+            </Link>
             <button
                 onClick={() => setIsSettingsOpen(true)}
                 className="flex h-10 w-10 items-center justify-center rounded-lg bg-surface-highlight text-white/80 hover:text-white transition-colors border border-white/10"
@@ -234,75 +331,147 @@ export function DesktopApp() {
         </div>
       </header>
 
-      <main className="flex-1 grid grid-cols-12 gap-6 p-6 overflow-hidden h-[calc(100vh-65px)]">
+      <main className="flex-1 flex gap-6 p-6 overflow-hidden h-[calc(100vh-65px)]">
         
-        {/* Sidebar */}
-        <Sidebar 
-            onSelectAnomaly={setSelectedAnomaly} 
-            selectedAnomalyId={selectedAnomaly?.flight_id} 
-            mode={mode}
-            setMode={setMode}
-            selectedDate={selectedDate}
-            setSelectedDate={setSelectedDate}
-        />
-
-        {/* Map Area */}
-        <section className={clsx(
-            "bg-surface rounded-xl relative overflow-hidden border border-white/5 transition-all duration-300",
-            showReport ? "col-span-6" : "col-span-9"
+        {/* Left Section: Sidebar + Map + Report */}
+        <div className={clsx(
+            "flex-1 grid grid-cols-12 gap-6 transition-all duration-300",
+            isAIPanelOpen ? "mr-0" : "mr-0"
         )}>
-            <MapComponent 
-                points={flightData?.points || []} 
-                secondaryPoints={secondaryFlightData?.points}
-                anomalyTimestamps={anomalyTimestamps}
+            {/* Sidebar */}
+            <Sidebar 
+                onSelectAnomaly={setSelectedAnomaly} 
+                selectedAnomalyId={selectedAnomaly?.flight_id} 
+                mode={mode}
+                setMode={setMode}
+                selectedDate={selectedDate}
+                setSelectedDate={setSelectedDate}
+                aiResultFlights={aiResultFlights}
             />
-            
-            {/* Legend Overlay */}
-            <div className="absolute bottom-4 right-4 bg-background-dark/80 backdrop-blur-sm p-3 rounded-lg border border-white/10 text-white z-10">
-                <p className="text-sm font-bold mb-2">Legend</p>
-                <div className="flex flex-col gap-2 text-xs">
-                    <div className="flex items-center gap-2">
-                        <span className="h-2.5 w-2.5 rounded-full bg-red-500"></span>
-                        <span>Anomaly Event</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                        <span className="h-2.5 w-2.5 rounded-full bg-blue-500"></span>
-                        <span>Normal Flight Path</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                        <span className="h-2.5 w-2.5 rounded-full bg-green-500"></span>
-                        <span>Start</span>
-                    </div>
-                     <div className="flex items-center gap-2">
-                        <span className="h-2.5 w-2.5 rounded-full bg-red-500"></span>
-                        <span>End</span>
-                    </div>
-                    {secondaryFlightData && (
-                         <div className="flex items-center gap-2">
-                            <span className="h-2.5 w-2.5 rounded-full bg-orange-400"></span>
-                            <span>Conflicting Flight</span>
-                        </div>
-                    )}
-                </div>
-            </div>
-        </section>
 
-        {/* Report Panel */}
-        {showReport && selectedAnomaly && (
-            <ReportPanel 
-                anomaly={selectedAnomaly} 
-                onClose={handleCloseReport} 
+            {/* Map Area */}
+            <section 
+                ref={mapContainerRef}
+                className={clsx(
+                    "bg-surface rounded-xl relative overflow-hidden border border-white/5 transition-all duration-300",
+                    showReport ? "col-span-6" : "col-span-9"
+                )}
+            >
+                <MapComponent 
+                    ref={mapRef}
+                    points={flightData?.points || []} 
+                    secondaryPoints={secondaryFlightData?.points}
+                    anomalyTimestamps={anomalyTimestamps}
+                    mlAnomalyPoints={mlAnomalyPoints}
+                    aiHighlightedPoint={aiHighlightedPoint}
+                    aiHighlightedSegment={aiHighlightedSegment}
+                    onClearAIHighlights={handleClearAIHighlights}
+                />
+                
+                {/* Legend Overlay */}
+                <div className="absolute bottom-4 right-4 bg-background-dark/80 backdrop-blur-sm p-3 rounded-lg border border-white/10 text-white z-10">
+                    <p className="text-sm font-bold mb-2">Legend</p>
+                    <div className="flex flex-col gap-2 text-xs">
+                        <div className="flex items-center gap-2">
+                            <span className="h-2.5 w-2.5 rounded-full bg-red-500"></span>
+                            <span>Anomaly Event</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                            <span className="h-2.5 w-2.5 rounded-full bg-blue-500"></span>
+                            <span>Normal Flight Path</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                            <span className="h-2.5 w-2.5 rounded-full bg-green-500"></span>
+                            <span>Start</span>
+                        </div>
+                         <div className="flex items-center gap-2">
+                            <span className="h-2.5 w-2.5 rounded-full bg-red-500"></span>
+                            <span>End</span>
+                        </div>
+                        {secondaryFlightData && (
+                             <div className="flex items-center gap-2">
+                                <span className="h-2.5 w-2.5 rounded-full bg-orange-400"></span>
+                                <span>Conflicting Flight</span>
+                            </div>
+                        )}
+                        {(aiHighlightedPoint || aiHighlightedSegment) && (
+                            <div className="flex items-center gap-2">
+                                <span className="h-2.5 w-2.5 rounded-full bg-amber-500 animate-pulse"></span>
+                                <span>AI Highlight</span>
+                            </div>
+                        )}
+                        {/* ML Anomaly Points Legend */}
+                        {mlAnomalyPoints.length > 0 && (
+                            <>
+                                <div className="border-t border-white/10 pt-2 mt-1">
+                                    <p className="text-[10px] text-white/50 font-bold mb-1">ML Anomaly Points</p>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                    <span className="h-2.5 w-2.5 rounded-full bg-purple-500"></span>
+                                    <span>Deep Dense</span>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                    <span className="h-2.5 w-2.5 rounded-full bg-orange-500"></span>
+                                    <span>Deep CNN</span>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                    <span className="h-2.5 w-2.5 rounded-full bg-cyan-500"></span>
+                                    <span>Transformer</span>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                    <span className="h-2.5 w-2.5 rounded-full bg-pink-500"></span>
+                                    <span>Hybrid</span>
+                                </div>
+                            </>
+                        )}
+                    </div>
+                </div>
+            </section>
+
+            {/* Analysis Panel (Report + AI Assistant) */}
+            {showReport && selectedAnomaly && (
+                <AnalysisPanel 
+                    anomaly={selectedAnomaly}
+                    flightPoints={flightData?.points || []}
+                    onClose={handleCloseReport}
+                    onAIActions={handleAIActions}
+                    onFlyTo={(lat, lon, zoom) => mapRef.current?.flyTo(lat, lon, zoom)}
+                    mode={mode}
+                />
+            )}
+        </div>
+
+        {/* AI Reasoning Panel - Always visible, collapsible */}
+        <div className={clsx(
+            "transition-all duration-300 shrink-0",
+            isAIPanelOpen ? "w-[380px]" : "w-0"
+        )}>
+            {isAIPanelOpen && (
+                <ReasoningChat
+                    isOpen={isAIPanelOpen}
+                    onToggle={() => setIsAIPanelOpen(!isAIPanelOpen)}
+                    onFlightsReceived={handleAIFlightsReceived}
+                    selectedFlight={selectedAnomaly && flightData ? {
+                        flightId: selectedAnomaly.flight_id,
+                        callsign: selectedAnomaly.callsign,
+                        points: flightData.points,
+                        report: selectedAnomaly.full_report
+                    } : null}
+                />
+            )}
+        </div>
+
+        {/* Collapsed AI Panel Toggle */}
+        {!isAIPanelOpen && (
+            <ReasoningChat
+                isOpen={false}
+                onToggle={() => setIsAIPanelOpen(true)}
+                onFlightsReceived={handleAIFlightsReceived}
+                selectedFlight={null}
             />
         )}
 
       </main>
-
-      {/* Chat - Always present, passed selected flight data */}
-      <ChatInterface 
-        data={selectedAnomaly?.full_report} 
-        flightId={selectedAnomaly?.flight_id || "No Flight Selected"} 
-        flightPoints={flightData?.points || []}
-      />
 
       <SettingsModal 
         isOpen={isSettingsOpen} 
@@ -311,4 +480,3 @@ export function DesktopApp() {
     </div>
   )
 }
-
