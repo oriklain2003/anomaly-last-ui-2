@@ -49,7 +49,7 @@ export function DesktopApp() {
 
 function DesktopAppContent() {
   const { t } = useTranslation();
-  const { isHebrew } = useLanguage();
+  useLanguage(); // Initialize language context
   const initialState = getInitialState();
 
   const [mode, setMode] = useState<SidebarMode>(initialState.mode);

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { X, AlertTriangle, CheckCircle, PlayCircle, Radio, Plane, Navigation, MapPin, TrendingDown, RotateCcw, Compass, ShieldAlert, Wifi, RefreshCw, Loader2, ExternalLink, ChevronDown, Skull, CircleDot, Target, GraduationCap, Shield, Eye, Satellite } from 'lucide-react';
+import { X, AlertTriangle, CheckCircle, PlayCircle, Radio, Plane, Navigation, MapPin, RotateCcw, Compass, ShieldAlert, Wifi, RefreshCw, Loader2, ExternalLink, ChevronDown, Skull, CircleDot, Target, GraduationCap, Shield, Eye, Satellite } from 'lucide-react';
 import type { AnomalyReport } from '../types';
 import { submitFeedback, fetchCallsignFromResearch, reanalyzeFeedbackFlight } from '../api';
 import clsx from 'clsx';

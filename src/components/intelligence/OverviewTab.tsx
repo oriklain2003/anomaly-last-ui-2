@@ -13,8 +13,6 @@ import {
   fetchTaggedStatsOverview,
   fetchTaggedFlightsPerDay,
   fetchTaggedMilitaryStats,
-  type TaggedOverviewStats,
-  type TaggedFlightPerDay,
   type TaggedMilitaryStats,
   type MonthlyFlightStats
 } from '../../api';
@@ -86,11 +84,14 @@ export function OverviewTab({ startTs, endTs, cacheKey = 0, useTaggedDb = true }
               callsign: f.callsign,
               country: f.country,
               aircraft_type: f.type,
-              pattern_type: 'transit',
+              pattern_type: 'transit' as const,
+              type: 'transit',
               duration_minutes: 0,
               avg_altitude_ft: 0,
               lat: 0,
-              lon: 0
+              lon: 0,
+              locations: [],
+              frequency: 0
             }));
             setMilitaryPatterns(patterns);
           }
@@ -355,11 +356,11 @@ export function OverviewTab({ startTs, endTs, cacheKey = 0, useTaggedDb = true }
             </div>
             {airspaceRisk && (
               <div className={`mt-3 text-xs font-medium ${
-                airspaceRisk.risk_level === 'HIGH' ? 'text-red-400' :
-                airspaceRisk.risk_level === 'MEDIUM' ? 'text-amber-400' :
+                airspaceRisk.risk_level === 'high' ? 'text-red-400' :
+                airspaceRisk.risk_level === 'medium' ? 'text-amber-400' :
                 'text-green-400'
               }`}>
-                {airspaceRisk.risk_level} RISK
+                {airspaceRisk.risk_level.toUpperCase()} RISK
               </div>
             )}
           </div>
@@ -386,7 +387,7 @@ export function OverviewTab({ startTs, endTs, cacheKey = 0, useTaggedDb = true }
       </div>
 
       {/* Quick Insights */}
-      {(gpsJamming.length > 0 || militaryPatterns.length > 0 || (airspaceRisk && airspaceRisk.risk_level !== 'LOW')) && (
+      {(gpsJamming.length > 0 || militaryPatterns.length > 0 || (airspaceRisk && airspaceRisk.risk_level !== 'low')) && (
         <div className="mt-6 bg-surface-highlight rounded-xl p-4 border border-white/10">
           <h4 className="text-sm font-semibold text-white/80 mb-3">Quick Insights</h4>
           <div className="space-y-2">
@@ -431,11 +432,11 @@ export function OverviewTab({ startTs, endTs, cacheKey = 0, useTaggedDb = true }
                 </span>
               </div>
             )}
-            {airspaceRisk && airspaceRisk.risk_level !== 'LOW' && (
+            {airspaceRisk && airspaceRisk.risk_level !== 'low' && (
               <div className="flex items-center gap-2 text-sm">
-                <div className={`w-2 h-2 rounded-full ${airspaceRisk.risk_level === 'HIGH' ? 'bg-red-400' : 'bg-amber-400'}`}></div>
+                <div className={`w-2 h-2 rounded-full ${airspaceRisk.risk_level === 'high' ? 'bg-red-400' : 'bg-amber-400'}`}></div>
                 <span className="text-white/70">
-                  Airspace risk is <span className={airspaceRisk.risk_level === 'HIGH' ? 'text-red-400' : 'text-amber-400'}>
+                  Airspace risk is <span className={airspaceRisk.risk_level === 'high' ? 'text-red-400' : 'text-amber-400'}>
                     {airspaceRisk.risk_level}
                   </span> - {airspaceRisk.factors?.slice(0, 2).map(f => f.name).join(', ') || 'multiple factors'}
                 </span>

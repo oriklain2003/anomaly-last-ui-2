@@ -17,7 +17,6 @@ import {
     type TrafficAircraft,
     type AircraftProfile,
     type RouteWaypoint,
-    type Conflict,
     type LearnedPath,
 } from './api';
 import { SimulationModal } from './components/SimulationModal';
@@ -27,9 +26,7 @@ import {
     MapPin, 
     Navigation, 
     ChevronLeft, 
-    Plus, 
     X, 
-    Trophy,
     Route,
     Ruler,
     Shield,
@@ -37,7 +34,6 @@ import {
     Loader2,
     AlertCircle,
     RefreshCw,
-    Crosshair,
     Clock,
     AlertTriangle,
     Zap,
@@ -141,7 +137,7 @@ export const RoutePlannerPage: React.FC = () => {
     const [selectedRoute, setSelectedRoute] = useState<AdvancedPlannedRoute | null>(null);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
-    const [loadingAirports, setLoadingAirports] = useState(true);
+    const [, setLoadingAirports] = useState(true);
     
     // Traffic
     const [traffic, setTraffic] = useState<TrafficAircraft[]>([]);
@@ -715,7 +711,7 @@ export const RoutePlannerPage: React.FC = () => {
         }
 
         // Create features for all learned paths
-        const features = learnedPaths.map((path, index) => ({
+        const features = learnedPaths.map((path) => ({
             type: 'Feature' as const,
             properties: {
                 id: path.id,
@@ -2144,7 +2140,7 @@ export const RoutePlannerPage: React.FC = () => {
                                             )}
                                         </>
                                     )}
-                                    {selectedRoute?.conflicts.length > 0 && (
+                                    {selectedRoute?.conflicts && selectedRoute.conflicts.length > 0 && (
                                         <div className="flex items-center gap-2">
                                             <div className="w-3 h-3 rounded-full bg-red-500" />
                                             <span className="text-slate-300">Conflict Zone</span>

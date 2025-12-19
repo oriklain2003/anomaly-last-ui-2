@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Shield, Radar, TrendingUp, Info, MapPin, AlertTriangle, Clock, Search, Dna, Building2, Plane, Target, ArrowUp, ArrowDown, MinusCircle, PlusCircle } from 'lucide-react';
+import { Shield, Radar, TrendingUp, Info, MapPin, AlertTriangle, Clock, Search, Dna, Plane, Target, ArrowUp, ArrowDown, MinusCircle, PlusCircle } from 'lucide-react';
 import { StatCard } from './StatCard';
 import { TableCard, Column } from './TableCard';
 import { ChartCard } from './ChartCard';
@@ -54,7 +54,7 @@ export function IntelligenceTab({ startTs, endTs, cacheKey = 0 }: IntelligenceTa
   const loadData = async () => {
     setLoading(true);
     try {
-      const [efficiencyData, holdingData, jammingData, militaryData, clustersData, activityData, routesData] = await Promise.all([
+      const [efficiencyData, holdingData, jammingData, militaryData, clustersData, routesData, activityData] = await Promise.all([
         fetchAirlineEfficiency(startTs, endTs),
         fetchHoldingPatterns(startTs, endTs),
         fetchGPSJamming(startTs, endTs),
@@ -68,8 +68,8 @@ export function IntelligenceTab({ startTs, endTs, cacheKey = 0 }: IntelligenceTa
       setGpsJamming(jammingData);
       setMilitaryPatterns(militaryData);
       setPatternClusters(clustersData);
-      setAirlineActivity(activityData);
       setMilitaryRoutes(routesData);
+      setAirlineActivity(activityData);
     } catch (error) {
       console.error('Failed to load intelligence data:', error);
     } finally {
@@ -203,7 +203,7 @@ export function IntelligenceTab({ startTs, endTs, cacheKey = 0 }: IntelligenceTa
       }
 
       // Add markers (clustered or individual)
-      clusters.forEach((patterns, gridKey) => {
+      clusters.forEach((patterns, _gridKey) => {
         if (patterns.length === 0) return;
         
         // Calculate cluster center
@@ -1269,7 +1269,7 @@ export function IntelligenceTab({ startTs, endTs, cacheKey = 0 }: IntelligenceTa
                           <div className="flex items-center gap-2">
                             {flight.flight_id}
                             {flight.is_anomaly && (
-                              <AlertTriangle className="w-3 h-3 text-orange-400" title="Anomaly" />
+                              <AlertTriangle className="w-3 h-3 text-orange-400" />
                             )}
                           </div>
                         </td>

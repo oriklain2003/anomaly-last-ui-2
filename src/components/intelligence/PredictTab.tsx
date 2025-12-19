@@ -3,7 +3,7 @@ import { Activity, AlertTriangle, TrendingUp, Shield, Search, Target, Navigation
 import { StatCard } from './StatCard';
 import { ChartCard } from './ChartCard';
 import { fetchAirspaceRisk, fetchSafetyForecast, fetchTrajectoryPrediction, predictHostileIntent } from '../../api';
-import type { AirspaceRisk, SafetyForecast, RiskFactor } from '../../types';
+import type { AirspaceRisk, SafetyForecast } from '../../types';
 import type { TrajectoryPrediction } from '../../api';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import maplibregl from 'maplibre-gl';

@@ -171,20 +171,11 @@ export const MissionSimulationModal: React.FC<MissionSimulationModalProps> = ({
 
     // Initialize flights from mission
     useEffect(() => {
-        console.log('=== MissionSimulationModal: Initializing ===');
-        console.log('mission:', mission);
-        console.log('mission.aircraft:', mission.aircraft);
-        console.log('attackTargets:', attackTargets);
-        console.log('origin:', origin);
-        
         const missionFlights: SimulatedMissionFlight[] = [];
         let maxEta = 0;
 
         // Add mission aircraft
         for (const aircraft of mission.aircraft) {
-            console.log('Processing aircraft:', aircraft.callsign);
-            console.log('  - route:', aircraft.route);
-            console.log('  - assignedTargets:', aircraft.assignedTargets);
             // Build the path from either planned_path or centerline
             let path: Array<{ lat: number; lon: number; alt_ft: number; time_offset_min: number }> = [];
             
@@ -271,10 +262,6 @@ export const MissionSimulationModal: React.FC<MissionSimulationModalProps> = ({
             const eta = path[path.length - 1].time_offset_min;
             if (eta > maxEta) maxEta = eta;
 
-            console.log('  - path generated with', path.length, 'points');
-            console.log('  - first point:', path[0]);
-            console.log('  - last point:', path[path.length - 1]);
-            
             missionFlights.push({
                 flight_id: aircraft.id,
                 callsign: aircraft.callsign,
@@ -291,9 +278,6 @@ export const MissionSimulationModal: React.FC<MissionSimulationModalProps> = ({
                 status: 'en_route'
             });
         }
-        
-        console.log('Total missionFlights:', missionFlights.length);
-        console.log('missionFlights:', missionFlights);
 
         // Add other traffic
         for (let i = 0; i < Math.min(traffic.length, 10); i++) {
@@ -324,17 +308,9 @@ export const MissionSimulationModal: React.FC<MissionSimulationModalProps> = ({
 
     // Initialize map
     useEffect(() => {
-        console.log('=== Map init effect ===');
-        console.log('mapContainerRef.current:', !!mapContainerRef.current);
-        console.log('mapContainerReady:', mapContainerReady);
-        console.log('map.current:', !!map.current);
-        
         if (!mapContainerRef.current || !mapContainerReady || map.current) {
-            console.log('Skipping map init - container:', !!mapContainerRef.current, 'ready:', mapContainerReady, 'map:', !!map.current);
             return;
         }
-
-        console.log('Creating map...');
         map.current = new maplibregl.Map({
             container: mapContainerRef.current,
             style: MAP_STYLE,
@@ -344,7 +320,6 @@ export const MissionSimulationModal: React.FC<MissionSimulationModalProps> = ({
         });
 
         map.current.on('load', () => {
-            console.log('=== Map loaded! ===');
             // Add routes source
             map.current!.addSource('mission-routes', {
                 type: 'geojson',
@@ -419,19 +394,12 @@ export const MissionSimulationModal: React.FC<MissionSimulationModalProps> = ({
 
     // Update map layers
     useEffect(() => {
-        console.log('=== Map layers update ===');
-        console.log('map.current:', !!map.current);
-        console.log('isStyleLoaded:', map.current?.isStyleLoaded());
-        console.log('flights:', flights.length);
-        
         if (!map.current || !map.current.isStyleLoaded()) {
-            console.log('Map not ready, skipping layer update');
             return;
         }
 
         // Update routes
         const routeSource = map.current.getSource('mission-routes') as maplibregl.GeoJSONSource;
-        console.log('routeSource:', !!routeSource);
         
         if (routeSource) {
             const routeFeatures = flights
@@ -444,7 +412,6 @@ export const MissionSimulationModal: React.FC<MissionSimulationModalProps> = ({
                         coordinates: f.predicted_path.map(p => [p.lon, p.lat])
                     }
                 }));
-            console.log('routeFeatures:', routeFeatures.length);
             routeSource.setData({ type: 'FeatureCollection', features: routeFeatures });
         }
 
@@ -469,7 +436,6 @@ export const MissionSimulationModal: React.FC<MissionSimulationModalProps> = ({
 
         // Update aircraft positions
         const aircraftSource = map.current.getSource('aircraft') as maplibregl.GeoJSONSource;
-        console.log('aircraftSource:', !!aircraftSource);
         
         if (aircraftSource) {
             const aircraftFeatures = flights.map(f => {
@@ -497,10 +463,6 @@ export const MissionSimulationModal: React.FC<MissionSimulationModalProps> = ({
                     }
                 };
             });
-            console.log('aircraftFeatures:', aircraftFeatures.length);
-            if (aircraftFeatures.length > 0) {
-                console.log('First aircraft:', aircraftFeatures[0]);
-            }
             aircraftSource.setData({ type: 'FeatureCollection', features: aircraftFeatures });
         }
     }, [flights, currentTime, attackTargets, destroyedTargets]);
@@ -635,7 +597,7 @@ export const MissionSimulationModal: React.FC<MissionSimulationModalProps> = ({
             <div className="flex-1 flex">
                 {/* Map */}
                 <div className="flex-1 relative">
-                    <div ref={mapContainer} className="absolute inset-0" />
+                    <div ref={setMapContainer} className="absolute inset-0" />
                     
                     {/* Time display */}
                     <div className="absolute top-4 left-4 bg-slate-900/90 backdrop-blur-sm rounded-lg px-4 py-2 border border-slate-700">

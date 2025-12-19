@@ -3,8 +3,8 @@ import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { 
     X, Play, Pause, SkipBack, SkipForward, 
-    Plane, MapPin, AlertTriangle, Clock, 
-    Navigation, Zap, Users, Target, Shield,
+    AlertTriangle, 
+    Users, Target,
     ChevronDown, ChevronUp, Eye, EyeOff
 } from 'lucide-react';
 import clsx from 'clsx';
@@ -152,7 +152,7 @@ const destinationPoint = (lat: number, lon: number, bearing: number, distance_nm
 const findMatchingPath = (
     currentLat: number, 
     currentLon: number, 
-    heading: number,
+    _heading: number,
     destLat: number,
     destLon: number,
     learnedPaths: LearnedPath[]
