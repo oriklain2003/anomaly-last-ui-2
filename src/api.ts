@@ -1,4 +1,11 @@
-import { AnomalyReport, FlightTrack, TrackPoint, DataFlight, AIReasoningResponse } from './types';
+import { 
+    AnomalyReport, FlightTrack, TrackPoint, DataFlight, AIReasoningResponse,
+    AnomalyDNA, PatternCluster, SafetyForecast,
+    OverviewStats, EmergencyCodeStat, NearMissEvent, GoAroundStat,
+    FlightPerDay, SignalLossLocation, SignalLossMonthly, SignalLossHourly,
+    AirlineEfficiency, HoldingPatternAnalysis,
+    GPSJammingPoint, MilitaryPattern, AirspaceRisk
+} from './types';
 import type { AIAction } from './utils/aiActions';
 import type { ChatMessage } from './chatTypes';
 
@@ -16,6 +23,8 @@ export interface AIAnalyzeRequest {
     anomaly_report: any;
     selected_point?: { lat: number; lon: number; timestamp?: number };
     history?: { role: string; content: string }[];  // Conversation history
+    length?: 'short' | 'medium' | 'long'; // Desired response length
+    language?: 'en' | 'he'; // Output language
 }
 
 export interface AIAnalyzeResponse {
@@ -43,6 +52,15 @@ export const fetchResearchAnomalies = async (startTs: number, endTs: number): Pr
     const response = await fetch(`${API_BASE}/research/anomalies?start_ts=${startTs}&end_ts=${endTs}`);
     if (!response.ok) {
         throw new Error('Failed to fetch research anomalies');
+    }
+    return response.json();
+};
+
+// Fetch all flights for dashboard (normal from research + all from feedback_tagged)
+export const fetchDashboardFlights = async (startTs: number, endTs: number): Promise<AnomalyReport[]> => {
+    const response = await fetch(`${API_BASE}/dashboard/flights?start_ts=${startTs}&end_ts=${endTs}`);
+    if (!response.ok) {
+        throw new Error('Failed to fetch dashboard flights');
     }
     return response.json();
 };
@@ -241,6 +259,105 @@ export const fetchFeedbackHistory = async (startTs: number = 0, endTs?: number, 
     return response.json();
 };
 
+// Fetch from the new feedback_tagged.db (clean database)
+export const fetchTaggedFeedbackHistory = async (startTs: number = 0, endTs?: number, limit: number = 100): Promise<AnomalyReport[]> => {
+    const params = new URLSearchParams({
+        start_ts: startTs.toString(),
+        limit: limit.toString()
+    });
+    
+    if (endTs !== undefined) {
+        params.append('end_ts', endTs.toString());
+    }
+    
+    const response = await fetch(`${API_BASE}/feedback/tagged/history?${params}`);
+    if (!response.ok) {
+        throw new Error('Failed to fetch tagged feedback history');
+    }
+    return response.json();
+};
+
+// Fetch track from feedback_tagged.db
+export const fetchTaggedFeedbackTrack = async (flightId: string): Promise<FlightTrack> => {
+    const response = await fetch(`${API_BASE}/feedback/tagged/track/${flightId}`);
+    if (!response.ok) {
+        throw new Error('Failed to fetch tagged feedback track');
+    }
+    return response.json();
+};
+
+// Flight Metadata type
+export interface FlightMetadata {
+    flight_id: string;
+    callsign?: string;
+    flight_number?: string;
+    airline?: string;
+    airline_code?: string;
+    aircraft_type?: string;
+    aircraft_model?: string;
+    aircraft_registration?: string;
+    origin_airport?: string;
+    origin_lat?: number;
+    origin_lon?: number;
+    destination_airport?: string;
+    dest_lat?: number;
+    dest_lon?: number;
+    first_seen_ts?: number;
+    last_seen_ts?: number;
+    scheduled_departure?: string;
+    scheduled_arrival?: string;
+    flight_duration_sec?: number;
+    total_distance_nm?: number;
+    total_points?: number;
+    min_altitude_ft?: number;
+    max_altitude_ft?: number;
+    avg_altitude_ft?: number;
+    cruise_altitude_ft?: number;
+    min_speed_kts?: number;
+    max_speed_kts?: number;
+    avg_speed_kts?: number;
+    start_lat?: number;
+    start_lon?: number;
+    end_lat?: number;
+    end_lon?: number;
+    squawk_codes?: string;
+    emergency_squawk_detected?: boolean;
+    is_anomaly?: boolean;
+    is_military?: boolean;
+    military_type?: string;
+    flight_phase_summary?: string;
+    nearest_airport_start?: string;
+    nearest_airport_end?: string;
+    crossed_borders?: string;
+    signal_loss_events?: number;
+    data_quality_score?: number;
+    feedback?: {
+        rule_id?: number;
+        rule_name?: string;
+        comments?: string;
+        other_details?: string;
+        tagged_at?: number;
+    };
+}
+
+// Fetch flight metadata from feedback_tagged.db
+export const fetchTaggedFlightMetadata = async (flightId: string): Promise<FlightMetadata> => {
+    const response = await fetch(`${API_BASE}/feedback/tagged/metadata/${flightId}`);
+    if (!response.ok) {
+        throw new Error('Failed to fetch flight metadata');
+    }
+    return response.json();
+};
+
+// Fetch flight metadata from research.db
+export const fetchResearchFlightMetadata = async (flightId: string): Promise<FlightMetadata> => {
+    const response = await fetch(`${API_BASE}/research/metadata/${flightId}`);
+    if (!response.ok) {
+        throw new Error('Failed to fetch research flight metadata');
+    }
+    return response.json();
+};
+
 export const updateFeedback = async (feedbackId: number, params: UpdateFeedbackParams): Promise<void> => {
     const { ruleId, comments = "", otherDetails = "" } = params;
     
@@ -283,7 +400,7 @@ export const reanalyzeFeedbackFlight = async (flightId: string): Promise<Anomaly
  * Send a screenshot and question to the AI co-pilot for analysis.
  * Returns the AI's response text and optional map actions.
  */
-export const analyzeWithAI = async (request: AIAnalyzeRequest): Promise<AIAnalyzeResponse> => {
+export const analyzeWithAI = async (request: AIAnalyzeRequest, signal?: AbortSignal): Promise<AIAnalyzeResponse> => {
     const response = await fetch(`${API_BASE}/ai/analyze`, {
         method: 'POST',
         headers: {
@@ -296,8 +413,11 @@ export const analyzeWithAI = async (request: AIAnalyzeRequest): Promise<AIAnalyz
             flight_data: request.flight_data,
             anomaly_report: request.anomaly_report,
             selected_point: request.selected_point,
-            history: request.history || []
+            history: request.history || [],
+            length: request.length || 'medium',
+            language: request.language || 'en'
         }),
+        signal,
     });
     
     if (!response.ok) {
@@ -337,7 +457,8 @@ export interface ReasoningFlightContext {
 export const sendReasoningQuery = async (
     message: string,
     history: ChatMessage[],
-    flightContext?: ReasoningFlightContext
+    flightContext?: ReasoningFlightContext,
+    signal?: AbortSignal
 ): Promise<AIReasoningResponse> => {
     const body: any = {
         message,
@@ -357,6 +478,7 @@ export const sendReasoningQuery = async (
             'Content-Type': 'application/json',
         },
         body: JSON.stringify(body),
+        signal,
     });
     
     if (!response.ok) {
@@ -364,5 +486,1195 @@ export const sendReasoningQuery = async (
         throw new Error(errorData.detail || 'AI reasoning failed');
     }
     
+    return response.json();
+};
+
+// ============================================================
+// Intelligence Dashboard API Functions
+// ============================================================
+
+// Cache Management
+export const clearCache = async (): Promise<{ status: string; cleared_entries: number }> => {
+    const response = await fetch(`${API_BASE}/cache/clear`, { method: 'POST' });
+    if (!response.ok) throw new Error('Failed to clear cache');
+    return response.json();
+};
+
+export const getCacheInfo = async (): Promise<{ total_entries: number; valid_entries: number; expiry_seconds: number }> => {
+    const response = await fetch(`${API_BASE}/cache/info`);
+    if (!response.ok) throw new Error('Failed to get cache info');
+    return response.json();
+};
+
+// Level 1: Statistics
+export const fetchStatsOverview = async (startTs: number, endTs: number, forceRefresh = false): Promise<OverviewStats> => {
+    const url = `${API_BASE}/stats/overview?start_ts=${startTs}&end_ts=${endTs}${forceRefresh ? '&force_refresh=true' : ''}`;
+    const response = await fetch(url);
+    if (!response.ok) throw new Error('Failed to fetch overview stats');
+    return response.json();
+};
+
+export const fetchEmergencyCodes = async (startTs: number, endTs: number): Promise<EmergencyCodeStat[]> => {
+    const response = await fetch(`${API_BASE}/stats/safety/emergency-codes?start_ts=${startTs}&end_ts=${endTs}`);
+    if (!response.ok) throw new Error('Failed to fetch emergency codes');
+    return response.json();
+};
+
+export const fetchNearMissEvents = async (startTs: number, endTs: number, severity?: string): Promise<NearMissEvent[]> => {
+    const url = severity 
+        ? `${API_BASE}/stats/safety/near-miss?start_ts=${startTs}&end_ts=${endTs}&severity=${severity}`
+        : `${API_BASE}/stats/safety/near-miss?start_ts=${startTs}&end_ts=${endTs}`;
+    const response = await fetch(url);
+    if (!response.ok) throw new Error('Failed to fetch near-miss events');
+    return response.json();
+};
+
+export const fetchGoArounds = async (startTs: number, endTs: number, airport?: string): Promise<GoAroundStat[]> => {
+    const url = airport 
+        ? `${API_BASE}/stats/safety/go-arounds?start_ts=${startTs}&end_ts=${endTs}&airport=${airport}`
+        : `${API_BASE}/stats/safety/go-arounds?start_ts=${startTs}&end_ts=${endTs}`;
+    const response = await fetch(url);
+    if (!response.ok) throw new Error('Failed to fetch go-arounds');
+    return response.json();
+};
+
+// Go-around hourly distribution
+export interface GoAroundHourly {
+    hour: number;
+    count: number;
+    airports: Record<string, number>;
+}
+
+export const fetchGoAroundsHourly = async (startTs: number, endTs: number): Promise<GoAroundHourly[]> => {
+    const response = await fetch(`${API_BASE}/stats/safety/go-arounds/hourly?start_ts=${startTs}&end_ts=${endTs}`);
+    if (!response.ok) throw new Error('Failed to fetch go-arounds hourly');
+    return response.json();
+};
+
+// Monthly safety events breakdown
+export interface SafetyMonthly {
+    month: string;
+    emergency_codes: number;
+    near_miss: number;
+    go_arounds: number;
+    total_events: number;
+    affected_flights: number;
+}
+
+export const fetchSafetyMonthly = async (startTs: number, endTs: number): Promise<SafetyMonthly[]> => {
+    const response = await fetch(`${API_BASE}/stats/safety/monthly?start_ts=${startTs}&end_ts=${endTs}`);
+    if (!response.ok) throw new Error('Failed to fetch monthly safety stats');
+    return response.json();
+};
+
+// Near-miss geographic locations
+export interface NearMissLocation {
+    lat: number;
+    lon: number;
+    count: number;
+    severity_high: number;
+    severity_medium: number;
+}
+
+export const fetchNearMissLocations = async (startTs: number, endTs: number, limit = 50): Promise<NearMissLocation[]> => {
+    const response = await fetch(`${API_BASE}/stats/safety/near-miss/locations?start_ts=${startTs}&end_ts=${endTs}&limit=${limit}`);
+    if (!response.ok) throw new Error('Failed to fetch near-miss locations');
+    return response.json();
+};
+
+// Flights missing callsign/destination
+export interface FlightsMissingInfo {
+    no_callsign: number;
+    no_destination: number;
+    total_flights: number;
+}
+
+export const fetchFlightsMissingInfo = async (startTs: number, endTs: number): Promise<FlightsMissingInfo> => {
+    const response = await fetch(`${API_BASE}/stats/traffic/missing-info?start_ts=${startTs}&end_ts=${endTs}`);
+    if (!response.ok) throw new Error('Failed to fetch missing info stats');
+    return response.json();
+};
+
+// Safety events by flight phase
+export interface SafetyByPhase {
+    phases: {
+        cruise: { count: number; emergency: number; near_miss: number; go_around: number };
+        descent_climb: { count: number; emergency: number; near_miss: number; go_around: number };
+        approach: { count: number; emergency: number; near_miss: number; go_around: number };
+        unknown: { count: number; emergency: number; near_miss: number; go_around: number };
+    };
+    total_events: number;
+    percentages: Record<string, number>;
+}
+
+export const fetchSafetyByPhase = async (startTs: number, endTs: number): Promise<SafetyByPhase> => {
+    const response = await fetch(`${API_BASE}/stats/safety/by-phase?start_ts=${startTs}&end_ts=${endTs}`);
+    if (!response.ok) throw new Error('Failed to fetch safety by phase');
+    return response.json();
+};
+
+// Deviations by aircraft type
+export interface DeviationByType {
+    aircraft_type: string;
+    deviation_count: number;
+    avg_deviation_nm: number;
+    large_deviations: number;
+    unique_flights: number;
+    flights: string[];
+}
+
+export const fetchDeviationsByType = async (startTs: number, endTs: number): Promise<DeviationByType[]> => {
+    const response = await fetch(`${API_BASE}/stats/traffic/deviations-by-type?start_ts=${startTs}&end_ts=${endTs}`);
+    if (!response.ok) throw new Error('Failed to fetch deviations by type');
+    return response.json();
+};
+
+// Emergency aftermath analysis
+export interface EmergencyAftermath {
+    flight_id: string;
+    callsign: string;
+    emergency_code: string;
+    code_description: string;
+    timestamp: number;
+    outcome: 'landed_at_destination' | 'diverted' | 'returned_to_base' | 'go_around_then_landed' | 'continued_flight' | 'unknown';
+    landing_airport: string | null;
+    origin: string;
+    destination: string;
+    had_go_around: boolean;
+}
+
+export const fetchEmergencyAftermath = async (startTs: number, endTs: number): Promise<EmergencyAftermath[]> => {
+    const response = await fetch(`${API_BASE}/stats/safety/emergency-aftermath?start_ts=${startTs}&end_ts=${endTs}`);
+    if (!response.ok) throw new Error('Failed to fetch emergency aftermath');
+    return response.json();
+};
+
+// Bottleneck zones
+export interface BottleneckZone {
+    lat: number;
+    lon: number;
+    density_score: number;
+    flight_count: number;
+    holding_count: number;
+    avg_altitude: number;
+    flights_per_hour: number;
+    congestion_level: 'critical' | 'high' | 'moderate' | 'low';
+}
+
+export const fetchBottleneckZones = async (startTs: number, endTs: number, limit = 20): Promise<BottleneckZone[]> => {
+    const response = await fetch(`${API_BASE}/stats/traffic/bottlenecks?start_ts=${startTs}&end_ts=${endTs}&limit=${limit}`);
+    if (!response.ok) throw new Error('Failed to fetch bottleneck zones');
+    return response.json();
+};
+
+export const fetchFlightsPerDay = async (startTs: number, endTs: number, forceRefresh = false): Promise<FlightPerDay[]> => {
+    const url = `${API_BASE}/stats/traffic/flights-per-day?start_ts=${startTs}&end_ts=${endTs}${forceRefresh ? '&force_refresh=true' : ''}`;
+    const response = await fetch(url);
+    if (!response.ok) throw new Error('Failed to fetch flights per day');
+    return response.json();
+};
+
+export const fetchBusiestAirports = async (startTs: number, endTs: number, limit = 10, forceRefresh = false): Promise<any[]> => {
+    const url = `${API_BASE}/stats/traffic/busiest-airports?start_ts=${startTs}&end_ts=${endTs}&limit=${limit}${forceRefresh ? '&force_refresh=true' : ''}`;
+    const response = await fetch(url);
+    if (!response.ok) throw new Error('Failed to fetch busiest airports');
+    return response.json();
+};
+
+export const fetchSignalLoss = async (startTs: number, endTs: number): Promise<SignalLossLocation[]> => {
+    const response = await fetch(`${API_BASE}/stats/traffic/signal-loss?start_ts=${startTs}&end_ts=${endTs}`);
+    if (!response.ok) throw new Error('Failed to fetch signal loss');
+    return response.json();
+};
+
+export const fetchSignalLossMonthly = async (startTs: number, endTs: number): Promise<SignalLossMonthly[]> => {
+    const response = await fetch(`${API_BASE}/stats/traffic/signal-loss/monthly?start_ts=${startTs}&end_ts=${endTs}`);
+    if (!response.ok) throw new Error('Failed to fetch monthly signal loss');
+    return response.json();
+};
+
+export const fetchSignalLossHourly = async (startTs: number, endTs: number): Promise<SignalLossHourly[]> => {
+    const response = await fetch(`${API_BASE}/stats/traffic/signal-loss/hourly?start_ts=${startTs}&end_ts=${endTs}`);
+    if (!response.ok) throw new Error('Failed to fetch hourly signal loss');
+    return response.json();
+};
+
+// ============================================================================
+// Tagged Dashboard API (Optimized for feedback_tagged.db)
+// These endpoints use pre-computed fields and indexes for fast queries
+// ============================================================================
+
+// Tagged Overview Stats
+export interface TaggedOverviewStats {
+    total_flights: number;
+    total_anomalies: number;
+    safety_events: number;
+    go_arounds: number;
+    emergency_codes: number;
+    near_miss: number;
+    military_flights: number;
+    avg_severity: number;
+}
+
+export const fetchTaggedStatsOverview = async (startTs: number, endTs: number, forceRefresh = false): Promise<TaggedOverviewStats> => {
+    const url = `${API_BASE}/stats/tagged/overview?start_ts=${startTs}&end_ts=${endTs}${forceRefresh ? '&force_refresh=true' : ''}`;
+    const response = await fetch(url);
+    if (!response.ok) throw new Error('Failed to fetch tagged overview stats');
+    return response.json();
+};
+
+// Tagged Flights Per Day
+export interface TaggedFlightPerDay {
+    date: string;
+    count: number;
+    military_count: number;
+    civilian_count: number;
+    anomaly_count: number;
+}
+
+export const fetchTaggedFlightsPerDay = async (startTs: number, endTs: number, forceRefresh = false): Promise<TaggedFlightPerDay[]> => {
+    const url = `${API_BASE}/stats/tagged/flights-per-day?start_ts=${startTs}&end_ts=${endTs}${forceRefresh ? '&force_refresh=true' : ''}`;
+    const response = await fetch(url);
+    if (!response.ok) throw new Error('Failed to fetch tagged flights per day');
+    return response.json();
+};
+
+// Tagged Busiest Airports
+export interface TaggedAirportStats {
+    airport: string;
+    arrivals: number;
+    departures: number;
+    total: number;
+}
+
+export const fetchTaggedBusiestAirports = async (startTs: number, endTs: number, limit = 10): Promise<TaggedAirportStats[]> => {
+    const response = await fetch(`${API_BASE}/stats/tagged/busiest-airports?start_ts=${startTs}&end_ts=${endTs}&limit=${limit}`);
+    if (!response.ok) throw new Error('Failed to fetch tagged busiest airports');
+    return response.json();
+};
+
+// Tagged Safety by Rule
+export interface TaggedSafetyByRule {
+    by_rule: Array<{ rule_id: number | string; rule_name: string; count: number }>;
+    by_category: Record<string, number>;
+    total_events: number;
+}
+
+export const fetchTaggedSafetyByRule = async (startTs: number, endTs: number): Promise<TaggedSafetyByRule> => {
+    const response = await fetch(`${API_BASE}/stats/tagged/safety-by-rule?start_ts=${startTs}&end_ts=${endTs}`);
+    if (!response.ok) throw new Error('Failed to fetch tagged safety by rule');
+    return response.json();
+};
+
+// Tagged Emergency Codes
+export interface TaggedEmergencyCode {
+    code: string;
+    count: number;
+    airlines: Record<string, number>;
+    flights: string[];
+}
+
+export const fetchTaggedEmergencyCodes = async (startTs: number, endTs: number): Promise<TaggedEmergencyCode[]> => {
+    const response = await fetch(`${API_BASE}/stats/tagged/emergency-codes?start_ts=${startTs}&end_ts=${endTs}`);
+    if (!response.ok) throw new Error('Failed to fetch tagged emergency codes');
+    return response.json();
+};
+
+// Tagged Military Stats
+export interface TaggedMilitaryStats {
+    total_military: number;
+    by_type: Record<string, number>;
+    by_country: Record<string, number>;
+    flights: Array<{
+        flight_id: string;
+        callsign: string;
+        type: string;
+        country: string;
+        route: string;
+    }>;
+}
+
+export const fetchTaggedMilitaryStats = async (startTs: number, endTs: number): Promise<TaggedMilitaryStats> => {
+    const response = await fetch(`${API_BASE}/stats/tagged/military?start_ts=${startTs}&end_ts=${endTs}`);
+    if (!response.ok) throw new Error('Failed to fetch tagged military stats');
+    return response.json();
+};
+
+// Tagged Signal Loss Stats
+export interface TaggedSignalLossStats {
+    total_events: number;
+    affected_flights: number;
+    avg_events_per_flight: number;
+    flights_with_loss: Array<{
+        flight_id: string;
+        callsign: string;
+        signal_loss_count: number;
+        route: string;
+    }>;
+}
+
+export const fetchTaggedSignalLossStats = async (startTs: number, endTs: number): Promise<TaggedSignalLossStats> => {
+    const response = await fetch(`${API_BASE}/stats/tagged/signal-loss?start_ts=${startTs}&end_ts=${endTs}`);
+    if (!response.ok) throw new Error('Failed to fetch tagged signal loss stats');
+    return response.json();
+};
+
+// Tagged Severity Distribution
+export interface TaggedSeverityDistribution {
+    distribution: Array<{ severity_range: string; count: number }>;
+    avg_cnn: number;
+    avg_dense: number;
+    max_cnn: number;
+    max_dense: number;
+}
+
+export const fetchTaggedSeverityDistribution = async (startTs: number, endTs: number): Promise<TaggedSeverityDistribution> => {
+    const response = await fetch(`${API_BASE}/stats/tagged/severity-distribution?start_ts=${startTs}&end_ts=${endTs}`);
+    if (!response.ok) throw new Error('Failed to fetch tagged severity distribution');
+    return response.json();
+};
+
+// Tagged Airline Stats
+export interface TaggedAirlineStats {
+    airline: string;
+    flight_count: number;
+    avg_duration_hours: number;
+    avg_distance_nm: number;
+    avg_speed_kts: number;
+    anomaly_count: number;
+    anomaly_rate: number;
+}
+
+export const fetchTaggedAirlineStats = async (startTs: number, endTs: number, limit = 20): Promise<TaggedAirlineStats[]> => {
+    const response = await fetch(`${API_BASE}/stats/tagged/airlines?start_ts=${startTs}&end_ts=${endTs}&limit=${limit}`);
+    if (!response.ok) throw new Error('Failed to fetch tagged airline stats');
+    return response.json();
+};
+
+// Tagged Routes Stats
+export interface TaggedRouteStats {
+    route: string;
+    origin: string;
+    destination: string;
+    flight_count: number;
+    avg_duration_hours: number;
+    avg_distance_nm: number;
+    anomaly_count: number;
+    anomaly_rate: number;
+}
+
+export const fetchTaggedRoutesStats = async (startTs: number, endTs: number, limit = 20): Promise<TaggedRouteStats[]> => {
+    const response = await fetch(`${API_BASE}/stats/tagged/routes?start_ts=${startTs}&end_ts=${endTs}&limit=${limit}`);
+    if (!response.ok) throw new Error('Failed to fetch tagged routes stats');
+    return response.json();
+};
+
+// Level 2: Insights
+export const fetchAirlineEfficiency = async (startTs?: number, endTs?: number, route?: string): Promise<AirlineEfficiency[]> => {
+    const params = new URLSearchParams();
+    if (startTs) params.append('start_ts', startTs.toString());
+    if (endTs) params.append('end_ts', endTs.toString());
+    if (route) params.append('route', route);
+    
+    const url = params.toString() 
+        ? `${API_BASE}/insights/airline-efficiency?${params.toString()}`
+        : `${API_BASE}/insights/airline-efficiency`;
+    const response = await fetch(url);
+    if (!response.ok) throw new Error('Failed to fetch airline efficiency');
+    return response.json();
+};
+
+export const fetchHoldingPatterns = async (startTs: number, endTs: number): Promise<HoldingPatternAnalysis> => {
+    const response = await fetch(`${API_BASE}/insights/holding-patterns?start_ts=${startTs}&end_ts=${endTs}`);
+    if (!response.ok) throw new Error('Failed to fetch holding patterns');
+    return response.json();
+};
+
+export const fetchAlternateAirports = async (airport: string, eventDate?: number): Promise<any[]> => {
+    const url = eventDate 
+        ? `${API_BASE}/insights/alternate-airports?airport=${airport}&event_date=${eventDate}`
+        : `${API_BASE}/insights/alternate-airports?airport=${airport}`;
+    const response = await fetch(url);
+    if (!response.ok) throw new Error('Failed to fetch alternate airports');
+    return response.json();
+};
+
+// Level 3: Intelligence
+export const fetchGPSJamming = async (startTs: number, endTs: number): Promise<GPSJammingPoint[]> => {
+    const response = await fetch(`${API_BASE}/intel/gps-jamming?start_ts=${startTs}&end_ts=${endTs}`);
+    if (!response.ok) throw new Error('Failed to fetch GPS jamming');
+    return response.json();
+};
+
+// Flight-specific GPS jamming analysis
+export interface FlightJammingAnalysis {
+    flight_id: string;
+    jamming_score: number;
+    jamming_confidence: 'HIGH' | 'MEDIUM' | 'LOW' | 'UNLIKELY';
+    indicators: {
+        altitude_jumps: number;
+        spoofed_altitude_hits: number;
+        impossible_altitude_rates: number;
+        speed_anomalies: number;
+        position_teleports: number;
+        mlat_ratio: number;
+        anomaly_clusters: number;
+    };
+    anomaly_details: Array<{
+        type: string;
+        timestamp: number;
+        [key: string]: any;
+    }>;
+    unique_altitudes: number[];
+    summary: string;
+}
+
+export const fetchFlightJammingAnalysis = async (flightId: string): Promise<FlightJammingAnalysis> => {
+    const response = await fetch(`${API_BASE}/intel/flight-jamming/${flightId}`);
+    if (!response.ok) throw new Error('Failed to fetch flight jamming analysis');
+    return response.json();
+};
+
+export const fetchMilitaryPatterns = async (startTs: number, endTs: number, country?: string, aircraftType?: string): Promise<MilitaryPattern[]> => {
+    let url = `${API_BASE}/intel/military-patterns?start_ts=${startTs}&end_ts=${endTs}`;
+    if (country) url += `&country=${country}`;
+    if (aircraftType) url += `&aircraft_type=${aircraftType}`;
+    const response = await fetch(url);
+    if (!response.ok) throw new Error('Failed to fetch military patterns');
+    return response.json();
+};
+
+// Military routes analysis
+export interface MilitaryRoutes {
+    by_country: Record<string, {
+        total_flights: number;
+        routes: Array<{ route: string; count: number }>;
+    }>;
+    by_type: Record<string, {
+        total_flights: number;
+        common_areas: Array<{ area: string; count: number }>;
+    }>;
+    route_segments: Array<{
+        lat: number;
+        lon: number;
+        count: number;
+        countries: string[];
+        types: string[];
+    }>;
+    total_military_flights: number;
+}
+
+export const fetchMilitaryRoutes = async (startTs: number, endTs: number, country?: string): Promise<MilitaryRoutes> => {
+    let url = `${API_BASE}/intel/military-routes?start_ts=${startTs}&end_ts=${endTs}`;
+    if (country) url += `&country=${country}`;
+    const response = await fetch(url);
+    if (!response.ok) throw new Error('Failed to fetch military routes');
+    return response.json();
+};
+
+// Level 4: Predictive
+export const fetchAirspaceRisk = async (): Promise<AirspaceRisk> => {
+    const response = await fetch(`${API_BASE}/predict/airspace-risk`);
+    if (!response.ok) throw new Error('Failed to fetch airspace risk');
+    return response.json();
+};
+
+export const predictHostileIntent = async (flightId: string): Promise<any> => {
+    const response = await fetch(`${API_BASE}/predict/hostile-intent/${flightId}`, {
+        method: 'POST',
+    });
+    if (!response.ok) {
+        if (response.status === 404) throw new Error('Flight not found - no track data available');
+        throw new Error('Failed to analyze flight');
+    }
+    return response.json();
+};
+
+export const predictTrajectory = async (flightId: string, currentPosition: any): Promise<any> => {
+    const response = await fetch(`${API_BASE}/predict/trajectory`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ flight_id: flightId, current_position: currentPosition })
+    });
+    if (!response.ok) throw new Error('Failed to predict trajectory');
+    return response.json();
+};
+
+export const fetchSafetyForecast = async (hoursAhead = 24): Promise<SafetyForecast> => {
+    const response = await fetch(`${API_BASE}/predict/safety-forecast?hours_ahead=${hoursAhead}`);
+    if (!response.ok) throw new Error('Failed to fetch safety forecast');
+    return response.json();
+};
+
+// Anomaly DNA endpoints
+export const fetchAnomalyDNA = async (flightId: string, lookbackDays = 30): Promise<AnomalyDNA> => {
+    const response = await fetch(`${API_BASE}/intelligence/anomaly-dna/${flightId}?lookback_days=${lookbackDays}`);
+    if (!response.ok) throw new Error('Failed to fetch anomaly DNA');
+    return response.json();
+};
+
+export const fetchPatternClusters = async (startTs: number, endTs: number, minOccurrences = 3): Promise<PatternCluster[]> => {
+    const params = new URLSearchParams({
+        start_ts: startTs.toString(),
+        end_ts: endTs.toString(),
+        min_occurrences: minOccurrences.toString()
+    });
+    const response = await fetch(`${API_BASE}/intelligence/pattern-clusters?${params}`);
+    if (!response.ok) throw new Error('Failed to fetch pattern clusters');
+    return response.json();
+};
+
+// ============================================================
+// Additional Analytics Endpoints (New UI Features)
+// ============================================================
+
+// Peak Hours Analysis with correlation
+export interface PeakHoursAnalysis {
+    peak_traffic_hours: number[];
+    peak_safety_hours: number[];
+    correlation_score: number;
+    hourly_data: { hour: number; traffic: number; safety_events: number }[];
+}
+
+export const fetchPeakHoursAnalysis = async (startTs: number, endTs: number): Promise<PeakHoursAnalysis> => {
+    const response = await fetch(`${API_BASE}/trends/peak-hours?start_ts=${startTs}&end_ts=${endTs}`);
+    if (!response.ok) throw new Error('Failed to fetch peak hours analysis');
+    return response.json();
+};
+
+// Diversion Statistics
+export interface DiversionStats {
+    total_diversions: number;
+    total_large_deviations: number;
+    total_holding_360s: number;
+    by_airport: Record<string, number>;
+    by_airline: Record<string, number>;
+}
+
+export const fetchDiversionStats = async (startTs: number, endTs: number): Promise<DiversionStats> => {
+    const response = await fetch(`${API_BASE}/stats/diversions?start_ts=${startTs}&end_ts=${endTs}`);
+    if (!response.ok) throw new Error('Failed to fetch diversion stats');
+    return response.json();
+};
+
+// Alternate Airports
+export interface AlternateAirport {
+    airport: string;
+    count: number;
+    aircraft_types: string[];
+    last_used: number;
+}
+
+export const fetchAlternateAirportsData = async (startTs: number, endTs: number): Promise<AlternateAirport[]> => {
+    const response = await fetch(`${API_BASE}/trends/alternate-airports?start_ts=${startTs}&end_ts=${endTs}`);
+    if (!response.ok) throw new Error('Failed to fetch alternate airports');
+    return response.json();
+};
+
+// Runway Usage
+export interface RunwayUsage {
+    runway: string;
+    airport: string;
+    landings: number;
+    takeoffs: number;
+    total: number;
+}
+
+export const fetchRunwayUsage = async (airport: string, startTs: number, endTs: number): Promise<RunwayUsage[]> => {
+    const response = await fetch(`${API_BASE}/stats/runway-usage?airport=${airport}&start_ts=${startTs}&end_ts=${endTs}`);
+    if (!response.ok) throw new Error('Failed to fetch runway usage');
+    return response.json();
+};
+
+// Trajectory Prediction with Restricted Zones
+export interface TrajectoryPrediction {
+    flight_id: string;
+    predicted_path: { lat: number; lon: number; time_offset_s: number }[];
+    breach_warning: boolean;
+    breach_zone?: string;
+    breach_severity?: string;
+    closest_zone?: { name: string; distance_nm: number };
+    prediction_confidence: number;
+}
+
+export const fetchTrajectoryPrediction = async (flightId: string): Promise<TrajectoryPrediction> => {
+    const response = await fetch(`${API_BASE}/predict/trajectory/${flightId}`, {
+        method: 'POST'
+    });
+    if (!response.ok) throw new Error('Failed to fetch trajectory prediction');
+    return response.json();
+};
+
+// Anomaly DNA (enhanced)
+export const fetchAnomalyDNAEnhanced = async (flightId: string, lookbackDays = 30): Promise<AnomalyDNA> => {
+    // Alias for backwards compatibility; canonical route is `/intelligence/anomaly-dna/...`
+    const response = await fetch(`${API_BASE}/intelligence/anomaly-dna/${flightId}?lookback_days=${lookbackDays}`);
+    if (!response.ok) throw new Error('Failed to fetch anomaly DNA');
+    return response.json();
+};
+
+// Monthly Diversions
+export interface DiversionMonthly {
+    month: string;
+    diversions: number;
+    holding_patterns: number;
+    off_course: number;
+    total_events: number;
+    affected_flights: number;
+}
+
+export const fetchDiversionsMonthly = async (startTs: number, endTs: number): Promise<DiversionMonthly[]> => {
+    const response = await fetch(`${API_BASE}/stats/diversions/monthly?start_ts=${startTs}&end_ts=${endTs}`);
+    if (!response.ok) throw new Error('Failed to fetch monthly diversions');
+    return response.json();
+};
+
+// RTB Events (Return-To-Base)
+export interface RTBEvent {
+    flight_id: string;
+    callsign: string;
+    departure_time: number;
+    landing_time: number;
+    duration_min: number;
+    airport: string;
+}
+
+export const fetchRTBEvents = async (startTs: number, endTs: number, maxDurationMin = 30): Promise<RTBEvent[]> => {
+    const response = await fetch(`${API_BASE}/stats/rtb-events?start_ts=${startTs}&end_ts=${endTs}&max_duration_min=${maxDurationMin}`);
+    if (!response.ok) throw new Error('Failed to fetch RTB events');
+    return response.json();
+};
+
+// Airline Activity Trends
+export interface AirlineActivityTrends {
+    stopped_flying: {
+        airline: string;
+        last_seen: number;
+        last_seen_date: string;
+        flight_count_before: number;
+    }[];
+    started_flying: {
+        airline: string;
+        first_seen: number;
+        first_seen_date: string;
+        flight_count: number;
+    }[];
+    activity_changes: {
+        airline: string;
+        change_percent: number;
+        before_count: number;
+        after_count: number;
+        trend: 'increasing' | 'decreasing';
+    }[];
+    analysis_period: {
+        current_start: number;
+        current_end: number;
+        lookback_start: number;
+        lookback_end: number;
+        lookback_days: number;
+    };
+}
+
+export const fetchAirlineActivityTrends = async (startTs: number, endTs: number, lookbackDays = 30): Promise<AirlineActivityTrends> => {
+    const response = await fetch(`${API_BASE}/trends/airline-activity?start_ts=${startTs}&end_ts=${endTs}&lookback_days=${lookbackDays}`);
+    if (!response.ok) throw new Error('Failed to fetch airline activity trends');
+    return response.json();
+};
+
+export interface IntelligenceDashboardHelpPayload {
+    version: number;
+    generated_at_utc: string;
+    default_language: 'en';
+    languages: Array<'en' | 'he'>;
+    hebrew_help_rtl: boolean;
+    panels: Array<{
+        panel_id: string;
+        tab: 'overview' | 'safety' | 'traffic' | 'intelligence' | 'predict';
+        title: Record<'en' | 'he', string>;
+        endpoints: Array<{ method: string; path: string; params: string[] }>;
+        calculation: Record<'en' | 'he', string[]>;
+        meaning: Record<'en' | 'he', string>;
+        hard_coded_values: Record<'en' | 'he', Array<{ name: string; value: any }>>;
+    }>;
+    demands_coverage: Array<{
+        id: string;
+        status: 'implemented' | 'not_implemented_yet';
+        question_en: string;
+        question_he: string;
+        panels: string[];
+        notes_en?: string;
+        notes_he?: string;
+    }>;
+}
+
+export const fetchIntelligenceDashboardHelp = async (): Promise<IntelligenceDashboardHelpPayload> => {
+    const response = await fetch(`${API_BASE}/intelligence/help`);
+    if (!response.ok) throw new Error('Failed to fetch dashboard help');
+    return response.json();
+};
+
+// ============================================================
+// New Dashboard Endpoints
+// ============================================================
+
+// Top Airline Emergencies
+export interface TopAirlineEmergency {
+    airline: string;
+    emergency_count: number;
+    total_flights: number;
+    emergency_rate: number;
+}
+
+export const fetchTopAirlineEmergencies = async (startTs: number, endTs: number, limit = 10): Promise<TopAirlineEmergency[]> => {
+    const response = await fetch(`${API_BASE}/stats/safety/top-airline-emergencies?start_ts=${startTs}&end_ts=${endTs}&limit=${limit}`);
+    if (!response.ok) throw new Error('Failed to fetch top airline emergencies');
+    return response.json();
+};
+
+// Airport Hourly Traffic
+export interface AirportHourlyTraffic {
+    hour: number;
+    departures: number;
+    arrivals: number;
+    total: number;
+}
+
+export const fetchAirportHourlyTraffic = async (airport: string, startTs: number, endTs: number): Promise<AirportHourlyTraffic[]> => {
+    const response = await fetch(`${API_BASE}/stats/traffic/airport-hourly/${airport}?start_ts=${startTs}&end_ts=${endTs}`);
+    if (!response.ok) throw new Error('Failed to fetch airport hourly traffic');
+    return response.json();
+};
+
+// Monthly Flight Aggregation
+export interface MonthlyFlightStats {
+    month: string;
+    total_flights: number;
+    military_count: number;
+    anomaly_count: number;
+    avg_duration_hours: number;
+}
+
+export const fetchFlightsPerMonth = async (startTs: number, endTs: number): Promise<MonthlyFlightStats[]> => {
+    const response = await fetch(`${API_BASE}/stats/traffic/flights-per-month?start_ts=${startTs}&end_ts=${endTs}`);
+    if (!response.ok) throw new Error('Failed to fetch flights per month');
+    return response.json();
+};
+
+// Near-Miss by Country
+export interface NearMissByCountry {
+    total_near_miss: number;
+    by_country: Record<string, number>;
+    events: Array<{
+        flight_id: string;
+        callsign: string;
+        countries: string[];
+        severity: number;
+        timestamp: number;
+    }>;
+}
+
+export const fetchNearMissByCountry = async (startTs: number, endTs: number, country?: string): Promise<NearMissByCountry> => {
+    const url = country 
+        ? `${API_BASE}/stats/safety/near-miss/by-country?start_ts=${startTs}&end_ts=${endTs}&country=${country}`
+        : `${API_BASE}/stats/safety/near-miss/by-country?start_ts=${startTs}&end_ts=${endTs}`;
+    const response = await fetch(url);
+    if (!response.ok) throw new Error('Failed to fetch near-miss by country');
+    return response.json();
+};
+
+// ============================================================
+// Route Planning API
+// ============================================================
+
+export interface RouteAirport {
+    code: string;
+    name: string;
+    lat: number;
+    lon: number;
+    elevation_ft?: number;
+    has_origin_paths?: boolean;
+    has_destination_paths?: boolean;
+}
+
+export interface RouteAirportsResponse {
+    airports: RouteAirport[];
+    total: number;
+    origins_with_paths: string[];
+    destinations_with_paths: string[];
+}
+
+export interface RouteCenterlinePoint {
+    lat: number;
+    lon: number;
+    alt?: number;
+}
+
+export interface PlannedRoute {
+    path_id: string;
+    origin: string | null;
+    destination: string | null;
+    centerline: RouteCenterlinePoint[];
+    width_nm: number;
+    distance_nm: number;
+    score: number;
+    distance_score: number;
+    safety_score: number;
+    coverage_score: number;
+    recommendation: 'best' | 'excellent' | 'good' | 'alternative' | '';
+    waypoint_count: number;
+}
+
+export interface RoutePlanResponse {
+    routes: PlannedRoute[];
+    best_route: PlannedRoute | null;
+    total_routes: number;
+    origins: string[];
+    destination: string;
+    error?: string;
+}
+
+export interface RoutePathResponse {
+    path_id: string;
+    origin: string | null;
+    destination: string | null;
+    centerline: RouteCenterlinePoint[];
+    width_nm: number;
+    distance_nm: number;
+    waypoint_count: number;
+}
+
+/**
+ * Get list of available airports for route planning.
+ */
+export const fetchRouteAirports = async (): Promise<RouteAirportsResponse> => {
+    const response = await fetch(`${API_BASE}/route/airports`);
+    if (!response.ok) throw new Error('Failed to fetch airports');
+    return response.json();
+};
+
+/**
+ * Plan routes from multiple origins to a destination.
+ * Uses learned path library to find and score routes.
+ */
+export const planRoute = async (origins: string[], destination: string): Promise<RoutePlanResponse> => {
+    const response = await fetch(`${API_BASE}/route/plan`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ origins, destination })
+    });
+    
+    if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.detail || 'Failed to plan route');
+    }
+    
+    return response.json();
+};
+
+/**
+ * Get detailed path geometry for a specific path ID.
+ */
+export const fetchRoutePath = async (pathId: string): Promise<RoutePathResponse> => {
+    const response = await fetch(`${API_BASE}/route/path/${encodeURIComponent(pathId)}`);
+    if (!response.ok) throw new Error('Failed to fetch path details');
+    return response.json();
+};
+
+// ============================================================
+// Advanced Route Planning API
+// ============================================================
+
+export interface AircraftProfile {
+    name: string;
+    type: 'fighter' | 'civil';
+    min_speed_kts: number;
+    max_speed_kts: number;
+    cruise_speed_kts: number;
+    min_altitude_ft: number;
+    max_altitude_ft: number;
+    cruise_altitude_ft: number;
+    climb_rate_ft_min: number;
+    descent_rate_ft_min: number;
+    turn_rate_deg_sec: number;
+}
+
+export interface RouteWaypoint {
+    lat: number;
+    lon: number;
+    alt_ft?: number;
+    name?: string;
+    airport_code?: string;
+    is_airport?: boolean;
+}
+
+export interface TrafficAircraft {
+    flight_id: string;
+    callsign: string | null;
+    lat: number;
+    lon: number;
+    alt_ft: number;
+    heading_deg: number;
+    speed_kts: number;
+    vspeed_fpm: number;
+    timestamp: number;
+    is_simulated: boolean;
+    track_points: Array<{ lat: number; lon: number; alt?: number; timestamp?: number }>;
+}
+
+export interface TrafficCacheInfo {
+    real_aircraft_count: number;
+    simulated_aircraft_count: number;
+    total_count: number;
+    cache_timestamp: number;
+    cache_age_seconds: number | null;
+}
+
+export interface Conflict {
+    severity: 'none' | 'warning' | 'conflict' | 'critical';
+    planned_lat: number;
+    planned_lon: number;
+    planned_alt_ft: number;
+    planned_time_offset_min: number;
+    traffic_flight_id: string;
+    traffic_callsign: string | null;
+    traffic_lat: number;
+    traffic_lon: number;
+    traffic_alt_ft: number;
+    horizontal_distance_nm: number;
+    vertical_distance_ft: number;
+}
+
+export interface PlannedPathPoint {
+    lat: number;
+    lon: number;
+    alt_ft: number;
+    time_offset_min: number;
+    cumulative_distance_nm: number;
+}
+
+export interface AdvancedPlannedRoute {
+    path_id: string;
+    origin: string | null;
+    destination: string | null;
+    centerline: RouteCenterlinePoint[];
+    width_nm: number;
+    distance_nm: number;
+    score: number;
+    distance_score: number;
+    safety_score: number;
+    coverage_score: number;
+    conflict_score: number;
+    recommendation: string;
+    waypoint_count: number;
+    conflicts: Conflict[];
+    conflict_count: number;
+    warning_count: number;
+    planned_path: PlannedPathPoint[];
+    eta_minutes: number;
+    corridor_ids: string[];  // IDs of learned corridors used to build this route
+}
+
+export interface AdvancedRoutePlanResponse {
+    routes: AdvancedPlannedRoute[];
+    best_route: AdvancedPlannedRoute | null;
+    total_routes: number;
+    origin: RouteWaypoint;
+    destination: RouteWaypoint;
+    waypoints: RouteWaypoint[];
+    aircraft_profile: AircraftProfile;
+    traffic_count: number;
+}
+
+export interface TrafficResponse {
+    traffic: TrafficAircraft[];
+    cache_info: TrafficCacheInfo;
+    message?: string;
+}
+
+export interface ConflictCheckResponse {
+    conflicts: Conflict[];
+    summary: {
+        total: number;
+        critical: number;
+        conflict: number;
+        warning: number;
+    };
+    is_clear: boolean;
+    traffic_count: number;
+}
+
+export interface PredictedPosition {
+    flight_id: string;
+    lat: number;
+    lon: number;
+    alt_ft: number;
+    time_offset_min: number;
+    timestamp: number;
+}
+
+export interface PredictionResponse {
+    flight_id: string;
+    callsign: string | null;
+    current_position: {
+        lat: number;
+        lon: number;
+        alt_ft: number;
+        heading_deg: number;
+        speed_kts: number;
+    };
+    predictions: PredictedPosition[];
+}
+
+// Tactical Zone for route planning
+export interface TacticalZoneRequest {
+    id: string;
+    type: 'low-altitude' | 'high-altitude' | 'slow-speed' | 'high-speed' | 'no-fly';
+    points: Array<{ lat: number; lon: number }>;
+    altitude?: number;
+    speed?: number;
+}
+
+// Attack Target for mission planning
+export interface AttackTargetRequest {
+    id: string;
+    lat: number;
+    lon: number;
+    name: string;
+    priority: 'high' | 'medium' | 'low';
+    ammoRequired: number;
+}
+
+/**
+ * Get available aircraft profiles (Fighter Jet vs Civil Aircraft).
+ */
+export const fetchAircraftProfiles = async (): Promise<{ profiles: Record<string, AircraftProfile> }> => {
+    const response = await fetch(`${API_BASE}/route/profiles`);
+    if (!response.ok) throw new Error('Failed to fetch aircraft profiles');
+    return response.json();
+};
+
+/**
+ * Advanced route planning with custom waypoints, zones, and conflict detection.
+ */
+export const planAdvancedRoute = async (
+    origin: RouteWaypoint,
+    destination: RouteWaypoint,
+    options: {
+        waypoints?: RouteWaypoint[];
+        aircraft_type?: 'fighter' | 'civil';
+        altitude_ft?: number;
+        speed_kts?: number;
+        check_conflicts?: boolean;
+        tactical_zones?: TacticalZoneRequest[];
+    } = {}
+): Promise<AdvancedRoutePlanResponse> => {
+    const response = await fetch(`${API_BASE}/route/plan-advanced`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            origin,
+            destination,
+            waypoints: options.waypoints || [],
+            aircraft_type: options.aircraft_type || 'civil',
+            altitude_ft: options.altitude_ft,
+            tactical_zones: options.tactical_zones || [],
+            speed_kts: options.speed_kts,
+            check_conflicts: options.check_conflicts ?? true,
+        })
+    });
+    
+    if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.detail || 'Failed to plan advanced route');
+    }
+    
+    return response.json();
+};
+
+/**
+ * Get current traffic in the airspace (cached data).
+ */
+export const fetchRouteTraffic = async (): Promise<TrafficResponse> => {
+    const response = await fetch(`${API_BASE}/route/traffic`);
+    if (!response.ok) throw new Error('Failed to fetch traffic');
+    return response.json();
+};
+
+/**
+ * Refresh traffic data from FR24 API.
+ */
+export const refreshRouteTraffic = async (): Promise<TrafficResponse> => {
+    const response = await fetch(`${API_BASE}/route/traffic/refresh`, {
+        method: 'POST'
+    });
+    if (!response.ok) throw new Error('Failed to refresh traffic');
+    return response.json();
+};
+
+/**
+ * Add a simulated aircraft to the traffic.
+ */
+export const addSimulatedAircraft = async (
+    flight_id: string,
+    path: Array<{ lat: number; lon: number }>,
+    speed_kts: number,
+    altitude_ft: number,
+    callsign?: string
+): Promise<{ aircraft: TrafficAircraft; message: string }> => {
+    const response = await fetch(`${API_BASE}/route/traffic/simulated`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ flight_id, path, speed_kts, altitude_ft, callsign })
+    });
+    
+    if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.detail || 'Failed to add simulated aircraft');
+    }
+    
+    return response.json();
+};
+
+/**
+ * Clear all simulated aircraft from the traffic.
+ */
+export const clearSimulatedAircraft = async (): Promise<{ message: string }> => {
+    const response = await fetch(`${API_BASE}/route/traffic/simulated`, {
+        method: 'DELETE'
+    });
+    if (!response.ok) throw new Error('Failed to clear simulated aircraft');
+    return response.json();
+};
+
+/**
+ * Check a planned path for conflicts with current traffic.
+ */
+export const checkRouteConflicts = async (
+    path: Array<{ lat: number; lon: number; alt?: number; time_offset_min?: number }>,
+    aircraft_type: 'fighter' | 'civil' = 'civil'
+): Promise<ConflictCheckResponse> => {
+    const response = await fetch(`${API_BASE}/route/conflicts`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path, aircraft_type })
+    });
+    
+    if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.detail || 'Failed to check conflicts');
+    }
+    
+    return response.json();
+};
+
+/**
+ * Predict future position of a specific aircraft.
+ */
+export const predictAircraftPosition = async (
+    flight_id: string,
+    minutes_ahead: number = 30
+): Promise<PredictionResponse> => {
+    const response = await fetch(`${API_BASE}/route/traffic/predict/${encodeURIComponent(flight_id)}?minutes_ahead=${minutes_ahead}`);
+    if (!response.ok) throw new Error('Failed to predict aircraft position');
     return response.json();
 };

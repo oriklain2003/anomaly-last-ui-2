@@ -1,31 +1,63 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { X, AlertTriangle, CheckCircle, ThumbsUp, PlayCircle, Radio, Plane, Navigation, MapPin, TrendingDown, RotateCcw, Compass, ShieldAlert, Wifi, RefreshCw, Loader2, ExternalLink, ChevronDown } from 'lucide-react';
+import { X, AlertTriangle, CheckCircle, PlayCircle, Radio, Plane, Navigation, MapPin, TrendingDown, RotateCcw, Compass, ShieldAlert, Wifi, RefreshCw, Loader2, ExternalLink, ChevronDown, Skull, CircleDot, Target, GraduationCap, Shield, Eye, Satellite } from 'lucide-react';
 import type { AnomalyReport } from '../types';
-import { submitFeedback, fetchCallsignFromResearch, fetchRules, reanalyzeFeedbackFlight } from '../api';
+import { submitFeedback, fetchCallsignFromResearch, reanalyzeFeedbackFlight } from '../api';
 import clsx from 'clsx';
 import { ReplayModal, ReplayEvent } from './ReplayModal';
+import { useLanguage } from '../contexts/LanguageContext';
 
 // Available rules type
 interface Rule {
     id: number;
     name: string;
+    nameHe: string;
     description: string;
+    category: 'emergency' | 'flight_ops' | 'technical' | 'military' | 'other';
+    color: string;
 }
+
+// Hardcoded tagging rules list
+const TAGGING_RULES: Rule[] = [
+    // Emergency & Safety (Red)
+    { id: 1, name: 'Emergency Squawks', nameHe: 'קודי חירום', description: 'Aircraft transmitting emergency squawk codes (7500, 7600, 7700)', category: 'emergency', color: 'red' },
+    { id: 2, name: 'Crash', nameHe: 'התרסקות', description: 'Aircraft crash or suspected crash event', category: 'emergency', color: 'red' },
+    { id: 3, name: 'Proximity Alert', nameHe: 'התראת קרבה', description: 'Dangerous proximity between aircraft', category: 'emergency', color: 'red' },
+    
+    // Flight Operations (Blue)
+    { id: 4, name: 'Holding Pattern', nameHe: 'דפוס המתנה', description: 'Aircraft in holding pattern', category: 'flight_ops', color: 'blue' },
+    { id: 5, name: 'Go Around', nameHe: 'גו-אראונד', description: 'Aborted landing and go-around maneuver', category: 'flight_ops', color: 'blue' },
+    { id: 6, name: 'Return to Land', nameHe: 'חזרה לנחיתה', description: 'Aircraft returning to departure airport', category: 'flight_ops', color: 'blue' },
+    { id: 7, name: 'Unplanned Landing', nameHe: 'נחיתה לא מתוכננת', description: 'Landing at unplanned airport', category: 'flight_ops', color: 'blue' },
+    
+    // Technical (Purple)
+    { id: 8, name: 'Signal Loss', nameHe: 'אובדן אות', description: 'Loss of ADS-B signal', category: 'technical', color: 'purple' },
+    { id: 9, name: 'Off Course', nameHe: 'סטייה ממסלול', description: 'Significant deviation from expected flight path', category: 'technical', color: 'purple' },
+    { id: 14, name: 'GPS Jamming', nameHe: 'שיבוש GPS', description: 'GPS jamming indicators detected (altitude oscillation, spoofed values, MLAT-only)', category: 'technical', color: 'purple' },
+    
+    // Military (Green)
+    { id: 10, name: 'Military Flight', nameHe: 'טיסה צבאית', description: 'Identified military aircraft', category: 'military', color: 'green' },
+    { id: 11, name: 'Operational Military Flight', nameHe: 'טיסה צבאית מבצעית', description: 'Military aircraft on operational mission', category: 'military', color: 'green' },
+    { id: 12, name: 'Suspicious Behavior', nameHe: 'התנהגות חשודה', description: 'Unusual or suspicious flight behavior', category: 'military', color: 'green' },
+    { id: 13, name: 'Flight Academy', nameHe: 'בית ספר לטיסה', description: 'Training flight from flight school', category: 'military', color: 'green' },
+];
 
 // Rule icon mapping
 const getRuleIcon = (ruleId: number) => {
     const iconMap: Record<number, React.ComponentType<any>> = {
-        1: Radio,           // Emergency Squawk
-        2: TrendingDown,    // Altitude Change
-        3: RotateCcw,       // Abrupt Turn
-        4: ShieldAlert,     // Proximity Alert
-        6: Plane,           // Go-Around
-        7: RotateCcw,       // Return to Field
-        8: MapPin,          // Diversion
-        9: TrendingDown,    // Low Altitude
-        10: Wifi,           // Signal Loss
-        11: Compass,        // Off Course
-        12: MapPin,         // Unplanned Landing
+        1: Radio,           // Emergency Squawks
+        2: Skull,           // Crash
+        3: ShieldAlert,     // Proximity Alert
+        4: CircleDot,       // Holding Pattern
+        5: Plane,           // Go Around
+        6: RotateCcw,       // Return to Land
+        7: MapPin,          // Unplanned Landing
+        8: Wifi,            // Signal Loss
+        9: Compass,         // Off Course
+        10: Shield,         // Military Flight
+        14: Satellite,      // GPS Jamming
+        11: Target,         // Operational Military Flight
+        12: Eye,            // Suspicious Behavior
+        13: GraduationCap,  // Flight Academy
     };
     return iconMap[ruleId] || AlertTriangle;
 };
@@ -46,7 +78,7 @@ const LAYER_COLORS: Record<string, { bg: string; border: string; text: string; a
     'Layer 6: Hybrid CNN-Transformer': { bg: 'bg-pink-500/15', border: 'border-pink-400', text: 'text-pink-300', accent: 'bg-pink-500/30' },
 };
 
-const LayerCard: React.FC<{ title: string; data: any; type: 'rules' | 'model'; resolvedCallsigns?: Record<string, string>; onFlyTo?: (lat: number, lon: number, zoom?: number) => void }> = ({ title, data, type, resolvedCallsigns, onFlyTo }) => {
+const LayerCard: React.FC<{ title: string; data: any; type: 'rules' | 'model'; resolvedCallsigns?: Record<string, string>; onFlyTo?: (lat: number, lon: number, zoom?: number) => void; isHebrew?: boolean }> = ({ title, data, type, resolvedCallsigns, onFlyTo, isHebrew }) => {
     const [anomalyLocationsCollapsed, setAnomalyLocationsCollapsed] = useState(true);
     
     if (!data) return null;
@@ -68,20 +100,20 @@ const LayerCard: React.FC<{ title: string; data: any; type: 'rules' | 'model'; r
         if (!rule.details?.events?.length) return null;
         return (
             <div className="mt-2 space-y-2">
-                <p className="text-xs font-bold text-red-300">Conflict Details:</p>
+                <p className="text-xs font-bold text-red-300">{isHebrew ? "פרטי קונפליקט:" : "Conflict Details:"}</p>
                 {rule.details.events.map((ev: any, idx: number) => {
                     const callsign = ev.other_callsign || (resolvedCallsigns && resolvedCallsigns[ev.other_flight]);
                     return (
                         <div key={idx} className="bg-red-500/10 p-2 rounded border border-red-500/20 text-[10px] text-red-200">
                             <div className="flex justify-between">
-                                <span>Other Flight: <span className="font-bold font-mono">{callsign ? `${callsign} (${ev.other_flight})` : ev.other_flight}</span></span>
+                                <span>{isHebrew ? "טיסה אחרת: " : "Other Flight: "}<span className="font-bold font-mono">{callsign ? `${callsign} (${ev.other_flight})` : ev.other_flight}</span></span>
                                 <span className="font-mono text-white/60">
                                     {new Date(ev.timestamp * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
                                 </span>
                             </div>
                             <div className="flex justify-between mt-1 text-white/40">
-                                <span>Dist: {ev.distance_nm} NM</span>
-                                <span>Alt Diff: {ev.altitude_diff_ft} ft</span>
+                                <span>{isHebrew ? "מרחק: " : "Dist: "}{ev.distance_nm} NM</span>
+                                <span>{isHebrew ? "הפרש גובה: " : "Alt Diff: "}{ev.altitude_diff_ft} ft</span>
                             </div>
                         </div>
                     );
@@ -98,7 +130,7 @@ const LayerCard: React.FC<{ title: string; data: any; type: 'rules' | 'model'; r
             <div className="mt-2 space-y-2">
                 {details.deviations && details.deviations.length > 0 && (
                     <div className="space-y-1">
-                        <p className="text-xs font-bold text-white/60">Deviations ({details.deviations.length}):</p>
+                        <p className="text-xs font-bold text-white/60">{isHebrew ? `סטיות (${details.deviations.length}):` : `Deviations (${details.deviations.length}):`}</p>
                         <div className="max-h-40 overflow-y-auto space-y-1 pr-1">
                              {details.deviations.slice(0, 50).map((dev: any, idx: number) => (
                                 <div key={idx} className="bg-red-500/10 p-2 rounded border border-red-500/20 text-[10px] text-red-200">
@@ -106,17 +138,17 @@ const LayerCard: React.FC<{ title: string; data: any; type: 'rules' | 'model'; r
                                         <span className="font-mono opacity-70">
                                             {new Date(dev.timestamp * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
                                         </span>
-                                        <span className="font-bold">{dev.dist_nm} NM off</span>
+                                        <span className="font-bold">{dev.dist_nm} {isHebrew ? "מייל סטייה" : "NM off"}</span>
                                     </div>
                                     <div className="flex justify-between items-center mt-1 opacity-60">
-                                        <span>Alt: {dev.alt} ft</span>
+                                        <span>{isHebrew ? "גובה: " : "Alt: "}{dev.alt} ft</span>
                                         <span>{dev.lat.toFixed(2)}, {dev.lon.toFixed(2)}</span>
                                     </div>
                                 </div>
                             ))}
                             {details.deviations.length > 50 && (
                                 <p className="text-[10px] text-center text-white/40 italic">
-                                    + {details.deviations.length - 50} more points...
+                                    {isHebrew ? `+ עוד ${details.deviations.length - 50} נקודות...` : `+ ${details.deviations.length - 50} more points...`}
                                 </p>
                             )}
                         </div>
@@ -125,7 +157,7 @@ const LayerCard: React.FC<{ title: string; data: any; type: 'rules' | 'model'; r
 
                 {details.segments && (
                     <div className="space-y-2">
-                        <p className="text-xs font-bold text-white/60">Segment Analysis:</p>
+                        <p className="text-xs font-bold text-white/60">{isHebrew ? "ניתוח מקטעים:" : "Segment Analysis:"}</p>
                         {Object.entries(details.segments).map(([phase, data]: [string, any]) => {
                             // Check if phase was skipped
                             const isSkipped = data === "skipped_phase" || data === "skipped_short" || data === "skipped_resample";
@@ -147,20 +179,20 @@ const LayerCard: React.FC<{ title: string; data: any; type: 'rules' | 'model'; r
                                     <div className="flex justify-between mb-1">
                                         <span className="font-bold uppercase text-white/40">{phase}</span>
                                         <span className={data.match_found ? "text-green-400" : "text-red-400"}>
-                                            {data.match_found ? "MATCH" : "NO MATCH"}
+                                            {data.match_found ? (isHebrew ? "תואם" : "MATCH") : (isHebrew ? "לא תואם" : "NO MATCH")}
                                         </span>
                                     </div>
                                     {data.match_found ? (
                                         <div className="flex flex-col gap-0.5">
-                                            <span>Flow: {data.flow_id} ({data.layer})</span>
-                                            <span>Dist: {data.dist_nm} NM</span>
+                                            <span>{isHebrew ? "זרימה: " : "Flow: "}{data.flow_id} ({data.layer})</span>
+                                            <span>{isHebrew ? "מרחק: " : "Dist: "}{data.dist_nm} NM</span>
                                         </div>
                                     ) : (
-                                        <span className="italic">No matching path</span>
+                                        <span className="italic">{isHebrew ? "אין מסלול תואם" : "No matching path"}</span>
                                     )}
                                     {data.closest_loose_dist_nm !== undefined && (
                                          <div className="mt-1 pt-1 border-t border-white/10 text-blue-300">
-                                             Loose Dist: {data.closest_loose_dist_nm} NM
+                                             {isHebrew ? "מרחק גס: " : "Loose Dist: "}{data.closest_loose_dist_nm} NM
                                          </div>
                                     )}
                                 </div>
@@ -182,10 +214,10 @@ const LayerCard: React.FC<{ title: string; data: any; type: 'rules' | 'model'; r
             <div className="space-y-1">
                 {type === 'rules' && (
                     <>
-                        <p className="text-xs text-white/60">Status: <span className={statusColor}>{data.status}</span></p>
+                        <p className="text-xs text-white/60">{isHebrew ? "סטטוס: " : "Status: "}<span className={statusColor}>{data.status}</span></p>
                         {data.triggers && data.triggers.length > 0 && (
                             <div className="mt-1">
-                                <p className="text-xs text-white/60 mb-1">Triggers:</p>
+                                <p className="text-xs text-white/60 mb-1">{isHebrew ? "טריגרים:" : "Triggers:"}</p>
                                 <ul className="list-disc list-inside text-xs text-white/80">
                                     {data.triggers.map((t: string, i: number) => (
                                         <li key={i}>{t}</li>
@@ -206,11 +238,11 @@ const LayerCard: React.FC<{ title: string; data: any; type: 'rules' | 'model'; r
                 {type === 'model' && (
                     <>
                          <p className="text-xs text-white/60">
-                            Prediction: <span className={statusColor}>{isAnomaly ? 'Anomaly' : 'Normal'}</span>
+                            {isHebrew ? "חיזוי: " : "Prediction: "}<span className={statusColor}>{isAnomaly ? (isHebrew ? 'אנומליה' : 'Anomaly') : (isHebrew ? 'תקין' : 'Normal')}</span>
                          </p>
                          {data.severity !== undefined && (
                             <div className="mt-1">
-                                <p className="text-xs text-white/60">Severity Score</p>
+                                <p className="text-xs text-white/60">{isHebrew ? "ציון חומרה" : "Severity Score"}</p>
                                 <div className="h-1.5 w-full bg-white/10 rounded-full mt-1 overflow-hidden">
                                     <div 
                                         className={clsx("h-full rounded-full", isAnomaly ? "bg-red-500" : "bg-green-500")} 
@@ -221,7 +253,7 @@ const LayerCard: React.FC<{ title: string; data: any; type: 'rules' | 'model'; r
                             </div>
                          )}
                          {data.score !== undefined && (
-                             <p className="text-xs text-white/60">Score: {data.score.toFixed(3)}</p>
+                             <p className="text-xs text-white/60">{isHebrew ? "ציון: " : "Score: "}{data.score.toFixed(3)}</p>
                          )}
                          
                          {/* ML Anomaly Points - Always show section with layer-specific colors */}
@@ -234,12 +266,12 @@ const LayerCard: React.FC<{ title: string; data: any; type: 'rules' | 'model'; r
                                     <ChevronDown className={clsx("size-3 transition-transform", isAnomaly ? layerColor.text : "text-white/40", anomalyLocationsCollapsed && "-rotate-90")} />
                                     <MapPin className={clsx("size-3", isAnomaly ? layerColor.text : "text-white/40")} />
                                     <span className={isAnomaly ? layerColor.text : "text-white/40"}>
-                                        Detected Anomaly Locations
+                                        {isHebrew ? "מיקומי אנומליה שזוהו" : "Detected Anomaly Locations"}
                                     </span>
                                 </p>
                                 {data.anomaly_points && data.anomaly_points.length > 0 && (
                                     <span className={clsx("text-[10px] px-1.5 py-0.5 rounded font-bold", layerColor.accent, layerColor.text)}>
-                                        {data.anomaly_points.length} points
+                                        {data.anomaly_points.length} {isHebrew ? "נקודות" : "points"}
                                     </span>
                                 )}
                             </div>
@@ -267,7 +299,7 @@ const LayerCard: React.FC<{ title: string; data: any; type: 'rules' | 'model'; r
                                                         </span>
                                                     </div>
                                                     <div className="flex items-center gap-1">
-                                                        <span className="text-white/40">Score:</span>
+                                                        <span className="text-white/40">{isHebrew ? "ציון:" : "Score:"}</span>
                                                         <span className={clsx("font-mono font-bold", layerColor.text)}>{pt.point_score.toFixed(4)}</span>
                                                     </div>
                                                 </div>
@@ -276,7 +308,7 @@ const LayerCard: React.FC<{ title: string; data: any; type: 'rules' | 'model'; r
                                                         {pt.lat.toFixed(4)}°, {pt.lon.toFixed(4)}°
                                                     </span>
                                                     <span className="text-white/30 text-[9px]">
-                                                        reconstruction error
+                                                        {isHebrew ? "שגיאת שחזור" : "reconstruction error"}
                                                     </span>
                                                 </div>
                                             </div>
@@ -284,7 +316,7 @@ const LayerCard: React.FC<{ title: string; data: any; type: 'rules' | 'model'; r
                                     </div>
                                 ) : (
                                     <div className="text-[10px] text-white/30 italic text-center py-2 bg-white/5 rounded">
-                                        {isAnomaly ? "No specific points identified" : "No anomalies detected"}
+                                        {isAnomaly ? (isHebrew ? "לא זוהו נקודות ספציפיות" : "No specific points identified") : (isHebrew ? "לא זוהו אנומליות" : "No anomalies detected")}
                                     </div>
                                 )
                             )}
@@ -303,9 +335,10 @@ export const ReportPanel: React.FC<ReportPanelProps> = ({ anomaly, onClose, clas
     const [frStatus, _setFrStatus] = useState<'checking' | 'valid' | 'invalid'>('checking');
     const [showReplay, setShowReplay] = useState(false);
     const [resolvedCallsigns, setResolvedCallsigns] = useState<Record<string, string>>({});
+    const { isHebrew } = useLanguage();
     
-    // Rule selection state
-    const [rules, setRules] = useState<Rule[]>([]);
+    // Rule selection state - use hardcoded rules list
+    const rules = TAGGING_RULES;
     const [selectedRuleId, setSelectedRuleId] = useState<number | null | 'other'>(null);
     const [otherDetails, setOtherDetails] = useState('');
     const [ruleError, setRuleError] = useState(false);
@@ -337,10 +370,6 @@ export const ReportPanel: React.FC<ReportPanelProps> = ({ anomaly, onClose, clas
         setLocalAnomaly(anomaly);
     }, [anomaly]);
     
-    // Fetch available rules on mount
-    useEffect(() => {
-        fetchRules().then(setRules).catch(console.error);
-    }, []);
 
     useEffect(() => {
         if (!localAnomaly) return;
@@ -568,15 +597,15 @@ export const ReportPanel: React.FC<ReportPanelProps> = ({ anomaly, onClose, clas
         <>
         <aside className={clsx("bg-surface rounded-xl flex flex-col h-full overflow-hidden border border-white/5 animate-in slide-in-from-right-4", className || "col-span-3")}>
             {/* Header */}
-            <div className="p-4 border-b border-white/10 flex items-center justify-between bg-surface-highlight/50">
+            <div className="p-4 border-b border-white/10 flex items-center justify-between bg-surface-highlight/50" dir={isHebrew ? "rtl" : "ltr"}>
                 <div>
-                    <h3 className="text-white font-bold">Analysis Report</h3>
+                    <h3 className="text-white font-bold">{isHebrew ? "דו\"ח ניתוח" : "Analysis Report"}</h3>
                     <p className="text-xs text-white/60">{localAnomaly.flight_id}</p>
                     
                     <div className="mt-3 flex flex-col gap-2">
                         {localAnomaly.callsign && (
                             <p className="text-[10px] text-pink-300 mb-0.5 animate-pulse font-medium">
-                                ✨ click me to copy
+                                {isHebrew ? "✨ לחץ להעתקה" : "✨ click me to copy"}
                             </p>
                         )}
                         <div className="flex items-center gap-2 flex-wrap">
@@ -590,7 +619,7 @@ export const ReportPanel: React.FC<ReportPanelProps> = ({ anomaly, onClose, clas
                                             : "bg-white/10 text-white hover:bg-white/20 border-white/10 hover:border-white/30"
                                     )}
                                 >
-                                    {copied ? "Copied!" : localAnomaly.callsign}
+                                    {copied ? (isHebrew ? "!הועתק" : "Copied!") : localAnomaly.callsign}
                                 </button>
                             )}
 
@@ -600,12 +629,15 @@ export const ReportPanel: React.FC<ReportPanelProps> = ({ anomaly, onClose, clas
                                     onClick={() => setShowActions(!showActions)}
                                     className="text-sm font-mono font-bold px-3 py-1 rounded border bg-white/10 text-white hover:bg-white/20 border-white/10 hover:border-white/30 transition-all duration-200 flex items-center gap-1"
                                 >
-                                    <span>Follow Up</span>
+                                    <span>{isHebrew ? "פעולות" : "Follow Up"}</span>
                                     <ChevronDown className="size-3" />
                                 </button>
 
                                 {showActions && (
-                                    <div className="absolute top-full left-0 mt-2 w-52 bg-surface/95 border border-white/10 rounded-lg shadow-xl z-50 overflow-hidden backdrop-blur-md animate-in fade-in slide-in-from-top-2 duration-200">
+                                    <div className={clsx(
+                                        "absolute top-full mt-2 w-52 bg-surface/95 border border-white/10 rounded-lg shadow-xl z-50 overflow-hidden backdrop-blur-md animate-in fade-in slide-in-from-top-2 duration-200",
+                                        isHebrew ? "right-0" : "left-0"
+                                    )}>
                                         <div className="p-1.5 space-y-1">
                                             {localAnomaly.callsign && (
                                                  <a 
@@ -613,7 +645,8 @@ export const ReportPanel: React.FC<ReportPanelProps> = ({ anomaly, onClose, clas
                                                     target="_blank"
                                                     rel="noopener noreferrer"
                                                     className={clsx(
-                                                        "flex items-center gap-3 w-full px-3 py-2.5 text-sm text-left rounded-md transition-all duration-200 no-underline group",
+                                                        "flex items-center gap-3 w-full px-3 py-2.5 text-sm rounded-md transition-all duration-200 no-underline group",
+                                                        isHebrew ? "text-right flex-row-reverse" : "text-left",
                                                         "hover:bg-green-500/10 hover:text-green-300",
                                                         frStatus === 'valid' ? "text-green-400" : "text-white/80"
                                                     )}
@@ -621,7 +654,7 @@ export const ReportPanel: React.FC<ReportPanelProps> = ({ anomaly, onClose, clas
                                                     <div className="p-1.5 rounded bg-white/5 group-hover:bg-green-500/20 transition-colors">
                                                         <ExternalLink className="size-3.5 group-hover:scale-110 transition-transform" />
                                                     </div>
-                                                    <span className="font-medium">Open in FR24</span>
+                                                    <span className="font-medium">{isHebrew ? "פתח ב-FR24" : "Open in FR24"}</span>
                                                 </a>
                                             )}
                                             
@@ -631,14 +664,15 @@ export const ReportPanel: React.FC<ReportPanelProps> = ({ anomaly, onClose, clas
                                                     setShowActions(false);
                                                 }}
                                                 className={clsx(
-                                                    "flex items-center gap-3 w-full px-3 py-2.5 text-sm text-left rounded-md transition-all duration-200 group",
+                                                    "flex items-center gap-3 w-full px-3 py-2.5 text-sm rounded-md transition-all duration-200 group",
+                                                    isHebrew ? "text-right flex-row-reverse" : "text-left",
                                                     "text-white/80 hover:text-blue-300 hover:bg-blue-500/10"
                                                 )}
                                             >
                                                 <div className="p-1.5 rounded bg-white/5 group-hover:bg-blue-500/20 transition-colors">
                                                     <PlayCircle className="size-3.5 group-hover:scale-110 transition-transform" />
                                                 </div>
-                                                <span className="font-medium">Replay Flight</span>
+                                                <span className="font-medium">{isHebrew ? "נגן טיסה" : "Replay Flight"}</span>
                                             </button>
 
                                             {mode === 'feedback' && (
@@ -649,7 +683,8 @@ export const ReportPanel: React.FC<ReportPanelProps> = ({ anomaly, onClose, clas
                                                     }}
                                                     disabled={isReanalyzing}
                                                     className={clsx(
-                                                        "flex items-center gap-3 w-full px-3 py-2.5 text-sm text-left rounded-md transition-all duration-200 group disabled:opacity-50",
+                                                        "flex items-center gap-3 w-full px-3 py-2.5 text-sm rounded-md transition-all duration-200 group disabled:opacity-50",
+                                                        isHebrew ? "text-right flex-row-reverse" : "text-left",
                                                         "text-white/80 hover:text-purple-300 hover:bg-purple-500/10"
                                                     )}
                                                 >
@@ -661,7 +696,7 @@ export const ReportPanel: React.FC<ReportPanelProps> = ({ anomaly, onClose, clas
                                                         )}
                                                     </div>
                                                     <span className="font-medium">
-                                                        {isReanalyzing ? "Analyzing..." : "Re-Analyze"}
+                                                        {isReanalyzing ? (isHebrew ? "מנתח..." : "Analyzing...") : (isHebrew ? "נתח מחדש" : "Re-Analyze")}
                                                     </span>
                                                 </button>
                                             )}
@@ -672,9 +707,12 @@ export const ReportPanel: React.FC<ReportPanelProps> = ({ anomaly, onClose, clas
                         </div>
                     </div>
                 </div>
-                <button onClick={onClose} className="text-white/60 hover:text-white p-1 rounded hover:bg-white/10 self-start">
-                    <X className="size-5" />
-                </button>
+                
+                <div className="flex flex-col gap-2 items-end">
+                    <button onClick={onClose} className="text-white/60 hover:text-white p-1 rounded hover:bg-white/10">
+                        <X className="size-5" />
+                    </button>
+                </div>
             </div>
 
             {/* Content */}
@@ -689,75 +727,83 @@ export const ReportPanel: React.FC<ReportPanelProps> = ({ anomaly, onClose, clas
                                 <Loader2 className="size-10 text-purple-400 animate-spin relative z-10" />
                             </div>
                             <div className="text-center">
-                                <p className="font-bold text-white text-lg">Re-analyzing Flight</p>
-                                <p className="text-sm text-white/60">Running anomaly detection pipeline...</p>
+                                <p className="font-bold text-white text-lg">{isHebrew ? "מנתח טיסה מחדש" : "Re-analyzing Flight"}</p>
+                                <p className="text-sm text-white/60">{isHebrew ? "מריץ צנרת זיהוי אנומליות..." : "Running anomaly detection pipeline..."}</p>
                             </div>
                         </div>
                     </div>
                 )}
 
                 {/* Overall Summary */}
-                <div className="bg-primary/10 rounded-lg p-3 border border-primary/20">
-                    <p className="text-xs text-primary font-bold uppercase mb-1">System Verdict</p>
+                <div className="bg-primary/10 rounded-lg p-3 border border-primary/20" dir={isHebrew ? "rtl" : "ltr"}>
+                    <p className="text-xs text-primary font-bold uppercase mb-1">{isHebrew ? "פסיקת מערכת" : "System Verdict"}</p>
                     <div className="flex items-center gap-2 mb-2">
                         <span className={clsx("text-lg font-bold", summary.is_anomaly ? "text-red-400" : "text-green-400")}>
-                            {summary.is_anomaly ? "ANOMALY DETECTED" : "NORMAL FLIGHT"}
+                            {summary.is_anomaly 
+                                ? (isHebrew ? "זוהתה אנומליה" : "ANOMALY DETECTED") 
+                                : (isHebrew ? "טיסה תקינה" : "NORMAL FLIGHT")}
                         </span>
                     </div>
                     <div className="flex flex-col gap-1">
                         <p className="text-xs text-white/80">
-                            Confidence Score: <span className={clsx("font-mono font-bold", confidenceColor)}>{summary.confidence_score}%</span>
+                            {isHebrew ? "ציון ביטחון: " : "Confidence Score: "}<span className={clsx("font-mono font-bold", confidenceColor)}>{summary.confidence_score}%</span>
                         </p>
                         <p className="text-xs text-white/60">
-                            Detected At: <span className="font-mono">{new Date(localAnomaly.timestamp * 1000).toLocaleString()}</span>
+                            {isHebrew ? "זוהה ב: " : "Detected At: "}<span className="font-mono">{new Date(localAnomaly.timestamp * 1000).toLocaleString()}</span>
                         </p>
                     </div>
                 </div>
 
                 {/* Layers */}
-                <div className="space-y-3">
-                    <p className="text-xs text-white/40 font-bold uppercase tracking-wider">Layer Analysis</p>
+                <div className="space-y-3" dir={isHebrew ? "rtl" : "ltr"}>
+                    <p className="text-xs text-white/40 font-bold uppercase tracking-wider">{isHebrew ? "ניתוח שכבות" : "Layer Analysis"}</p>
                     
                     <LayerCard 
-                        title="Layer 1: Rule Engine" 
+                        title={isHebrew ? "שכבה 1: מנוע חוקים" : "Layer 1: Rule Engine"}
                         data={report.layer_1_rules} 
                         type="rules" 
                         resolvedCallsigns={resolvedCallsigns}
+                        isHebrew={isHebrew}
                     />
                     
                     <LayerCard 
-                        title="Layer 2: XGBoost" 
+                        title={isHebrew ? "שכבה 2: XGBoost" : "Layer 2: XGBoost"}
                         data={report.layer_2_xgboost} 
                         type="model"
                         onFlyTo={onFlyTo}
+                        isHebrew={isHebrew}
                     />
 
                     <LayerCard 
-                        title="Layer 3: Deep Dense Autoencoder" 
+                        title={isHebrew ? "שכבה 3: מקודד אוטומטי עמוק" : "Layer 3: Deep Dense Autoencoder"}
                         data={report.layer_3_deep_dense} 
                         type="model"
                         onFlyTo={onFlyTo}
+                        isHebrew={isHebrew}
                     />
 
                     <LayerCard 
-                        title="Layer 4: Deep CNN" 
+                        title={isHebrew ? "שכבה 4: CNN עמוק" : "Layer 4: Deep CNN"}
                         data={report.layer_4_deep_cnn} 
                         type="model"
                         onFlyTo={onFlyTo}
+                        isHebrew={isHebrew}
                     />
 
                     <LayerCard 
-                        title="Layer 5: Transformer" 
+                        title={isHebrew ? "שכבה 5: טרנספורמר" : "Layer 5: Transformer"}
                         data={report.layer_5_transformer} 
                         type="model"
                         onFlyTo={onFlyTo}
+                        isHebrew={isHebrew}
                     />
 
                     <LayerCard 
-                        title="Layer 6: Hybrid CNN-Transformer" 
+                        title={isHebrew ? "שכבה 6: CNN-טרנספורמר היברידי" : "Layer 6: Hybrid CNN-Transformer"}
                         data={report.layer_6_hybrid} 
                         type="model"
                         onFlyTo={onFlyTo} 
+                        isHebrew={isHebrew}
                     />
                 </div>
 
@@ -765,14 +811,14 @@ export const ReportPanel: React.FC<ReportPanelProps> = ({ anomaly, onClose, clas
                 <div className="rounded-xl p-4 border shadow-lg mt-4" style={{
                     background: 'rgb(var(--color-surface) / 0.8)',
                     borderColor: 'rgb(var(--color-primary) / 0.2)'
-                }}>
+                }} dir={isHebrew ? "rtl" : "ltr"}>
                     <div className="flex items-center gap-2 mb-4">
                         <div className="h-8 w-1 rounded-full" style={{
                             background: 'rgb(var(--color-primary))'
                         }}></div>
                         <p className="text-sm font-bold uppercase tracking-wide" style={{
                             color: 'rgb(var(--color-text))'
-                        }}>Human Feedback</p>
+                        }}>{isHebrew ? "משוב אנושי" : "Human Feedback"}</p>
                     </div>
                     
                     {feedbackStatus === 'success' ? (
@@ -791,10 +837,10 @@ export const ReportPanel: React.FC<ReportPanelProps> = ({ anomaly, onClose, clas
                                 <div>
                                     <p className="font-bold" style={{
                                         color: 'rgb(134 239 172)'
-                                    }}>Feedback Submitted!</p>
+                                    }}>{isHebrew ? "משוב נשלח!" : "Feedback Submitted!"}</p>
                                     <p className="text-xs mt-0.5" style={{
                                         color: 'rgb(var(--color-text-muted))'
-                                    }}>Thank you for helping improve our system</p>
+                                    }}>{isHebrew ? "תודה שעזרת לשפר את המערכת" : "Thank you for helping improve our system"}</p>
                                 </div>
                             </div>
                         </div>
@@ -806,10 +852,10 @@ export const ReportPanel: React.FC<ReportPanelProps> = ({ anomaly, onClose, clas
                             }}>
                                 <p className="text-sm font-medium" style={{
                                     color: 'rgb(var(--color-text))'
-                                }}>Is this actually an anomaly?</p>
+                                }}>{isHebrew ? "תייג אנומליה זו" : "Tag this anomaly"}</p>
                                 <p className="text-xs mt-1" style={{
                                     color: 'rgb(var(--color-text-muted))'
-                                }}>Your feedback helps train our AI models</p>
+                                }}>{isHebrew ? "בחר את סוג החוק ושלח את המשוב שלך" : "Select the rule type and submit your feedback"}</p>
                             </div>
                             
                             {/* Rule Selection Button - Required for anomaly */}
@@ -817,7 +863,7 @@ export const ReportPanel: React.FC<ReportPanelProps> = ({ anomaly, onClose, clas
                                 <label className="text-xs font-medium flex items-center gap-1" style={{
                                     color: 'rgb(var(--color-text) / 0.9)'
                                 }}>
-                                    Which rule triggered this anomaly?
+                                    {isHebrew ? "איזה חוק הפעיל אנומליה זו?" : "Which rule triggered this anomaly?"}
                                     <span className="text-red-400 text-sm">*</span>
                                 </label>
                                 
@@ -843,9 +889,9 @@ export const ReportPanel: React.FC<ReportPanelProps> = ({ anomaly, onClose, clas
                                                     className: "size-5",
                                                     style: { color: 'rgb(var(--color-primary))' }
                                                 })}
-                                                <div className="text-left">
+                                                <div className={isHebrew ? "text-right" : "text-left"}>
                                                     <p className="font-medium" style={{ color: 'rgb(var(--color-text))' }}>
-                                                        {rules.find(r => r.id === selectedRuleId)?.name}
+                                                        {isHebrew ? rules.find(r => r.id === selectedRuleId)?.nameHe : rules.find(r => r.id === selectedRuleId)?.name}
                                                     </p>
                                                     <p className="text-xs" style={{ color: 'rgb(var(--color-text-muted))' }}>
                                                         {rules.find(r => r.id === selectedRuleId)?.description}
@@ -855,27 +901,30 @@ export const ReportPanel: React.FC<ReportPanelProps> = ({ anomaly, onClose, clas
                                         ) : selectedRuleId === 'other' ? (
                                             <>
                                                 <AlertTriangle className="size-5 text-yellow-400" />
-                                                <div className="text-left">
+                                                <div className={isHebrew ? "text-right" : "text-left"}>
                                                     <p className="font-medium" style={{ color: 'rgb(var(--color-text))' }}>
-                                                        Other / Custom Anomaly
+                                                        {isHebrew ? "אחר / אנומליה מותאמת" : "Other / Custom Anomaly"}
                                                     </p>
                                                     <p className="text-xs" style={{ color: 'rgb(var(--color-text-muted))' }}>
-                                                        Custom anomaly type
+                                                        {isHebrew ? "סוג אנומליה מותאם אישית" : "Custom anomaly type"}
                                                     </p>
                                                 </div>
                                             </>
                                         ) : (
-                                            <div className="text-left">
+                                            <div className={isHebrew ? "text-right" : "text-left"}>
                                                 <p className="font-medium" style={{ color: 'rgb(var(--color-text-muted))' }}>
-                                                    Select a rule...
+                                                    {isHebrew ? "...בחר חוק" : "Select a rule..."}
                                                 </p>
                                                 <p className="text-xs" style={{ color: 'rgb(var(--color-text-muted) / 0.6)' }}>
-                                                    Click to choose from available rules
+                                                    {isHebrew ? "לחץ כדי לבחור מתוך החוקים הזמינים" : "Click to choose from available rules"}
                                                 </p>
                                             </div>
                                         )}
                                     </div>
-                                    <Navigation className="size-5 group-hover:translate-x-1 transition-transform" style={{
+                                    <Navigation className={clsx(
+                                        "size-5 transition-transform", 
+                                        isHebrew ? "group-hover:-translate-x-1 rotate-180" : "group-hover:translate-x-1"
+                                    )} style={{
                                         color: 'rgb(var(--color-text-muted))'
                                     }} />
                                 </button>
@@ -883,7 +932,7 @@ export const ReportPanel: React.FC<ReportPanelProps> = ({ anomaly, onClose, clas
                                 {ruleError && selectedRuleId === null && (
                                     <div className="flex items-center gap-1.5 text-xs text-red-400 animate-in slide-in-from-top-1">
                                         <AlertTriangle className="size-3" />
-                                        <span>Please select which rule applies to submit feedback</span>
+                                        <span>{isHebrew ? "אנא בחר איזה חוק תקף כדי לשלוח משוב" : "Please select which rule applies to submit feedback"}</span>
                                     </div>
                                 )}
                             </div>
@@ -898,7 +947,7 @@ export const ReportPanel: React.FC<ReportPanelProps> = ({ anomaly, onClose, clas
                                             color: 'rgb(250 204 21)'
                                         }}>
                                             <AlertTriangle className="size-3.5" />
-                                            Describe the custom anomaly type
+                                            {isHebrew ? "תאר את סוג האנומליה המותאם" : "Describe the custom anomaly type"}
                                             <span className="text-red-400 text-sm">*</span>
                                         </label>
                                         <textarea
@@ -907,7 +956,10 @@ export const ReportPanel: React.FC<ReportPanelProps> = ({ anomaly, onClose, clas
                                                 setOtherDetails(e.target.value);
                                                 setRuleError(false);
                                             }}
-                                            placeholder="E.g., Unusual communication pattern, unexpected holding pattern, suspicious route deviation, etc..."
+                                            placeholder={isHebrew 
+                                                ? "לדוגמה: דפוס תקשורת חריג, תבנית המתנה לא צפויה, סטייה חשודה מהמסלול, וכו'..." 
+                                                : "E.g., Unusual communication pattern, unexpected holding pattern, suspicious route deviation, etc..."
+                                            }
                                             rows={4}
                                             style={{
                                                 background: 'rgb(var(--color-background) / 0.5)',
@@ -924,27 +976,28 @@ export const ReportPanel: React.FC<ReportPanelProps> = ({ anomaly, onClose, clas
                                         <p className="text-[10px] mt-2 italic" style={{
                                             color: 'rgb(var(--color-text-muted))'
                                         }}>
-                                            💡 Be specific about what makes this flight anomalous
+                                            {isHebrew ? "💡 היה ספציפי לגבי מה הופך טיסה זו לחריגה" : "💡 Be specific about what makes this flight anomalous"}
                                         </p>
                                     </div>
                                     {ruleError && !otherDetails.trim() && (
                                         <div className="flex items-center gap-1.5 text-xs text-red-400 animate-in slide-in-from-top-1">
                                             <AlertTriangle className="size-3" />
-                                            <span>Please describe the anomaly type to continue</span>
+                                            <span>{isHebrew ? "אנא תאר את סוג האנומליה כדי להמשיך" : "Please describe the anomaly type to continue"}</span>
                                         </div>
                                     )}
                                 </div>
                             )}
                             
+                            {/* Feedback Buttons - Anomaly and Normal */}
                             <div className="flex gap-3">
                                 <button
                                     onClick={() => handleFeedback(true)}
                                     disabled={feedbackStatus === 'submitting'}
-                                    className="flex-1 flex flex-col items-center justify-center gap-2 p-4 rounded-lg border-2 font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg active:scale-95 hover:shadow-xl"
+                                    className="flex-1 flex items-center justify-center gap-3 p-4 rounded-lg border-2 font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg active:scale-95 hover:shadow-xl"
                                     style={{
                                         background: 'rgb(239 68 68 / 0.15)',
                                         borderColor: 'rgb(239 68 68 / 0.5)',
-                                        color: 'rgb(252 165 165)'
+                                        color: 'rgb(248 113 113)'
                                     }}
                                     onMouseEnter={(e) => {
                                         e.currentTarget.style.background = 'rgb(239 68 68 / 0.25)';
@@ -955,17 +1008,24 @@ export const ReportPanel: React.FC<ReportPanelProps> = ({ anomaly, onClose, clas
                                         e.currentTarget.style.borderColor = 'rgb(239 68 68 / 0.5)';
                                     }}
                                 >
-                                    <AlertTriangle className="size-5" />
-                                    <span className="text-sm">Yes, Anomaly</span>
+                                    {feedbackStatus === 'submitting' ? (
+                                        <Loader2 className="size-5 animate-spin" />
+                                    ) : (
+                                        <AlertTriangle className="size-5" />
+                                    )}
+                                    <span className="text-sm font-bold">
+                                        {feedbackStatus === 'submitting' ? (isHebrew ? "שולח..." : "Submitting...") : (isHebrew ? "אנומליה" : "Anomaly")}
+                                    </span>
                                 </button>
+                                
                                 <button
                                     onClick={() => handleFeedback(false)}
                                     disabled={feedbackStatus === 'submitting'}
-                                    className="flex-1 flex flex-col items-center justify-center gap-2 p-4 rounded-lg border-2 font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg active:scale-95 hover:shadow-xl"
+                                    className="flex-1 flex items-center justify-center gap-3 p-4 rounded-lg border-2 font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg active:scale-95 hover:shadow-xl"
                                     style={{
                                         background: 'rgb(34 197 94 / 0.15)',
                                         borderColor: 'rgb(34 197 94 / 0.5)',
-                                        color: 'rgb(134 239 172)'
+                                        color: 'rgb(74 222 128)'
                                     }}
                                     onMouseEnter={(e) => {
                                         e.currentTarget.style.background = 'rgb(34 197 94 / 0.25)';
@@ -976,20 +1036,26 @@ export const ReportPanel: React.FC<ReportPanelProps> = ({ anomaly, onClose, clas
                                         e.currentTarget.style.borderColor = 'rgb(34 197 94 / 0.5)';
                                     }}
                                 >
-                                    <ThumbsUp className="size-5" />
-                                    <span className="text-sm">No, Normal</span>
+                                    {feedbackStatus === 'submitting' ? (
+                                        <Loader2 className="size-5 animate-spin" />
+                                    ) : (
+                                        <CheckCircle className="size-5" />
+                                    )}
+                                    <span className="text-sm font-bold">
+                                        {feedbackStatus === 'submitting' ? (isHebrew ? "שולח..." : "Submitting...") : (isHebrew ? "תקין" : "Normal")}
+                                    </span>
                                 </button>
                             </div>
 
                             <div className="relative">
                                 <label className="text-xs mb-1.5 block" style={{
                                     color: 'rgb(var(--color-text-muted))'
-                                }}>Additional Comments (Optional)</label>
+                                }}>{isHebrew ? "הערות נוספות (אופציונלי)" : "Additional Comments (Optional)"}</label>
                                 <input
                                     type="text"
                                     value={comment}
                                     onChange={(e) => setComment(e.target.value)}
-                                    placeholder="Add any additional notes or context..."
+                                    placeholder={isHebrew ? "הוסף הערות או הקשר נוסף..." : "Add any additional notes or context..."}
                                     style={{
                                         background: 'rgb(var(--color-background) / 0.5)',
                                         borderColor: 'rgb(var(--color-border) / 0.3)',
@@ -1006,7 +1072,7 @@ export const ReportPanel: React.FC<ReportPanelProps> = ({ anomaly, onClose, clas
                             </div>
                             
                             {feedbackStatus === 'error' && (
-                                <p className="text-xs text-red-400">Failed to submit feedback. Try again.</p>
+                                <p className="text-xs text-red-400">{isHebrew ? "שליחת המשוב נכשלה. נסה שנית." : "Failed to submit feedback. Try again."}</p>
                             )}
                         </div>
                     )}
@@ -1056,25 +1122,21 @@ export const ReportPanel: React.FC<ReportPanelProps> = ({ anomaly, onClose, clas
                             color: 'rgb(var(--color-text))',
                             textShadow: '0 2px 10px rgba(0,0,0,0.5)'
                         }}>
-                            Select Rule Type
+                            {isHebrew ? "בחר סוג חוק" : "Select Rule Type"}
                         </h3>
                         <p className="text-sm" style={{ 
                             color: 'rgb(var(--color-text-muted))',
                             textShadow: '0 1px 5px rgba(0,0,0,0.5)'
                         }}>
-                            Click on the rule that best describes this anomaly
+                            {isHebrew ? "לחץ על החוק שמתאר הכי טוב את האנומליה" : "Click on the rule that best describes this anomaly"}
                         </p>
                     </div>
                     
-                    {/* Floating Rules */}
+                    {/* Floating Rules - Organized by Category */}
                     <div className="space-y-6">
-                        {/* Emergency & Safety */}
                         <div className="flex flex-wrap gap-6 justify-center items-center">
-                                {rules.filter(r => 
-                                    r.name.toLowerCase().includes('squawk') || 
-                                    r.name.toLowerCase().includes('proximity') ||
-                                    (r.name.toLowerCase().includes('altitude') && r.name.toLowerCase().includes('low'))
-                                ).map((rule, idx) => {
+                                {/* Emergency & Safety (Red) */}
+                                {rules.filter(r => r.category === 'emergency').map((rule, idx) => {
                                     const Icon = getRuleIcon(rule.id);
                                     const isSelected = selectedRuleId === rule.id;
                                     return (
@@ -1114,23 +1176,18 @@ export const ReportPanel: React.FC<ReportPanelProps> = ({ anomaly, onClose, clas
                                                     color: 'rgb(var(--color-text))',
                                                     textShadow: '0 2px 5px rgba(0,0,0,0.5)'
                                                 }}>
-                                                    {rule.name}
+                                                    {isHebrew ? rule.nameHe : rule.name}
                                                 </p>
                                             </div>
                                         </button>
                                     );
                                 })}
                         
-                        {/* Flight Path & Navigation */}
-                                {rules.filter(r => 
-                                    (r.name.toLowerCase().includes('altitude') && !r.name.toLowerCase().includes('low')) ||
-                                    r.name.toLowerCase().includes('turn') ||
-                                    r.name.toLowerCase().includes('course') ||
-                                    r.name.toLowerCase().includes('off')
-                                ).map((rule, idx) => {
+                                {/* Flight Operations (Blue) */}
+                                {rules.filter(r => r.category === 'flight_ops').map((rule, idx) => {
                                     const Icon = getRuleIcon(rule.id);
                                     const isSelected = selectedRuleId === rule.id;
-                                    const baseDelay = 3; // Start after red circles
+                                    const baseDelay = 3;
                                     return (
                                         <button
                                             key={rule.id}
@@ -1168,76 +1225,18 @@ export const ReportPanel: React.FC<ReportPanelProps> = ({ anomaly, onClose, clas
                                                     color: 'rgb(var(--color-text))',
                                                     textShadow: '0 2px 5px rgba(0,0,0,0.5)'
                                                 }}>
-                                                    {rule.name}
+                                                    {isHebrew ? rule.nameHe : rule.name}
                                                 </p>
                                             </div>
                                         </button>
                                     );
                                 })}
                         
-                        {/* Landing & Departure */}
-                                {rules.filter(r => 
-                                    r.name.toLowerCase().includes('around') ||
-                                    r.name.toLowerCase().includes('return') ||
-                                    r.name.toLowerCase().includes('diversion') ||
-                                    r.name.toLowerCase().includes('landing')
-                                ).map((rule, idx) => {
+                                {/* Technical (Purple) */}
+                                {rules.filter(r => r.category === 'technical').map((rule, idx) => {
                                     const Icon = getRuleIcon(rule.id);
                                     const isSelected = selectedRuleId === rule.id;
-                                    const baseDelay = 7; // Start after blue circles
-                                    return (
-                                        <button
-                                            key={rule.id}
-                                            onClick={() => {
-                                                setSelectedRuleId(rule.id);
-                                                setRuleError(false);
-                                                setShowRuleSelector(false);
-                                            }}
-                                            className="flex flex-col items-center gap-2 transition-all hover:scale-110 group relative opacity-0"
-                                            style={{
-                                                animation: 'jumpIn 0.5s cubic-bezier(0.68, -0.55, 0.265, 1.55) forwards',
-                                                animationDelay: `${(baseDelay + idx) * 0.1}s`
-                                            }}
-                                        >
-                                            <div 
-                                                className="w-20 h-20 rounded-full flex items-center justify-center transition-all group-hover:shadow-2xl"
-                                                style={{
-                                                    background: isSelected 
-                                                        ? 'linear-gradient(135deg, rgb(34 197 94 / 0.4), rgb(22 163 74 / 0.6))' 
-                                                        : 'linear-gradient(135deg, rgb(34 197 94 / 0.3), rgb(22 163 74 / 0.2))',
-                                                    border: isSelected ? '4px solid rgb(34 197 94)' : '3px solid rgb(34 197 94 / 0.5)',
-                                                    boxShadow: isSelected 
-                                                        ? '0 10px 40px rgb(34 197 94 / 0.6), inset 0 2px 10px rgb(255 255 255 / 0.1)' 
-                                                        : '0 5px 20px rgb(34 197 94 / 0.3)',
-                                                    backdropFilter: 'blur(10px)'
-                                                }}
-                                            >
-                                                <Icon className="size-8 text-green-300 group-hover:scale-110 transition-transform" />
-                                                {isSelected && (
-                                                    <CheckCircle className="size-5 text-green-300 absolute -top-1 -right-1 animate-in zoom-in" />
-                                                )}
-                                            </div>
-                                            <div className="text-center max-w-[100px]">
-                                                <p className="text-xs font-bold" style={{ 
-                                                    color: 'rgb(var(--color-text))',
-                                                    textShadow: '0 2px 5px rgba(0,0,0,0.5)'
-                                                }}>
-                                                    {rule.name}
-                                                </p>
-                                            </div>
-                                        </button>
-                                    );
-                                })}
-                        
-                        {/* Technical */}
-                                {rules.filter(r => 
-                                    r.name.toLowerCase().includes('signal') ||
-                                    r.name.toLowerCase().includes('loss') ||
-                                    r.name.toLowerCase().includes('communication')
-                                ).map((rule, idx) => {
-                                    const Icon = getRuleIcon(rule.id);
-                                    const isSelected = selectedRuleId === rule.id;
-                                    const baseDelay = 11; // Start after green circles
+                                    const baseDelay = 7;
                                     return (
                                         <button
                                             key={rule.id}
@@ -1275,14 +1274,63 @@ export const ReportPanel: React.FC<ReportPanelProps> = ({ anomaly, onClose, clas
                                                     color: 'rgb(var(--color-text))',
                                                     textShadow: '0 2px 5px rgba(0,0,0,0.5)'
                                                 }}>
-                                                    {rule.name}
+                                                    {isHebrew ? rule.nameHe : rule.name}
                                                 </p>
                                             </div>
                                         </button>
                                     );
                                 })}
                         
-                        {/* Other / Custom */}
+                                {/* Military & Security (Green) */}
+                                {rules.filter(r => r.category === 'military').map((rule, idx) => {
+                                    const Icon = getRuleIcon(rule.id);
+                                    const isSelected = selectedRuleId === rule.id;
+                                    const baseDelay = 9;
+                                    return (
+                                        <button
+                                            key={rule.id}
+                                            onClick={() => {
+                                                setSelectedRuleId(rule.id);
+                                                setRuleError(false);
+                                                setShowRuleSelector(false);
+                                            }}
+                                            className="flex flex-col items-center gap-2 transition-all hover:scale-110 group relative opacity-0"
+                                            style={{
+                                                animation: 'jumpIn 0.5s cubic-bezier(0.68, -0.55, 0.265, 1.55) forwards',
+                                                animationDelay: `${(baseDelay + idx) * 0.1}s`
+                                            }}
+                                        >
+                                            <div 
+                                                className="w-20 h-20 rounded-full flex items-center justify-center transition-all group-hover:shadow-2xl"
+                                                style={{
+                                                    background: isSelected 
+                                                        ? 'linear-gradient(135deg, rgb(34 197 94 / 0.4), rgb(22 163 74 / 0.6))' 
+                                                        : 'linear-gradient(135deg, rgb(34 197 94 / 0.3), rgb(22 163 74 / 0.2))',
+                                                    border: isSelected ? '4px solid rgb(34 197 94)' : '3px solid rgb(34 197 94 / 0.5)',
+                                                    boxShadow: isSelected 
+                                                        ? '0 10px 40px rgb(34 197 94 / 0.6), inset 0 2px 10px rgb(255 255 255 / 0.1)' 
+                                                        : '0 5px 20px rgb(34 197 94 / 0.3)',
+                                                    backdropFilter: 'blur(10px)'
+                                                }}
+                                            >
+                                                <Icon className="size-8 text-green-300 group-hover:scale-110 transition-transform" />
+                                                {isSelected && (
+                                                    <CheckCircle className="size-5 text-green-300 absolute -top-1 -right-1 animate-in zoom-in" />
+                                                )}
+                                            </div>
+                                            <div className="text-center max-w-[100px]">
+                                                <p className="text-xs font-bold" style={{ 
+                                                    color: 'rgb(var(--color-text))',
+                                                    textShadow: '0 2px 5px rgba(0,0,0,0.5)'
+                                                }}>
+                                                    {isHebrew ? rule.nameHe : rule.name}
+                                                </p>
+                                            </div>
+                                        </button>
+                                    );
+                                })}
+                        
+                        {/* Other / Custom (Yellow) */}
                             <button
                                 onClick={() => {
                                     setSelectedRuleId('other');
@@ -1318,7 +1366,7 @@ export const ReportPanel: React.FC<ReportPanelProps> = ({ anomaly, onClose, clas
                                         color: 'rgb(var(--color-text))',
                                         textShadow: '0 2px 5px rgba(0,0,0,0.5)'
                                     }}>
-                                        Other
+                                        {isHebrew ? "אחר" : "Other"}
                                     </p>
                                 </div>
                             </button>

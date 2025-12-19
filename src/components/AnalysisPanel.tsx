@@ -1,12 +1,10 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { X, Bot, Send, User, Trash2, FileText, Loader2, MonitorUp, MonitorOff, Eye, Camera, Clock, ScanEye } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { X, FileText, Loader2, Info, Plane, MapPin, Gauge, Calendar } from 'lucide-react';
 import type { AnomalyReport, TrackPoint } from '../types';
-import { analyzeWithAI } from '../api';
-import { stripDataUrlPrefix } from '../utils/screenshot';
-import { parseActionsFromResponse, processActions, stripActionsFromText, type AIAction } from '../utils/aiActions';
+import { fetchTaggedFlightMetadata, fetchResearchFlightMetadata, type FlightMetadata } from '../api';
 import type { ProcessedActions } from '../utils/aiActions';
 import clsx from 'clsx';
-import { TypewriterMarkdown } from '../utils/markdown';
+import { useLanguage } from '../contexts/LanguageContext';
 
 // Import the original ReportPanel content component
 import { ReportPanel } from './ReportPanel';
@@ -14,13 +12,6 @@ import { ReportPanel } from './ReportPanel';
 // ============================================================
 // Types
 // ============================================================
-
-interface ChatMessage {
-    role: 'user' | 'assistant';
-    content: string;
-    screenshot?: string; // base64 thumbnail
-    actions?: AIAction[];
-}
 
 interface AnalysisPanelProps {
     anomaly: AnomalyReport | null;
@@ -32,292 +23,209 @@ interface AnalysisPanelProps {
     mode?: 'historical' | 'realtime' | 'research' | 'rules' | 'feedback' | 'ai-results';
 }
 
-// TypewriterText removed - now using TypewriterMarkdown from utils/markdown
+// ============================================================
+// Flight Metadata Panel Component
+// ============================================================
+
+interface FlightMetadataPanelProps {
+    metadata: FlightMetadata | null;
+    loading: boolean;
+    isHebrew: boolean;
+}
+
+const FlightMetadataPanel: React.FC<FlightMetadataPanelProps> = ({ metadata, loading, isHebrew }) => {
+    if (loading) {
+        return (
+            <div className="flex items-center justify-center h-full">
+                <Loader2 className="size-8 animate-spin text-cyan-500" />
+            </div>
+        );
+    }
+
+    if (!metadata) {
+        return (
+            <div className="flex flex-col items-center justify-center h-full text-white/40 p-8">
+                <Info className="size-12 mb-4" />
+                <p className="text-center">
+                    {isHebrew ? "אין מידע זמין עבור טיסה זו" : "No metadata available for this flight"}
+                </p>
+            </div>
+        );
+    }
+
+    const formatDuration = (seconds?: number) => {
+        if (!seconds) return '-';
+        const hours = Math.floor(seconds / 3600);
+        const minutes = Math.floor((seconds % 3600) / 60);
+        return `${hours}h ${minutes}m`;
+    };
+
+    const formatTimestamp = (ts?: number) => {
+        if (!ts) return '-';
+        return new Date(ts * 1000).toLocaleString();
+    };
+
+    const formatNumber = (num?: number, decimals = 0) => {
+        if (num === undefined || num === null) return '-';
+        return num.toLocaleString(undefined, { maximumFractionDigits: decimals });
+    };
+
+    const MetadataRow = ({ label, value, icon }: { label: string; value: React.ReactNode; icon?: React.ReactNode }) => (
+        <div className="flex items-center justify-between py-2 border-b border-white/5 last:border-0">
+            <div className="flex items-center gap-2 text-white/60 text-sm">
+                {icon}
+                <span>{label}</span>
+            </div>
+            <span className="text-white font-medium text-sm">{value || '-'}</span>
+        </div>
+    );
+
+    const Section = ({ title, children }: { title: string; children: React.ReactNode }) => (
+        <div className="mb-6">
+            <h4 className="text-xs font-bold text-white/40 uppercase tracking-wider mb-3">{title}</h4>
+            <div className="bg-white/5 rounded-lg px-4">
+                {children}
+            </div>
+        </div>
+    );
+
+    return (
+        <div className="h-full overflow-y-auto p-4 space-y-2">
+            {/* Flight Identity */}
+            <Section title={isHebrew ? "זיהוי טיסה" : "Flight Identity"}>
+                <MetadataRow label={isHebrew ? "מזהה טיסה" : "Flight ID"} value={metadata.flight_id} />
+                <MetadataRow label={isHebrew ? "קריאה" : "Callsign"} value={metadata.callsign} icon={<Plane className="size-3" />} />
+                <MetadataRow label={isHebrew ? "מספר טיסה" : "Flight Number"} value={metadata.flight_number} />
+                <MetadataRow label={isHebrew ? "חברת תעופה" : "Airline"} value={metadata.airline} />
+                <MetadataRow label={isHebrew ? "סוג מטוס" : "Aircraft Type"} value={metadata.aircraft_type} />
+                <MetadataRow label={isHebrew ? "דגם" : "Model"} value={metadata.aircraft_model} />
+                <MetadataRow label={isHebrew ? "רישום" : "Registration"} value={metadata.aircraft_registration} />
+                {metadata.is_military && (
+                    <MetadataRow 
+                        label={isHebrew ? "צבאי" : "Military"} 
+                        value={<span className="px-2 py-0.5 bg-red-500/20 text-red-400 rounded text-xs">{metadata.military_type || 'Yes'}</span>} 
+                    />
+                )}
+            </Section>
+
+            {/* Route */}
+            <Section title={isHebrew ? "מסלול" : "Route"}>
+                <MetadataRow label={isHebrew ? "מקור" : "Origin"} value={metadata.origin_airport} icon={<MapPin className="size-3" />} />
+                <MetadataRow label={isHebrew ? "יעד" : "Destination"} value={metadata.destination_airport} icon={<MapPin className="size-3" />} />
+                <MetadataRow label={isHebrew ? "שדה קרוב (התחלה)" : "Nearest Airport (Start)"} value={metadata.nearest_airport_start} />
+                <MetadataRow label={isHebrew ? "שדה קרוב (סיום)" : "Nearest Airport (End)"} value={metadata.nearest_airport_end} />
+                <MetadataRow label={isHebrew ? "חצה גבולות" : "Crossed Borders"} value={metadata.crossed_borders} />
+            </Section>
+
+            {/* Time */}
+            <Section title={isHebrew ? "זמנים" : "Timing"}>
+                <MetadataRow label={isHebrew ? "נראה לראשונה" : "First Seen"} value={formatTimestamp(metadata.first_seen_ts)} icon={<Calendar className="size-3" />} />
+                <MetadataRow label={isHebrew ? "נראה לאחרונה" : "Last Seen"} value={formatTimestamp(metadata.last_seen_ts)} icon={<Calendar className="size-3" />} />
+                <MetadataRow label={isHebrew ? "משך טיסה" : "Flight Duration"} value={formatDuration(metadata.flight_duration_sec)} />
+                <MetadataRow label={isHebrew ? "המראה מתוכננת" : "Scheduled Departure"} value={metadata.scheduled_departure} />
+                <MetadataRow label={isHebrew ? "נחיתה מתוכננת" : "Scheduled Arrival"} value={metadata.scheduled_arrival} />
+            </Section>
+
+            {/* Performance */}
+            <Section title={isHebrew ? "ביצועים" : "Performance"}>
+                <MetadataRow label={isHebrew ? "גובה מינימלי" : "Min Altitude"} value={`${formatNumber(metadata.min_altitude_ft)} ft`} icon={<Gauge className="size-3" />} />
+                <MetadataRow label={isHebrew ? "גובה מקסימלי" : "Max Altitude"} value={`${formatNumber(metadata.max_altitude_ft)} ft`} />
+                <MetadataRow label={isHebrew ? "גובה ממוצע" : "Avg Altitude"} value={`${formatNumber(metadata.avg_altitude_ft)} ft`} />
+                <MetadataRow label={isHebrew ? "גובה שיוט" : "Cruise Altitude"} value={`${formatNumber(metadata.cruise_altitude_ft)} ft`} />
+                <MetadataRow label={isHebrew ? "מהירות מינימלית" : "Min Speed"} value={`${formatNumber(metadata.min_speed_kts)} kts`} />
+                <MetadataRow label={isHebrew ? "מהירות מקסימלית" : "Max Speed"} value={`${formatNumber(metadata.max_speed_kts)} kts`} />
+                <MetadataRow label={isHebrew ? "מהירות ממוצעת" : "Avg Speed"} value={`${formatNumber(metadata.avg_speed_kts)} kts`} />
+            </Section>
+
+            {/* Track Data */}
+            <Section title={isHebrew ? "נתוני מסלול" : "Track Data"}>
+                <MetadataRow label={isHebrew ? "סה״כ נקודות" : "Total Points"} value={formatNumber(metadata.total_points)} />
+                <MetadataRow label={isHebrew ? "מרחק כולל" : "Total Distance"} value={`${formatNumber(metadata.total_distance_nm, 1)} NM`} />
+                <MetadataRow label={isHebrew ? "קודי סקווק" : "Squawk Codes"} value={metadata.squawk_codes} />
+                <MetadataRow 
+                    label={isHebrew ? "סקווק חירום" : "Emergency Squawk"} 
+                    value={metadata.emergency_squawk_detected 
+                        ? <span className="px-2 py-0.5 bg-red-500/20 text-red-400 rounded text-xs">Yes</span>
+                        : <span className="text-white/40">No</span>
+                    } 
+                />
+                <MetadataRow label={isHebrew ? "אירועי איבוד אות" : "Signal Loss Events"} value={formatNumber(metadata.signal_loss_events)} />
+                <MetadataRow label={isHebrew ? "ציון איכות נתונים" : "Data Quality Score"} value={metadata.data_quality_score ? `${(metadata.data_quality_score * 100).toFixed(0)}%` : '-'} />
+            </Section>
+
+            {/* User Feedback */}
+            {metadata.feedback && (
+                <Section title={isHebrew ? "משוב משתמש" : "User Feedback"}>
+                    <MetadataRow label={isHebrew ? "תויג בתאריך" : "Tagged At"} value={formatTimestamp(metadata.feedback.tagged_at)} />
+                    <MetadataRow label={isHebrew ? "חוק" : "Rule"} value={metadata.feedback.rule_name || `Rule ${metadata.feedback.rule_id}`} />
+                    <MetadataRow label={isHebrew ? "הערות" : "Comments"} value={metadata.feedback.comments} />
+                    {metadata.feedback.other_details && (
+                        <MetadataRow label={isHebrew ? "פרטים נוספים" : "Other Details"} value={metadata.feedback.other_details} />
+                    )}
+                </Section>
+            )}
+        </div>
+    );
+};
 
 // ============================================================
 // Main Component
 // ============================================================
 
 export const AnalysisPanel: React.FC<AnalysisPanelProps> = ({ 
-    anomaly, 
-    flightPoints,
+    anomaly,
+    flightPoints: _flightPoints,
     onClose,
-    onAIActions,
+    onAIActions: _onAIActions,
     onFlyTo,
     className,
     mode = 'historical' 
 }) => {
-    const [activeTab, setActiveTab] = useState<'report' | 'ai'>('report');
-    const [messages, setMessages] = useState<ChatMessage[]>([
-        { role: 'assistant', content: "👁️ **Visual Analyst**\n\nI analyze what you see on screen for this flight. Share your screen to enable visual analysis, then ask me questions about what you're looking at." }
-    ]);
-    
-    // Countdown state for next capture
-    const [captureCountdown, setCaptureCountdown] = useState(5);
-    const countdownIntervalRef = useRef<NodeJS.Timeout | null>(null);
-    const [input, setInput] = useState('');
-    const [loading, setLoading] = useState(false);
-    const messagesEndRef = useRef<HTMLDivElement>(null);
-    
-    // Screen sharing state
-    const [isScreenSharing, setIsScreenSharing] = useState(false);
-    const [latestScreenshot, setLatestScreenshot] = useState<string | null>(null);
-    const [lastCaptureTime, setLastCaptureTime] = useState<Date | null>(null);
-    const screenStreamRef = useRef<MediaStream | null>(null);
-    const captureIntervalRef = useRef<NodeJS.Timeout | null>(null);
-    const videoRef = useRef<HTMLVideoElement | null>(null);
+    const [activeTab, setActiveTab] = useState<'report' | 'metadata'>('report');
+    const [metadata, setMetadata] = useState<FlightMetadata | null>(null);
+    const [loadingMetadata, setLoadingMetadata] = useState(false);
+    const { isHebrew } = useLanguage();
 
-    const scrollToBottom = () => {
-        messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-    };
-
+    // Fetch metadata when anomaly changes - use appropriate endpoint based on mode
     useEffect(() => {
-        scrollToBottom();
-    }, [messages]);
-
-    // Reset messages when anomaly changes
-    useEffect(() => {
-        setMessages([
-            { role: 'assistant', content: "👁️ **Visual Analyst**\n\nI analyze what you see on screen for this flight. Share your screen to enable visual analysis, then ask me questions about what you're looking at." }
-        ]);
-    }, [anomaly?.flight_id]);
-
-    // Cleanup on unmount
-    useEffect(() => {
-        return () => {
-            stopScreenSharing();
-            if (countdownIntervalRef.current) {
-                clearInterval(countdownIntervalRef.current);
-            }
-        };
-    }, []);
-
-    // ============================================================
-    // Screen Sharing with Continuous Capture
-    // ============================================================
-
-    const captureFrame = useCallback(() => {
-        if (!videoRef.current || !screenStreamRef.current) return;
-        
-        const video = videoRef.current;
-        if (video.readyState < 2) return; // Video not ready
-        
-        try {
-            const canvas = document.createElement('canvas');
-            canvas.width = video.videoWidth;
-            canvas.height = video.videoHeight;
-            const ctx = canvas.getContext('2d');
+        if (anomaly?.flight_id) {
+            setLoadingMetadata(true);
             
-            if (ctx) {
-                ctx.drawImage(video, 0, 0);
-                const screenshot = canvas.toDataURL('image/png');
-                setLatestScreenshot(screenshot);
-                setLastCaptureTime(new Date());
-            }
-        } catch (e) {
-            console.error('Failed to capture frame:', e);
-        }
-    }, []);
-
-    const startScreenSharing = async () => {
-        try {
-            // Request screen capture permission
-            const stream = await navigator.mediaDevices.getDisplayMedia({
-                video: {
-                    displaySurface: 'browser'
-                } as MediaTrackConstraints,
-                audio: false
-            });
-            
-            screenStreamRef.current = stream;
-            
-            // Create video element to capture from
-            const video = document.createElement('video');
-            video.srcObject = stream;
-            video.muted = true;
-            await video.play();
-            videoRef.current = video;
-            
-            // Wait for video to be ready
-            await new Promise(resolve => setTimeout(resolve, 500));
-            
-            // Capture initial frame
-            captureFrame();
-            setCaptureCountdown(5);
-            
-            // Start countdown interval (every second)
-            countdownIntervalRef.current = setInterval(() => {
-                setCaptureCountdown(prev => {
-                    if (prev <= 1) {
-                        captureFrame();
-                        return 5;
+            // Choose the appropriate fetch function based on mode
+            const fetchMetadata = async () => {
+                // For research mode, try research endpoint first
+                if (mode === 'research') {
+                    try {
+                        const data = await fetchResearchFlightMetadata(anomaly.flight_id);
+                        return data;
+                    } catch {
+                        // Fall back to tagged metadata if research fails
+                        return await fetchTaggedFlightMetadata(anomaly.flight_id);
                     }
-                    return prev - 1;
-                });
-            }, 1000);
+                }
+                
+                // For feedback mode, use tagged endpoint
+                if (mode === 'feedback') {
+                    return await fetchTaggedFlightMetadata(anomaly.flight_id);
+                }
+                
+                // For other modes (historical, realtime, rules, ai-results),
+                // try tagged first, then research as fallback
+                try {
+                    return await fetchTaggedFlightMetadata(anomaly.flight_id);
+                } catch {
+                    return await fetchResearchFlightMetadata(anomaly.flight_id);
+                }
+            };
             
-            setIsScreenSharing(true);
-            
-            // Handle stream end (user stops sharing)
-            stream.getVideoTracks()[0].addEventListener('ended', () => {
-                stopScreenSharing();
-            });
-            
-            setMessages(prev => [...prev, {
-                role: 'assistant',
-                content: "✅ Screen sharing active! I'm capturing every 5 seconds. Ask me about anything you see on the map."
-            }]);
-            
-        } catch (e) {
-            console.error('Screen sharing failed:', e);
-            setMessages(prev => [...prev, {
-                role: 'assistant',
-                content: "Screen sharing was cancelled. Click 'Share Screen' when you're ready."
-            }]);
-        }
-    };
-
-    const stopScreenSharing = () => {
-        // Stop the capture interval (now handled by countdown)
-        if (captureIntervalRef.current) {
-            clearInterval(captureIntervalRef.current);
-            captureIntervalRef.current = null;
-        }
-        
-        // Stop countdown interval
-        if (countdownIntervalRef.current) {
-            clearInterval(countdownIntervalRef.current);
-            countdownIntervalRef.current = null;
-        }
-        
-        // Stop the stream
-        if (screenStreamRef.current) {
-            screenStreamRef.current.getTracks().forEach(track => track.stop());
-            screenStreamRef.current = null;
-        }
-        
-        // Clean up video
-        if (videoRef.current) {
-            videoRef.current.pause();
-            videoRef.current.srcObject = null;
-            videoRef.current = null;
-        }
-        
-        setIsScreenSharing(false);
-        setLatestScreenshot(null);
-        setLastCaptureTime(null);
-        setCaptureCountdown(5);
-    };
-    
-    // Manual capture trigger
-    const captureNow = useCallback(() => {
-        if (isScreenSharing) {
-            captureFrame();
-            setCaptureCountdown(5);
-            // Reset the countdown interval
-            if (countdownIntervalRef.current) {
-                clearInterval(countdownIntervalRef.current);
-            }
-            countdownIntervalRef.current = setInterval(() => {
-                setCaptureCountdown(prev => {
-                    if (prev <= 1) {
-                        captureFrame();
-                        return 5;
-                    }
-                    return prev - 1;
-                });
-            }, 1000);
-        }
-    }, [isScreenSharing, captureFrame]);
-
-    const toggleScreenSharing = () => {
-        if (isScreenSharing) {
-            stopScreenSharing();
-            setMessages(prev => [...prev, {
-                role: 'assistant',
-                content: "Screen sharing stopped. Click 'Start Sharing' to resume."
-            }]);
+            fetchMetadata()
+                .then(data => setMetadata(data))
+                .catch(() => setMetadata(null))
+                .finally(() => setLoadingMetadata(false));
         } else {
-            startScreenSharing();
+            setMetadata(null);
         }
-    };
-
-    // ============================================================
-    // Send Message
-    // ============================================================
-
-    const handleSend = async (e?: React.FormEvent) => {
-        if (e) e.preventDefault();
-        if (!input.trim() || loading || !anomaly) return;
-
-        // Always use the latest screenshot if available
-        const screenshotToSend = latestScreenshot;
-
-        const userMsg: ChatMessage = { 
-            role: 'user', 
-            content: input,
-            screenshot: screenshotToSend || undefined
-        };
-        
-        setMessages(prev => [...prev, userMsg]);
-        setInput('');
-        setLoading(true);
-
-        try {
-            // Send full conversation history (excluding the message we just added)
-            const historyToSend = messages
-                .map(m => ({ role: m.role, content: m.content }));
-
-            const response = await analyzeWithAI({
-                screenshot: screenshotToSend ? stripDataUrlPrefix(screenshotToSend) : '',
-                question: input,
-                flight_id: anomaly.flight_id,
-                flight_data: flightPoints,
-                anomaly_report: anomaly.full_report,
-                history: historyToSend
-            });
-
-            // Parse actions from response
-            const actions = response.actions || parseActionsFromResponse(response.response);
-            const cleanedText = actions.length > 0 
-                ? stripActionsFromText(response.response) 
-                : response.response;
-
-            // Process and apply actions
-            if (actions.length > 0) {
-                const processedActions = processActions(actions, flightPoints);
-                onAIActions(processedActions);
-            }
-
-            setMessages(prev => [...prev, {
-                role: 'assistant',
-                content: cleanedText,
-                actions: actions.length > 0 ? actions : undefined
-            }]);
-
-        } catch (err: any) {
-            setMessages(prev => [...prev, {
-                role: 'assistant',
-                content: `Sorry, I encountered an error: ${err.message}`
-            }]);
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    // ============================================================
-    // Clear Chat
-    // ============================================================
-
-    const handleClearChat = () => {
-        setMessages([
-            { role: 'assistant', content: isScreenSharing 
-                ? "Chat cleared! Still watching your screen - ask me anything." 
-                : "👁️ **Visual Analyst**\n\nI analyze what you see on screen for this flight. Share your screen to enable visual analysis, then ask me questions about what you're looking at."
-            }
-        ]);
-        onAIActions({ highlightedPoint: null, highlightedSegment: null, zoomBounds: null });
-    };
+    }, [anomaly?.flight_id, mode]);
 
     if (!anomaly) return null;
 
@@ -335,7 +243,9 @@ export const AnalysisPanel: React.FC<AnalysisPanelProps> = ({
                 {/* Title Row */}
                 <div className="p-4 pb-2 flex items-center justify-between">
                     <div>
-                        <h3 className="text-white font-bold">Flight Analysis</h3>
+                        <h3 className="text-white font-bold flex items-center gap-2">
+                            {isHebrew ? "ניתוח טיסה" : "Flight Analysis"}
+                        </h3>
                         <p className="text-xs text-white/60">{anomaly.callsign || anomaly.flight_id}</p>
                     </div>
                     <button 
@@ -358,22 +268,19 @@ export const AnalysisPanel: React.FC<AnalysisPanelProps> = ({
                         )}
                     >
                         <FileText className="size-4" />
-                        Report
+                        {isHebrew ? "דוח" : "Report"}
                     </button>
                     <button
-                        onClick={() => setActiveTab('ai')}
+                        onClick={() => setActiveTab('metadata')}
                         className={clsx(
                             "flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-t-lg transition-all border-b-2",
-                            activeTab === 'ai'
-                                ? "bg-surface text-white border-amber-500"
+                            activeTab === 'metadata'
+                                ? "bg-surface text-white border-cyan-500"
                                 : "text-white/60 hover:text-white border-transparent hover:bg-white/5"
                         )}
                     >
-                        <ScanEye className="size-4" />
-                        Visual Analyst
-                        {isScreenSharing && (
-                            <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
-                        )}
+                        <Info className="size-4" />
+                        {isHebrew ? "מידע טיסה" : "Flight Info"}
                     </button>
                 </div>
             </div>
@@ -384,197 +291,8 @@ export const AnalysisPanel: React.FC<AnalysisPanelProps> = ({
                     // Report Tab - Use existing ReportPanel content
                     <ReportPanelContent anomaly={anomaly} onClose={onClose} mode={mode} onFlyTo={onFlyTo} />
                 ) : (
-                    // AI Assistant Tab
-                    <div className="flex flex-col h-full">
-                        {/* Screen Sharing Status Bar - Enhanced */}
-                        {isScreenSharing && (
-                            <div className="px-4 py-3 bg-gradient-to-r from-green-500/10 to-amber-500/10 border-b border-green-500/20">
-                                <div className="flex items-center justify-between mb-2">
-                                    <div className="flex items-center gap-2">
-                                        <div className="relative">
-                                            <Eye className="size-4 text-green-400" />
-                                            <span className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-green-500 rounded-full animate-ping" />
-                                            <span className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-green-500 rounded-full" />
-                                        </div>
-                                        <span className="text-xs text-green-300 font-bold">LIVE</span>
-                                    </div>
-                                    <div className="flex items-center gap-2">
-                                        <button
-                                            onClick={captureNow}
-                                            className="flex items-center gap-1 px-2 py-1 rounded bg-amber-500/20 text-amber-300 text-[10px] font-medium hover:bg-amber-500/30 transition-colors border border-amber-500/30"
-                                            title="Capture now"
-                                        >
-                                            <Camera className="size-3" />
-                                            Capture
-                                        </button>
-                                        <div className="flex items-center gap-1 px-2 py-1 rounded bg-white/5 text-white/60 text-[10px]">
-                                            <Clock className="size-3" />
-                                            <span className="font-mono w-3 text-center">{captureCountdown}</span>s
-                                        </div>
-                                    </div>
-                                </div>
-                                {/* Screenshot preview */}
-                                {latestScreenshot && (
-                                    <div className="relative group">
-                                        <img 
-                                            src={latestScreenshot} 
-                                            alt="Latest capture" 
-                                            className="w-full h-20 object-cover rounded-lg border border-white/10 opacity-90 group-hover:opacity-100 transition-opacity"
-                                        />
-                                        <div className="absolute bottom-1 left-1 px-1.5 py-0.5 rounded bg-black/60 text-[9px] text-white/70">
-                                            {lastCaptureTime?.toLocaleTimeString()}
-                                        </div>
-                                    </div>
-                                )}
-                            </div>
-                        )}
-
-                        {/* Messages */}
-                        <div className="flex-1 overflow-y-auto p-4 space-y-4">
-                            {messages.map((msg, i) => (
-                                <div
-                                    key={i}
-                                    className={clsx(
-                                        "flex gap-3 items-start max-w-[90%]",
-                                        msg.role === 'user' ? "self-end flex-row-reverse" : "self-start"
-                                    )}
-                                >
-                                    <div
-                                        className={clsx(
-                                            "h-8 w-8 rounded-full flex items-center justify-center shrink-0",
-                                            msg.role === 'user'
-                                                ? "bg-primary/20 text-primary"
-                                                : "bg-amber-500/20 text-amber-400"
-                                        )}
-                                    >
-                                        {msg.role === 'user' ? <User className="h-4 w-4" /> : <Bot className="h-4 w-4" />}
-                                    </div>
-
-                                    <div className="flex flex-col gap-2">
-                                        {/* Screenshot thumbnail for user messages */}
-                                        {msg.screenshot && (
-                                            <img 
-                                                src={msg.screenshot} 
-                                                alt="Screen capture" 
-                                                className="rounded-lg border border-white/10 max-w-[200px] opacity-80"
-                                            />
-                                        )}
-                                        
-                                        <div
-                                            className={clsx(
-                                                "px-3 py-2 rounded-xl text-sm leading-relaxed",
-                                                msg.role === 'user'
-                                                    ? "bg-primary text-white rounded-tr-none whitespace-pre-wrap"
-                                                    : "bg-white/5 border border-white/10 rounded-tl-none text-white/90"
-                                            )}
-                                        >
-                                            {msg.role === 'assistant' ? (
-                                                <TypewriterMarkdown 
-                                                    text={msg.content} 
-                                                    shouldAnimate={i === messages.length - 1} 
-                                                />
-                                            ) : (
-                                                msg.content
-                                            )}
-                                        </div>
-
-                                        {/* Action indicator */}
-                                        {msg.actions && msg.actions.length > 0 && (
-                                            <div className="flex items-center gap-1 text-[10px] text-amber-400">
-                                                <ScanEye className="size-3" />
-                                                <span>Map highlight applied</span>
-                                            </div>
-                                        )}
-                                    </div>
-                                </div>
-                            ))}
-
-                            {loading && (
-                                <div className="flex gap-3 items-start">
-                                    <div className="h-8 w-8 rounded-full bg-amber-500/20 flex items-center justify-center">
-                                        <Bot className="h-4 w-4 text-amber-400" />
-                                    </div>
-                                    <div className="px-3 py-2 rounded-xl rounded-tl-none bg-white/5 border border-white/10">
-                                        <div className="flex gap-1">
-                                            <span className="w-2 h-2 bg-amber-400/60 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></span>
-                                            <span className="w-2 h-2 bg-amber-400/60 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></span>
-                                            <span className="w-2 h-2 bg-amber-400/60 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></span>
-                                        </div>
-                                    </div>
-                                </div>
-                            )}
-
-                            <div ref={messagesEndRef} />
-                        </div>
-
-                        {/* Input Area */}
-                        <div className="p-3 border-t border-white/10 bg-surface-highlight/30">
-                            {/* Screen Sharing Toggle - Enhanced */}
-                            <div className="flex gap-2 mb-3">
-                                <button
-                                    onClick={toggleScreenSharing}
-                                    className={clsx(
-                                        "flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-medium transition-all",
-                                        isScreenSharing
-                                            ? "bg-gradient-to-r from-green-500/20 to-green-600/20 text-green-300 border border-green-500/40 hover:from-red-500/20 hover:to-red-600/20 hover:text-red-300 hover:border-red-500/40"
-                                            : "bg-gradient-to-r from-amber-500/20 to-orange-500/20 text-amber-300 border border-amber-500/40 hover:from-amber-500/30 hover:to-orange-500/30"
-                                    )}
-                                >
-                                    {isScreenSharing ? (
-                                        <>
-                                            <MonitorOff className="size-4" />
-                                            Stop Sharing
-                                        </>
-                                    ) : (
-                                        <>
-                                            <MonitorUp className="size-4" />
-                                            Share Screen
-                                        </>
-                                    )}
-                                </button>
-                                <button
-                                    onClick={handleClearChat}
-                                    className="p-2.5 rounded-lg text-white/40 hover:text-white hover:bg-white/10 transition-colors border border-white/10"
-                                    title="Clear chat"
-                                >
-                                    <Trash2 className="size-4" />
-                                </button>
-                            </div>
-
-                            {/* Hint when not sharing */}
-                            {!isScreenSharing && (
-                                <div className="flex items-center gap-2 mb-3 p-2 rounded-lg bg-amber-500/10 border border-amber-500/20">
-                                    <ScanEye className="size-4 text-amber-400 shrink-0" />
-                                    <p className="text-[10px] text-amber-300/80">
-                                        Share your screen so I can analyze what you're looking at
-                                    </p>
-                                </div>
-                            )}
-
-                            {/* Text Input */}
-                            <form onSubmit={handleSend} className="flex gap-2">
-                                <input
-                                    type="text"
-                                    value={input}
-                                    onChange={e => setInput(e.target.value)}
-                                    placeholder={isScreenSharing ? "What do you see on the map?" : "Share screen first, or type a question..."}
-                                    className="flex-1 px-3 py-2.5 rounded-lg bg-black/20 border border-white/10 text-white text-sm placeholder:text-white/30 focus:outline-none focus:border-amber-500/50 focus:ring-1 focus:ring-amber-500/20"
-                                    disabled={loading}
-                                />
-                                <button
-                                    type="submit"
-                                    disabled={loading || !input.trim()}
-                                    className="p-2.5 rounded-lg bg-amber-500 text-white hover:bg-amber-600 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                                >
-                                    {loading ? (
-                                        <Loader2 className="size-4 animate-spin" />
-                                    ) : (
-                                        <Send className="size-4" />
-                                    )}
-                                </button>
-                            </form>
-                        </div>
-                    </div>
+                    // Flight Metadata Tab
+                    <FlightMetadataPanel metadata={metadata} loading={loadingMetadata} isHebrew={isHebrew} />
                 )}
             </div>
         </aside>

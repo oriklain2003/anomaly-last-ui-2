@@ -4,6 +4,8 @@ import { MobileApp } from './MobileApp';
 import { ComparisonPage } from './ComparisonPage';
 import { TestNewAirspacePage } from './TestNewAirspacePage';
 import { DataExplorerPage } from './DataExplorerPage';
+import { IntelligencePage } from './IntelligencePage';
+import { RoutePlannerPage } from './RoutePlannerPage';
 
 function App() {
   return (
@@ -14,6 +16,8 @@ function App() {
         <Route path="/comparison" element={<ComparisonPage />} />
         <Route path="/test_new_airspace" element={<TestNewAirspacePage />} />
         <Route path="/explorer" element={<DataExplorerPage />} />
+        <Route path="/intelligence" element={<IntelligencePage />} />
+        <Route path="/route-planner" element={<RoutePlannerPage />} />
       </Routes>
     </BrowserRouter>
   );

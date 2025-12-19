@@ -1,0 +1,109 @@
+{
+  "app": {
+    "title": "Onyx Intelligence Dashboard",
+    "nav": {
+      "main": "Main",
+      "intelligence": "Intelligence",
+      "explorer": "Explorer"
+    },
+    "legend": {
+        "title": "Legend",
+        "anomaly": "Anomaly Event",
+        "normal": "Normal Flight Path",
+        "start": "Start",
+        "end": "End",
+        "conflicting": "Conflicting Flight",
+        "aiHighlight": "AI Highlight",
+        "mlAnomaly": "ML Anomaly Points"
+    }
+  },
+  "settings": {
+    "title": "Theme Settings",
+    "language": "Language",
+    "analystLanguage": "Visual Analyst Language",
+    "auto": "Auto",
+    "primaryColor": "Primary color (app background)",
+    "secondaryColor": "Secondary color (items & cards)",
+    "accentColor": "Third color (tabs & highlights)",
+    "presets": "Theme Presets",
+    "reset": "Reset defaults",
+    "darkThemes": "Dark Themes",
+    "lightThemes": "Light Themes",
+    "done": "Done"
+  },
+  "analysis": {
+    "title": "Flight Analysis",
+    "tabs": {
+      "report": "Report",
+      "visual": "Visual Analyst"
+    },
+    "visual": {
+      "welcome": "👁️ **Visual Analyst**\n\nI analyze what you see on screen for this flight. Share your screen to enable visual analysis, then ask me questions about what you're looking at.",
+      "cleared": "Chat cleared! Still watching your screen - ask me anything.",
+      "shareHint": "Share your screen so I can analyze what you're looking at",
+      "capture": "Capture",
+      "stopSharing": "Stop Sharing",
+      "shareScreen": "Share Screen",
+      "clearChat": "Clear chat",
+      "messageSize": "Message Size",
+      "inputPlaceholder": "Share screen first, or type a question...",
+      "inputPlaceholderSharing": "What do you see on the map?"
+    }
+  },
+  "report": {
+    "title": "Analysis Report",
+    "copy": "click me to copy",
+    "copied": "Copied!",
+    "followUp": "Follow Up",
+    "openFr24": "Open in FR24",
+    "replay": "Replay Flight",
+    "reanalyze": "Re-Analyze",
+    "analyzing": "Analyzing...",
+    "verdict": "System Verdict",
+    "anomaly": "ANOMALY DETECTED",
+    "normal": "NORMAL FLIGHT",
+    "confidence": "Confidence Score",
+    "detectedAt": "Detected At",
+    "layers": "Layer Analysis",
+    "feedback": {
+      "title": "Human Feedback",
+      "submitted": "Feedback Submitted!",
+      "thanks": "Thank you for helping improve our system",
+      "tag": "Tag this anomaly",
+      "selectRule": "Select the rule type and submit your feedback",
+      "whichRule": "Which rule triggered this anomaly?",
+      "submit": "Tag Anomaly",
+      "submitting": "Submitting...",
+      "comments": "Additional Comments (Optional)",
+      "placeholder": "Add any additional notes or context..."
+    },
+    "rules": {
+        "select": "Select Rule Type",
+        "desc": "Click on the rule that best describes this anomaly",
+        "other": "Other",
+        "custom": "Other / Custom Anomaly",
+        "customDesc": "Custom anomaly type",
+        "selectPlaceholder": "Select a rule...",
+        "clickToChoose": "Click to choose from available rules"
+    }
+  },
+  "sidebar": {
+      "history": "History",
+      "research": "Research",
+      "rules": "Rules",
+      "realtime": "Live",
+      "feedback": "Feedback",
+      "aiResults": "AI Results",
+      "filterDate": "Filter by Date",
+      "searchPlaceholder": "Search Call sign or Flight ID",
+      "loading": "Searching anomalies...",
+      "loadingRules": "Loading rules...",
+      "noAnomalies": "No anomalies detected recently.",
+      "noFlights": "No flights match criteria.",
+      "aiPrompt": "Ask the AI to find flights. Try: \"Show me turn anomalies from yesterday\"",
+      "minConfidence": "Minimum Confidence Score",
+      "filterLayer": "Filter by Layer",
+      "filterVersion": "Filter by Version",
+      "showNormal": "Show flights marked as Normal"
+  }
+}

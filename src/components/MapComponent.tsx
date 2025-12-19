@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useImperativeHandle, forwardRef } from 'react';
+import { useEffect, useRef, useState, useImperativeHandle, forwardRef, useMemo } from 'react';
 import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import type { TrackPoint } from '../types';
@@ -89,6 +89,44 @@ export const MapComponent = forwardRef<MapComponentHandle, MapComponentProps>(({
   const [showSids, setShowSids] = useState(false);
   const [showStars, setShowStars] = useState(false);
   const [showMLPoints, setShowMLPoints] = useState(true);
+  const [selectedPathCluster, setSelectedPathCluster] = useState<string>('all');
+  const [showPathSelector, setShowPathSelector] = useState(false);
+
+  // Group paths by origin-destination cluster
+  const pathClusters = useMemo(() => {
+    if (!learnedLayers?.paths) return [];
+    
+    const clusterMap = new Map<string, { key: string; label: string; count: number }>();
+    
+    learnedLayers.paths.forEach(path => {
+      const origin = path.origin || 'Unknown';
+      const dest = path.destination || 'Unknown';
+      const key = `${origin}_${dest}`;
+      const label = `${origin} → ${dest}`;
+      
+      if (clusterMap.has(key)) {
+        clusterMap.get(key)!.count++;
+      } else {
+        clusterMap.set(key, { key, label, count: 1 });
+      }
+    });
+    
+    // Sort by count descending
+    return Array.from(clusterMap.values()).sort((a, b) => b.count - a.count);
+  }, [learnedLayers?.paths]);
+
+  // Filter paths based on selected cluster
+  const filteredPaths = useMemo(() => {
+    if (!learnedLayers?.paths) return [];
+    if (selectedPathCluster === 'all') return learnedLayers.paths;
+    
+    const [origin, dest] = selectedPathCluster.split('_');
+    return learnedLayers.paths.filter(path => {
+      const pathOrigin = path.origin || 'Unknown';
+      const pathDest = path.destination || 'Unknown';
+      return pathOrigin === origin && pathDest === dest;
+    });
+  }, [learnedLayers?.paths, selectedPathCluster]);
 
   // Expose imperative handle for parent components
   useImperativeHandle(ref, () => ({
@@ -675,8 +713,8 @@ export const MapComponent = forwardRef<MapComponentHandle, MapComponentProps>(({
         const source = map.current!.getSource('learned-paths') as maplibregl.GeoJSONSource;
         if (!source) return;
 
-        if (showPaths && learnedLayers?.paths && learnedLayers.paths.length > 0) {
-            const features = learnedLayers.paths
+        if (showPaths && filteredPaths && filteredPaths.length > 0) {
+            const features = filteredPaths
                 .filter(path => path.centerline && path.centerline.length >= 2)
                 .map(path => ({
                     type: 'Feature' as const,
@@ -781,7 +819,7 @@ export const MapComponent = forwardRef<MapComponentHandle, MapComponentProps>(({
     updateTurns();
     updateSids();
     updateStars();
-  }, [showPaths, showTurns, showSids, showStars, learnedLayers]);
+  }, [showPaths, showTurns, showSids, showStars, learnedLayers, filteredPaths, selectedPathCluster]);
 
   useEffect(() => {
     if (!map.current) return;
@@ -979,15 +1017,91 @@ export const MapComponent = forwardRef<MapComponentHandle, MapComponentProps>(({
         )}
         
         <div className="absolute top-4 right-4 z-10 flex flex-col gap-2">
-            <button 
-                onClick={() => setShowPaths(!showPaths)}
-                className={`px-3 py-2 rounded shadow text-xs font-medium opacity-90 transition-colors ${
-                    showPaths ? 'bg-green-600 text-white' : 'bg-gray-800 text-gray-300 hover:bg-gray-700'
-                }`}
-                title={`${learnedLayers?.paths?.length || 0} flight paths`}
-            >
-                {showPaths ? "Hide Paths" : "Show Paths"}
-            </button>
+            <div className="relative">
+                <button 
+                    onClick={() => {
+                        if (!showPaths) {
+                            setShowPaths(true);
+                        }
+                        setShowPathSelector(!showPathSelector);
+                    }}
+                    className={`px-3 py-2 rounded shadow text-xs font-medium opacity-90 transition-colors flex items-center gap-1 ${
+                        showPaths ? 'bg-green-600 text-white' : 'bg-gray-800 text-gray-300 hover:bg-gray-700'
+                    }`}
+                    title={`${filteredPaths?.length || 0} / ${learnedLayers?.paths?.length || 0} flight paths`}
+                >
+                    <span>{showPaths ? "Paths" : "Show Paths"}</span>
+                    {showPaths && (
+                        <span className="bg-white/20 px-1.5 py-0.5 rounded text-[10px]">
+                            {filteredPaths?.length || 0}
+                        </span>
+                    )}
+                    <svg className={`w-3 h-3 transition-transform ${showPathSelector ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                    </svg>
+                </button>
+                
+                {/* Path Cluster Dropdown */}
+                {showPathSelector && showPaths && (
+                    <div className="absolute right-0 mt-1 w-64 max-h-80 overflow-y-auto bg-gray-900 border border-gray-700 rounded-lg shadow-xl">
+                        <div className="p-2 border-b border-gray-700">
+                            <div className="text-xs text-gray-400 mb-2">Filter by Route</div>
+                            <button
+                                onClick={() => {
+                                    setSelectedPathCluster('all');
+                                    setShowPathSelector(false);
+                                }}
+                                className={`w-full text-left px-2 py-1.5 rounded text-xs transition-colors ${
+                                    selectedPathCluster === 'all' 
+                                        ? 'bg-green-600 text-white' 
+                                        : 'text-gray-300 hover:bg-gray-800'
+                                }`}
+                            >
+                                All Routes ({learnedLayers?.paths?.length || 0})
+                            </button>
+                        </div>
+                        <div className="p-2 space-y-1">
+                            {pathClusters.map(cluster => (
+                                <button
+                                    key={cluster.key}
+                                    onClick={() => {
+                                        setSelectedPathCluster(cluster.key);
+                                        setShowPathSelector(false);
+                                    }}
+                                    className={`w-full text-left px-2 py-1.5 rounded text-xs transition-colors flex justify-between items-center ${
+                                        selectedPathCluster === cluster.key 
+                                            ? 'bg-green-600 text-white' 
+                                            : 'text-gray-300 hover:bg-gray-800'
+                                    }`}
+                                >
+                                    <span className="truncate">{cluster.label}</span>
+                                    <span className={`ml-2 px-1.5 py-0.5 rounded text-[10px] ${
+                                        selectedPathCluster === cluster.key 
+                                            ? 'bg-white/20' 
+                                            : 'bg-gray-700'
+                                    }`}>
+                                        {cluster.count}
+                                    </span>
+                                </button>
+                            ))}
+                        </div>
+                        {showPaths && (
+                            <div className="p-2 border-t border-gray-700">
+                                <button
+                                    onClick={() => {
+                                        setShowPaths(false);
+                                        setShowPathSelector(false);
+                                        setSelectedPathCluster('all');
+                                    }}
+                                    className="w-full px-2 py-1.5 rounded text-xs text-red-400 hover:bg-red-900/30 transition-colors"
+                                >
+                                    Hide All Paths
+                                </button>
+                            </div>
+                        )}
+                    </div>
+                )}
+            </div>
             <button 
                 onClick={() => setShowTurns(!showTurns)}
                 className={`px-3 py-2 rounded shadow text-xs font-medium opacity-90 transition-colors ${

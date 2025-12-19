@@ -152,16 +152,37 @@ export function renderMarkdown(text: string): React.ReactNode {
 
 function extractThinkingBlocks(raw: string): { cleanText: string; thinkingBlocks: string[] } {
     const thinkingBlocks: string[] = [];
-    const re = /<thinking>([\s\S]*?)<\/thinking>/gi;
+    
+    // Match all variations: <thinking>, <thoughts>, <think> tags (case insensitive)
+    const thinkingRe = /<thinking>([\s\S]*?)<\/thinking>/gi;
+    const thoughtsRe = /<thoughts>([\s\S]*?)<\/thoughts>/gi;
+    const thinkRe = /<think>([\s\S]*?)<\/think>/gi;
 
     let m: RegExpExecArray | null;
-    while ((m = re.exec(raw)) !== null) {
+    
+    // Extract <thinking> blocks
+    while ((m = thinkingRe.exec(raw)) !== null) {
+        const block = (m[1] ?? '').trim();
+        if (block) thinkingBlocks.push(block);
+    }
+    
+    // Extract <thoughts> blocks
+    while ((m = thoughtsRe.exec(raw)) !== null) {
+        const block = (m[1] ?? '').trim();
+        if (block) thinkingBlocks.push(block);
+    }
+    
+    // Extract <think> blocks
+    while ((m = thinkRe.exec(raw)) !== null) {
         const block = (m[1] ?? '').trim();
         if (block) thinkingBlocks.push(block);
     }
 
+    // Remove all types of thinking tags from the text
     const cleanText = raw
-        .replace(re, '')
+        .replace(thinkingRe, '')
+        .replace(thoughtsRe, '')
+        .replace(thinkRe, '')
         .replace(/\n{3,}/g, '\n\n')
         .trim();
 

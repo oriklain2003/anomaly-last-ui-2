@@ -6,6 +6,7 @@ export interface TrackPoint {
     gspeed?: number;
     track?: number;
     flight_id?: string;
+    callsign?: string;
 }
 
 export interface FlightTrack {
@@ -69,4 +70,255 @@ export interface AIReasoningResponse {
     type: 'message' | 'flights';
     response: string;
     flights?: AnomalyReport[];
+}
+
+// Intelligence Dashboard Types
+
+export interface OverviewStats {
+  total_flights: number;
+  total_anomalies: number;
+  safety_events: number;
+  go_arounds: number;
+  emergency_codes: number;
+  near_miss: number;
+}
+
+export interface EmergencyCodeStat {
+  code: string;
+  count: number;
+  airlines: Record<string, number>;
+  flights: string[];
+}
+
+export interface NearMissEvent {
+  timestamp: number;
+  flight_id: string;
+  other_flight_id: string;
+  distance_nm: number;
+  altitude_diff_ft: number;
+  severity: 'high' | 'medium';
+}
+
+export interface GoAroundStat {
+  airport: string;
+  count: number;
+  avg_per_day: number;
+  by_hour: Record<number, number>;
+}
+
+export interface FlightPerDay {
+  date: string;
+  count: number;
+  military_count: number;
+  civilian_count: number;
+}
+
+export interface SignalLossLocation {
+  lat: number;
+  lon: number;
+  count: number;
+  avgDuration: number;  // Average gap duration in seconds
+  intensity?: number;
+  affected_flights?: number;
+  gap_type?: 'brief' | 'medium' | 'extended';
+  brief_count?: number;
+  medium_count?: number;
+  extended_count?: number;
+  first_seen?: number;
+  last_seen?: number;
+}
+
+export interface SignalLossMonthly {
+  month: string;  // 'YYYY-MM'
+  count: number;
+  affected_flights: number;
+  avg_duration: number;
+}
+
+export interface SignalLossHourly {
+  hour: number;  // 0-23
+  count: number;
+  affected_flights: number;
+}
+
+export interface AirlineEfficiency {
+  airline: string;
+  avg_flight_time_min: number;
+  avg_holding_time_min: number;
+  sample_count: number;
+}
+
+export interface HoldingPatternAnalysis {
+  total_time_hours: number;
+  estimated_fuel_cost_usd: number;
+  peak_hours: number[];
+  events_by_airport: Record<string, number>;
+}
+
+export interface GPSJammingPoint {
+  lat: number;
+  lon: number;
+  intensity: number;
+  jamming_score?: number;
+  jamming_confidence?: 'HIGH' | 'MEDIUM' | 'LOW' | 'UNLIKELY';
+  jamming_indicators?: string[];
+  first_seen: number;
+  last_seen: number;
+  event_count: number;
+  affected_flights: number;
+  avg_gap_duration_s?: number;
+  correlated_events?: number;
+  altitude_anomalies?: number;
+  motion_anomalies?: number;
+  heading_anomalies?: number;  // NEW: turn rate, oscillation, track/bearing mismatch
+  mlat_only_flights?: number;
+  likely_jamming?: boolean;
+}
+
+export interface FlightJammingAnalysis {
+  flight_id: string;
+  jamming_score: number;
+  jamming_confidence: 'HIGH' | 'MEDIUM' | 'LOW' | 'UNLIKELY';
+  indicators: {
+    altitude_jumps: number;
+    spoofed_altitude_hits: number;
+    impossible_altitude_rates: number;
+    speed_anomalies: number;
+    position_teleports: number;
+    mlat_ratio: number;
+    anomaly_clusters: number;
+    // NEW: Heading-based indicators
+    heading_oscillations: number;
+    impossible_turn_rates: number;
+    track_bearing_mismatches: number;
+  };
+  anomaly_details: Array<{
+    type: string;
+    timestamp: number;
+    [key: string]: any;
+  }>;
+  unique_altitudes: number[];
+  summary: string;
+}
+
+export interface MilitaryPattern {
+  flight_id: string;
+  callsign: string;
+  country: string;
+  type: string;
+  pattern_type: string;
+  locations: any[];
+  frequency: number;
+}
+
+export interface AirspaceRisk {
+  risk_score: number;
+  risk_level: 'low' | 'medium' | 'high' | 'critical';
+  factors: RiskFactor[];
+  recommendation: string;
+  timestamp: number;
+}
+
+export interface RiskFactor {
+  name: string;
+  weight: number;
+  value: number | string;
+  impact: number;
+  description: string;
+}
+
+// Additional analytics types for missing features
+export interface DiversionStats {
+  total_diversions: number;
+  total_large_deviations: number;  // >20nm from route
+  total_holding_360s: number;  // 360° holds before landing
+  by_airport: Record<string, number>;
+  by_airline: Record<string, number>;
+}
+
+export interface RTBEvent {
+  flight_id: string;
+  callsign: string;
+  departure_time: number;
+  landing_time: number;
+  duration_min: number;
+  airport: string;
+}
+
+export interface RunwayStats {
+  runway: string;
+  airport: string;
+  landings: number;
+  takeoffs: number;
+  total: number;
+}
+
+export interface MonthlyTrend {
+  month: string;  // YYYY-MM
+  total_flights: number;
+  anomalies: number;
+  safety_events: number;
+  busiest_hour: number;
+}
+
+export interface SafetyForecast {
+  forecast_period_hours: number;
+  expected_events: number;
+  confidence_interval: [number, number];
+  peak_risk_hours: number[];
+}
+
+export interface SimilarFlight {
+  flight_id: string;
+  callsign: string;
+  similarity_score: number;
+  match_percentage: number;  // Trajectory match percentage (0-100)
+  matching_points?: number;  // Number of points that matched
+  total_points?: number;     // Total points compared
+  date: string | null;
+  pattern: string;
+  origin?: string;           // Origin airport code
+  destination?: string;      // Destination airport code
+  is_anomaly?: boolean;      // Whether this flight is an anomaly
+  common_rules?: number[];   // Rule IDs in common with target flight
+}
+
+export interface AnomalyDNA {
+  flight_info: {
+    flight_id: string;
+    callsign?: string;
+    airline?: string;
+    origin?: string;
+    destination?: string;
+    is_anomaly?: boolean;
+    rule_ids?: number[];
+  };
+  similar_flights: SimilarFlight[];
+  recurring_pattern: string;
+  risk_assessment: string;
+  insights: string[];
+  anomalies_detected?: Array<{
+    rule_id: number;
+    rule_name: string;
+    timestamp: number;
+  }>;
+  search_criteria?: {
+    origin?: string;
+    destination?: string;
+    is_anomaly?: boolean;
+    rule_ids?: number[];
+    match_threshold?: number;
+    distance_threshold_nm?: number;
+  };
+}
+
+export interface PatternCluster {
+  pattern_id: string;
+  description: string;
+  location: { lat: number; lon: number };
+  flights: string[];
+  first_seen: number;
+  last_seen: number;
+  occurrence_count: number;
+  risk_level: string;
 }

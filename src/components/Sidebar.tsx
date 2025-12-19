@@ -1,9 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { ChevronLeft, ChevronRight, Search, Radio, Filter, Beaker, Calendar, List, ArrowLeft, Plane, History, Sparkles } from 'lucide-react';
-import { fetchLiveAnomalies, fetchResearchAnomalies, fetchRules, fetchFlightsByRule, fetchFeedbackHistory as apiFetchFeedbackHistory } from '../api';
+import { fetchLiveAnomalies, fetchResearchAnomalies, fetchRules, fetchFlightsByRule, fetchFeedbackHistory as apiFetchFeedbackHistory, fetchTaggedFeedbackHistory } from '../api';
 import type { AnomalyReport } from '../types';
 import clsx from 'clsx';
 import { ALERT_AUDIO_SRC, SOUND_COOLDOWN_MS } from '../constants';
+import { useTranslation } from 'react-i18next';
+import { useLanguage } from '../contexts/LanguageContext';
 
 export type SidebarMode = 'historical' | 'realtime' | 'research' | 'rules' | 'feedback' | 'ai-results';
 
@@ -18,18 +20,21 @@ interface SidebarProps {
     aiResultFlights?: AnomalyReport[];
 }
 
-const LoadingPlane: React.FC<{ message?: string }> = ({ message = 'Searching anomalies...' }) => (
-    <div className="flex flex-col items-center justify-center py-6 text-white/70 gap-3">
-        <div className="relative w-16 h-16">
-            <div className="absolute inset-0 rounded-full border-4 border-white/10 border-t-primary animate-spin" />
-            <div className="absolute inset-2 rounded-full border-2 border-dashed border-primary/60 animate-spin" />
-            <div className="absolute inset-0 flex items-center justify-center text-primary">
-                <Plane className="w-6 h-6" />
+const LoadingPlane: React.FC<{ message?: string }> = ({ message }) => {
+    const { t } = useTranslation();
+    return (
+        <div className="flex flex-col items-center justify-center py-6 text-white/70 gap-3">
+            <div className="relative w-16 h-16">
+                <div className="absolute inset-0 rounded-full border-4 border-white/10 border-t-primary animate-spin" />
+                <div className="absolute inset-2 rounded-full border-2 border-dashed border-primary/60 animate-spin" />
+                <div className="absolute inset-0 flex items-center justify-center text-primary">
+                    <Plane className="w-6 h-6" />
+                </div>
             </div>
+            <p className="text-sm font-semibold text-white/70">{message || t('sidebar.loading')}</p>
         </div>
-        <p className="text-sm font-semibold text-white/70">{message}</p>
-    </div>
-);
+    );
+};
 
 export const Sidebar: React.FC<SidebarProps> = ({ 
     onSelectAnomaly, 
@@ -41,6 +46,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
     className,
     aiResultFlights = []
 }) => {
+    const { t } = useTranslation();
+    const { isHebrew } = useLanguage();
     const [anomalies, setAnomalies] = useState<AnomalyReport[]>([]);
     const [loading, setLoading] = useState(false);
     const [filter, setFilter] = useState('');
@@ -169,6 +176,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
             const end = new Date(selectedDate);
             end.setHours(23, 59, 59, 999);
 
+            // For research mode: use research anomalies endpoint
+            // For historical mode: use live anomalies
             const apiFunc = mode === 'research' ? fetchResearchAnomalies : fetchLiveAnomalies;
 
             const data = await apiFunc(
@@ -196,15 +205,30 @@ export const Sidebar: React.FC<SidebarProps> = ({
             const end = new Date(selectedDate);
             end.setHours(23, 59, 59, 999);
 
-            const data = await apiFetchFeedbackHistory(
+            // Primary source: feedback_tagged.db (clean, well-structured data)
+            const taggedData = await fetchTaggedFeedbackHistory(
+                Math.floor(start.getTime() / 1000),
+                Math.floor(end.getTime() / 1000),
+                200
+            ).catch(() => []);
+            
+            if (controller.signal.aborted) return;
+            
+            // If we have tagged data, use it as primary source
+            if (taggedData.length > 0) {
+                setAnomalies(taggedData);
+                return;
+            }
+            
+            // Fallback to old databases if no tagged data found
+            const oldData = await apiFetchFeedbackHistory(
                 Math.floor(start.getTime() / 1000),
                 Math.floor(end.getTime() / 1000),
                 100
-            );
-            if (controller.signal.aborted) return;
+            ).catch(() => []);
             
-            // Data is already in AnomalyReport format from the API
-            setAnomalies(data);
+            if (controller.signal.aborted) return;
+            setAnomalies(oldData);
         } catch (error: any) {
             if (error?.name === 'AbortError') return;
             console.error("Error fetching feedback history:", error);
@@ -320,7 +344,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
         const cutoffTimestampV2 = new Date('2025-07-08T20:00:00Z').getTime() / 1000;
         const cutoffTimestampV3 = new Date('2025-07-17T00:00:00Z').getTime() / 1000;
-        const cutoffTimestampV4 = new Date('2025-11-01T00:00:00Z').getTime() / 1000;
+        const cutoffTimestampV4 = new Date('2025-10-21T00:00:00Z').getTime() / 1000;
         
         let version = 'v1';
         if (a.timestamp >= cutoffTimestampV4) {
@@ -369,7 +393,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     };
 
     return (
-        <aside className={clsx("flex flex-col gap-6 overflow-y-auto h-full pr-2", className || "col-span-3")}>
+        <aside className={clsx("flex flex-col gap-6 overflow-y-auto h-full pe-2", className || "col-span-3")}>
             
             {/* Mode Switcher - Top Row */}
             <div className="bg-surface rounded-xl p-1 flex gap-1">
@@ -380,7 +404,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                         mode === 'historical' ? "bg-primary text-background-dark" : "text-white/60 hover:text-white"
                     )}
                 >
-                    History
+                    {t('sidebar.history')}
                 </button>
                 <button 
                     onClick={() => setMode('research')}
@@ -390,7 +414,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     )}
                 >
                     <Beaker className="size-4" />
-                    Research
+                    {t('sidebar.research')}
                 </button>
                 <button 
                     onClick={() => { setMode('rules'); setSelectedRuleId(null); }}
@@ -400,7 +424,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     )}
                 >
                     <List className="size-4" />
-                    Rules
+                    {t('sidebar.rules')}
                 </button>
                 <button 
                     onClick={() => setMode('realtime')}
@@ -410,7 +434,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     )}
                 >
                     <Radio className={clsx("size-4", mode === 'realtime' && "animate-pulse")} />
-                    Live
+                    {t('sidebar.realtime')}
                 </button>
             </div>
 
@@ -424,7 +448,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     )}
                 >
                     <History className="size-4" />
-                    Feedback
+                    {t('sidebar.feedback')}
                 </button>
                 {/* AI Results tab - only shown when there are results */}
                 {aiResultFlights.length > 0 && (
@@ -438,7 +462,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                         )}
                     >
                         <Sparkles className={clsx("size-4", mode === 'ai-results' && "animate-pulse")} />
-                        AI Results
+                        {t('sidebar.aiResults')}
                         <span className="ml-1 px-1.5 py-0.5 text-[10px] bg-white/20 rounded-full font-bold">
                             {aiResultFlights.length}
                         </span>
@@ -449,7 +473,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             {/* Date Filter (Only visible in Historical/Research/Feedback Mode) */}
             {(mode === 'historical' || mode === 'research' || mode === 'feedback') && (
                 <div className="bg-surface rounded-xl p-4 flex flex-col gap-4 shrink-0 animate-in fade-in slide-in-from-top-2">
-                    <p className="text-white text-base font-bold leading-tight">Filter by Date</p>
+                    <p className="text-white text-base font-bold leading-tight">{t('sidebar.filterDate')}</p>
                     <div className="flex items-center p-1 justify-between">
                         <button onClick={() => changeDate(-1)} className="text-white/80 hover:text-white p-1 rounded hover:bg-white/10 transition-colors">
                             <ChevronLeft className="size-6" />
@@ -498,9 +522,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 
                 {/* Rule List View */}
                 {mode === 'rules' && selectedRuleId === null ? (
-                    <div className="flex flex-col gap-2 overflow-y-auto pr-2 -mr-2 flex-1">
+                    <div className="flex flex-col gap-2 overflow-y-auto pe-2 -me-2 flex-1">
                         {loading ? (
-                            <p className="text-white/60 text-center py-4">Loading rules...</p>
+                            <p className="text-white/60 text-center py-4">{t('sidebar.loadingRules')}</p>
                         ) : (
                             rules.map(rule => (
                                 <div 
@@ -526,7 +550,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                     onClick={() => { setSelectedRuleId(null); setAnomalies([]); }}
                                     className="p-1 hover:bg-white/10 rounded transition-colors"
                                 >
-                                    <ArrowLeft className="size-5 text-white" />
+                                    <ArrowLeft className={`size-5 text-white ${isHebrew ? 'rotate-180' : ''}`} />
                                 </button>
                                 <div>
                                     <p className="text-sm font-bold text-white">
@@ -558,12 +582,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
                         <div className="flex items-center gap-2">
                     <label className="flex flex-col w-full h-12 flex-1">
                         <div className="flex w-full flex-1 items-stretch rounded-lg h-full bg-background-dark">
-                            <div className="text-white/60 flex items-center justify-center pl-4">
+                            <div className="text-white/60 flex items-center justify-center ps-4">
                                 <Search className="size-5" />
                             </div>
                             <input 
                                 className="flex w-full flex-1 bg-transparent text-white focus:outline-none px-4 placeholder:text-white/60 text-sm"
-                                placeholder="Search Call sign or Flight ID" 
+                                placeholder={t('sidebar.searchPlaceholder')}
                                 value={filter}
                                 onChange={e => setFilter(e.target.value)}
                             />
@@ -595,7 +619,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                         className="w-4 h-4 rounded border-white/20 bg-white/5 text-primary focus:ring-primary focus:ring-offset-background-dark"
                                     />
                                     <span className="text-sm text-white/80 group-hover:text-white transition-colors">
-                                        Show flights marked as Normal
+                                        {t('sidebar.showNormal')}
                                     </span>
                                 </label>
                             </div>
@@ -603,7 +627,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
                         {/* Confidence Score Filter */}
                         <div>
-                            <p className="text-xs text-white/60 font-bold uppercase mb-2">Minimum Confidence Score: {minScore}%</p>
+                            <p className="text-xs text-white/60 font-bold uppercase mb-2">{t('sidebar.minConfidence')}: {minScore}%</p>
                             <input 
                                 type="range" 
                                 min="0" 
@@ -621,7 +645,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
                         {/* Trigger Reason Filter */}
                         <div>
-                            <p className="text-xs text-white/60 font-bold uppercase mb-2">Filter by Layer</p>
+                            <p className="text-xs text-white/60 font-bold uppercase mb-2">{t('sidebar.filterLayer')}</p>
                             <div className="grid grid-cols-2 gap-2">
                                 {triggerOptions.map((option) => (
                                     <button
@@ -681,7 +705,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
                         {/* Version Filter */}
                         <div>
-                            <p className="text-xs text-white/60 font-bold uppercase mb-2">Filter by Version</p>
+                            <p className="text-xs text-white/60 font-bold uppercase mb-2">{t('sidebar.filterVersion')}</p>
                             <div className="grid grid-cols-4 gap-2">
                                 {versionOptions.map((option) => (
                                     <button
@@ -702,17 +726,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     </div>
                 )}
 
-                <div className="flex flex-col gap-2 overflow-y-auto pr-2 -mr-2 flex-1">
+                <div className="flex flex-col gap-2 overflow-y-auto pe-2 -me-2 flex-1">
                     {loading && sourceAnomalies.length === 0 ? (
-                        <LoadingPlane message={mode === 'realtime' ? "Scanning for live anomalies..." : "Searching anomalies..."} />
+                        <LoadingPlane message={mode === 'realtime' ? "Scanning for live anomalies..." : undefined} />
                     ) : filteredAnomalies.length === 0 ? (
                         <div className="flex flex-col items-center justify-center text-center py-8 gap-2">
                             <p className="text-white/60">
                                 {mode === 'ai-results' 
-                                    ? "Ask the AI to find flights. Try: \"Show me turn anomalies from yesterday\"" 
+                                    ? t('sidebar.aiPrompt')
                                     : mode === 'realtime' 
-                                        ? "No anomalies detected recently." 
-                                        : "No flights match criteria."}
+                                        ? t('sidebar.noAnomalies')
+                                        : t('sidebar.noFlights')}
                             </p>
                             {feedbackHiddenCount > 0 && (
                                 <button 
@@ -740,7 +764,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                              // Version Badge Logic
                              const cutoffTimestampV2 = new Date('2025-07-08T20:00:00Z').getTime() / 1000;
                              const cutoffTimestampV3 = new Date('2025-07-21T00:00:00Z').getTime() / 1000;
-                             const cutoffTimestampV4 = new Date('2025-11-01T00:00:00Z').getTime() / 1000;
+                             const cutoffTimestampV4 = new Date('2025-10-21T00:00:00Z').getTime() / 1000;
                              
                              let versionLabel = 'v1 OLD';
                              let versionStyle = "bg-zinc-800 text-zinc-500 border-zinc-700";
