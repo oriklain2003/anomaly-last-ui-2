@@ -157,7 +157,26 @@ const FlightMetadataPanel: React.FC<FlightMetadataPanelProps> = ({ metadata, loa
             {metadata.feedback && (
                 <Section title={isHebrew ? "משוב משתמש" : "User Feedback"}>
                     <MetadataRow label={isHebrew ? "תויג בתאריך" : "Tagged At"} value={formatTimestamp(metadata.feedback.tagged_at)} />
-                    <MetadataRow label={isHebrew ? "חוק" : "Rule"} value={metadata.feedback.rule_name || `Rule ${metadata.feedback.rule_id}`} />
+                    {/* Support both single rule (legacy) and multiple rules */}
+                    {metadata.feedback.rule_names && metadata.feedback.rule_names.length > 0 ? (
+                        <MetadataRow 
+                            label={isHebrew ? "חוקים" : "Rules"} 
+                            value={
+                                <div className="flex flex-wrap gap-1">
+                                    {metadata.feedback.rule_names.map((name, idx) => (
+                                        <span 
+                                            key={idx}
+                                            className="px-2 py-0.5 bg-primary/20 text-primary rounded text-xs"
+                                        >
+                                            {name}
+                                        </span>
+                                    ))}
+                                </div>
+                            } 
+                        />
+                    ) : metadata.feedback.rule_name || metadata.feedback.rule_id ? (
+                        <MetadataRow label={isHebrew ? "חוק" : "Rule"} value={metadata.feedback.rule_name || `Rule ${metadata.feedback.rule_id}`} />
+                    ) : null}
                     <MetadataRow label={isHebrew ? "הערות" : "Comments"} value={metadata.feedback.comments} />
                     {metadata.feedback.other_details && (
                         <MetadataRow label={isHebrew ? "פרטים נוספים" : "Other Details"} value={metadata.feedback.other_details} />

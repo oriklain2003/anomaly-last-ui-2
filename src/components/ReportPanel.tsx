@@ -337,12 +337,27 @@ export const ReportPanel: React.FC<ReportPanelProps> = ({ anomaly, onClose, clas
     const [resolvedCallsigns, setResolvedCallsigns] = useState<Record<string, string>>({});
     const { isHebrew } = useLanguage();
     
-    // Rule selection state - use hardcoded rules list
+    // Rule selection state - use hardcoded rules list - NOW SUPPORTS MULTIPLE SELECTION
     const rules = TAGGING_RULES;
-    const [selectedRuleId, setSelectedRuleId] = useState<number | null | 'other'>(null);
+    const [selectedRuleIds, setSelectedRuleIds] = useState<Set<number>>(new Set());
+    const [isOtherSelected, setIsOtherSelected] = useState(false);
     const [otherDetails, setOtherDetails] = useState('');
     const [ruleError, setRuleError] = useState(false);
     const [showRuleSelector, setShowRuleSelector] = useState(false);
+    
+    // Helper to toggle rule selection
+    const toggleRuleSelection = (ruleId: number) => {
+        setSelectedRuleIds(prev => {
+            const newSet = new Set(prev);
+            if (newSet.has(ruleId)) {
+                newSet.delete(ruleId);
+            } else {
+                newSet.add(ruleId);
+            }
+            return newSet;
+        });
+        setRuleError(false);
+    };
     
     // Actions dropdown state
     const [showActions, setShowActions] = useState(false);
@@ -460,11 +475,12 @@ export const ReportPanel: React.FC<ReportPanelProps> = ({ anomaly, onClose, clas
     const handleFeedback = async (isAnomaly: boolean) => {
         // If marking as anomaly, validate rule selection
         if (isAnomaly) {
-            if (selectedRuleId === null) {
+            // Must have at least one rule selected OR other details provided
+            if (selectedRuleIds.size === 0 && !isOtherSelected) {
                 setRuleError(true);
                 return;
             }
-            if (selectedRuleId === 'other' && !otherDetails.trim()) {
+            if (isOtherSelected && !otherDetails.trim() && selectedRuleIds.size === 0) {
                 setRuleError(true);
                 return;
             }
@@ -477,12 +493,13 @@ export const ReportPanel: React.FC<ReportPanelProps> = ({ anomaly, onClose, clas
                 flightId: localAnomaly.flight_id,
                 isAnomaly,
                 comments: comment,
-                ruleId: isAnomaly ? (selectedRuleId === 'other' ? null : selectedRuleId as number) : undefined,
-                otherDetails: isAnomaly && selectedRuleId === 'other' ? otherDetails : undefined
+                ruleIds: isAnomaly && selectedRuleIds.size > 0 ? Array.from(selectedRuleIds) : undefined,
+                otherDetails: isAnomaly && isOtherSelected ? otherDetails : undefined
             });
             setFeedbackStatus('success');
             setComment('');
-            setSelectedRuleId(null);
+            setSelectedRuleIds(new Set());
+            setIsOtherSelected(false);
             setOtherDetails('');
             
             if (!isAnomaly) {
@@ -557,29 +574,7 @@ export const ReportPanel: React.FC<ReportPanelProps> = ({ anomaly, onClose, clas
             }
         });
 
-        // Add ML model anomaly points
-        const mlLayers = [
-            { key: 'layer_3_deep_dense', name: 'Deep Dense' },
-            { key: 'layer_4_deep_cnn', name: 'Deep CNN' },
-            { key: 'layer_5_transformer', name: 'Transformer' },
-            { key: 'layer_6_hybrid', name: 'Hybrid' }
-        ];
-
-        mlLayers.forEach(({ key, name }) => {
-            const layerData = localAnomaly.full_report?.[key];
-            if (layerData?.anomaly_points && layerData.is_anomaly) {
-                // Only add top 2 points from each model to avoid clutter
-                layerData.anomaly_points.slice(0, 2).forEach((pt: any, idx: number) => {
-                    events.push({
-                        timestamp: pt.timestamp,
-                        type: 'ml_anomaly',
-                        description: `${name} detected anomaly #${idx + 1} (score: ${pt.point_score.toFixed(4)})`,
-                        lat: pt.lat,
-                        lon: pt.lon
-                    });
-                });
-            }
-        });
+        // Only show rule-based events, no ML anomaly points
 
         // Also add the main anomaly timestamp as a generic event if not covered
         if (!events.find(e => Math.abs(e.timestamp - localAnomaly.timestamp) < 5)) {
@@ -872,33 +867,58 @@ export const ReportPanel: React.FC<ReportPanelProps> = ({ anomaly, onClose, clas
                                     onClick={() => setShowRuleSelector(true)}
                                     className="w-full border-2 rounded-lg p-4 transition-all flex items-center justify-between group"
                                     style={{
-                                        background: selectedRuleId !== null 
+                                        background: (selectedRuleIds.size > 0 || isOtherSelected)
                                             ? 'rgb(var(--color-primary) / 0.1)' 
                                             : 'rgb(var(--color-background) / 0.5)',
-                                        borderColor: ruleError && selectedRuleId === null 
+                                        borderColor: ruleError && selectedRuleIds.size === 0 && !isOtherSelected
                                             ? 'rgb(239 68 68 / 0.5)' 
-                                            : selectedRuleId !== null 
+                                            : (selectedRuleIds.size > 0 || isOtherSelected)
                                                 ? 'rgb(var(--color-primary) / 0.5)'
                                                 : 'rgb(var(--color-border) / 0.3)',
                                     }}
                                 >
-                                    <div className="flex items-center gap-3">
-                                        {selectedRuleId !== null && selectedRuleId !== 'other' ? (
-                                            <>
-                                                {React.createElement(getRuleIcon(selectedRuleId as number), { 
-                                                    className: "size-5",
-                                                    style: { color: 'rgb(var(--color-primary))' }
-                                                })}
-                                                <div className={isHebrew ? "text-right" : "text-left"}>
-                                                    <p className="font-medium" style={{ color: 'rgb(var(--color-text))' }}>
-                                                        {isHebrew ? rules.find(r => r.id === selectedRuleId)?.nameHe : rules.find(r => r.id === selectedRuleId)?.name}
-                                                    </p>
-                                                    <p className="text-xs" style={{ color: 'rgb(var(--color-text-muted))' }}>
-                                                        {rules.find(r => r.id === selectedRuleId)?.description}
-                                                    </p>
+                                    <div className="flex items-center gap-3 flex-1 min-w-0">
+                                        {selectedRuleIds.size > 0 ? (
+                                            <div className="flex flex-col gap-1 flex-1 min-w-0">
+                                                <div className="flex items-center gap-2 flex-wrap">
+                                                    {Array.from(selectedRuleIds).slice(0, 3).map(ruleId => {
+                                                        const rule = rules.find(r => r.id === ruleId);
+                                                        const Icon = getRuleIcon(ruleId);
+                                                        return (
+                                                            <span 
+                                                                key={ruleId}
+                                                                className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium"
+                                                                style={{
+                                                                    background: 'rgb(var(--color-primary) / 0.2)',
+                                                                    color: 'rgb(var(--color-text))'
+                                                                }}
+                                                            >
+                                                                <Icon className="size-3" />
+                                                                {isHebrew ? rule?.nameHe : rule?.name}
+                                                            </span>
+                                                        );
+                                                    })}
+                                                    {selectedRuleIds.size > 3 && (
+                                                        <span className="text-xs" style={{ color: 'rgb(var(--color-text-muted))' }}>
+                                                            +{selectedRuleIds.size - 3} {isHebrew ? "נוספים" : "more"}
+                                                        </span>
+                                                    )}
+                                                    {isOtherSelected && (
+                                                        <span 
+                                                            className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-yellow-500/20 text-yellow-300"
+                                                        >
+                                                            <AlertTriangle className="size-3" />
+                                                            {isHebrew ? "אחר" : "Other"}
+                                                        </span>
+                                                    )}
                                                 </div>
-                                            </>
-                                        ) : selectedRuleId === 'other' ? (
+                                                <p className="text-xs" style={{ color: 'rgb(var(--color-text-muted))' }}>
+                                                    {isHebrew 
+                                                        ? `${selectedRuleIds.size + (isOtherSelected ? 1 : 0)} חוקים נבחרו - לחץ לעריכה`
+                                                        : `${selectedRuleIds.size + (isOtherSelected ? 1 : 0)} rule(s) selected - click to edit`}
+                                                </p>
+                                            </div>
+                                        ) : isOtherSelected ? (
                                             <>
                                                 <AlertTriangle className="size-5 text-yellow-400" />
                                                 <div className={isHebrew ? "text-right" : "text-left"}>
@@ -913,32 +933,32 @@ export const ReportPanel: React.FC<ReportPanelProps> = ({ anomaly, onClose, clas
                                         ) : (
                                             <div className={isHebrew ? "text-right" : "text-left"}>
                                                 <p className="font-medium" style={{ color: 'rgb(var(--color-text-muted))' }}>
-                                                    {isHebrew ? "...בחר חוק" : "Select a rule..."}
+                                                    {isHebrew ? "...בחר חוקים" : "Select rules..."}
                                                 </p>
                                                 <p className="text-xs" style={{ color: 'rgb(var(--color-text-muted) / 0.6)' }}>
-                                                    {isHebrew ? "לחץ כדי לבחור מתוך החוקים הזמינים" : "Click to choose from available rules"}
+                                                    {isHebrew ? "לחץ כדי לבחור חוקים (ניתן לבחור מספר חוקים)" : "Click to choose rules (multiple selection allowed)"}
                                                 </p>
                                             </div>
                                         )}
                                     </div>
                                     <Navigation className={clsx(
-                                        "size-5 transition-transform", 
+                                        "size-5 transition-transform flex-shrink-0", 
                                         isHebrew ? "group-hover:-translate-x-1 rotate-180" : "group-hover:translate-x-1"
                                     )} style={{
                                         color: 'rgb(var(--color-text-muted))'
                                     }} />
                                 </button>
                                 
-                                {ruleError && selectedRuleId === null && (
+                                {ruleError && selectedRuleIds.size === 0 && !isOtherSelected && (
                                     <div className="flex items-center gap-1.5 text-xs text-red-400 animate-in slide-in-from-top-1">
                                         <AlertTriangle className="size-3" />
-                                        <span>{isHebrew ? "אנא בחר איזה חוק תקף כדי לשלוח משוב" : "Please select which rule applies to submit feedback"}</span>
+                                        <span>{isHebrew ? "אנא בחר לפחות חוק אחד כדי לשלוח משוב" : "Please select at least one rule to submit feedback"}</span>
                                     </div>
                                 )}
                             </div>
                             
                             {/* Other Details Textbox - Shows when "Other" is selected */}
-                            {selectedRuleId === 'other' && (
+                            {isOtherSelected && (
                                 <div className="space-y-2 animate-in slide-in-from-top-2 duration-300">
                                     <div className="rounded-lg p-3 border border-yellow-500/30" style={{
                                         background: 'rgb(234 179 8 / 0.1)'
@@ -1089,7 +1109,7 @@ export const ReportPanel: React.FC<ReportPanelProps> = ({ anomaly, onClose, clas
             />
         )}
         
-        {/* Floating Rule Circles */}
+        {/* Floating Rule Circles - Multi-Select */}
         {showRuleSelector && (
             <div 
                 className="fixed inset-0 z-50 flex items-end justify-center pb-12"
@@ -1103,18 +1123,34 @@ export const ReportPanel: React.FC<ReportPanelProps> = ({ anomaly, onClose, clas
                     className="relative w-full max-w-7xl px-8 animate-in slide-in-from-bottom-12 duration-500"
                     onClick={(e) => e.stopPropagation()}
                 >
-                    {/* Close Button */}
-                    <button
-                        onClick={() => setShowRuleSelector(false)}
-                        className="absolute -top-16 right-8 p-3 rounded-full transition-all hover:scale-110 hover:rotate-90"
-                        style={{
-                            background: 'rgb(var(--color-surface) / 0.9)',
-                            color: 'rgb(var(--color-text))',
-                            backdropFilter: 'blur(10px)'
-                        }}
-                    >
-                        <X className="size-6" />
-                    </button>
+                    {/* Close/Done Button */}
+                    <div className="absolute -top-16 right-8 flex items-center gap-3">
+                        {(selectedRuleIds.size > 0 || isOtherSelected) && (
+                            <button
+                                onClick={() => setShowRuleSelector(false)}
+                                className="px-4 py-2 rounded-full transition-all hover:scale-105 font-medium text-sm flex items-center gap-2"
+                                style={{
+                                    background: 'rgb(var(--color-primary))',
+                                    color: 'white',
+                                    boxShadow: '0 4px 15px rgb(var(--color-primary) / 0.4)'
+                                }}
+                            >
+                                <CheckCircle className="size-4" />
+                                {isHebrew ? `סיום (${selectedRuleIds.size + (isOtherSelected ? 1 : 0)})` : `Done (${selectedRuleIds.size + (isOtherSelected ? 1 : 0)})`}
+                            </button>
+                        )}
+                        <button
+                            onClick={() => setShowRuleSelector(false)}
+                            className="p-3 rounded-full transition-all hover:scale-110 hover:rotate-90"
+                            style={{
+                                background: 'rgb(var(--color-surface) / 0.9)',
+                                color: 'rgb(var(--color-text))',
+                                backdropFilter: 'blur(10px)'
+                            }}
+                        >
+                            <X className="size-6" />
+                        </button>
+                    </div>
                     
                     {/* Title */}
                     <div className="text-center mb-8">
@@ -1122,14 +1158,22 @@ export const ReportPanel: React.FC<ReportPanelProps> = ({ anomaly, onClose, clas
                             color: 'rgb(var(--color-text))',
                             textShadow: '0 2px 10px rgba(0,0,0,0.5)'
                         }}>
-                            {isHebrew ? "בחר סוג חוק" : "Select Rule Type"}
+                            {isHebrew ? "בחר סוגי חוקים" : "Select Rule Types"}
                         </h3>
                         <p className="text-sm" style={{ 
                             color: 'rgb(var(--color-text-muted))',
                             textShadow: '0 1px 5px rgba(0,0,0,0.5)'
                         }}>
-                            {isHebrew ? "לחץ על החוק שמתאר הכי טוב את האנומליה" : "Click on the rule that best describes this anomaly"}
+                            {isHebrew ? "לחץ על החוקים שמתארים את האנומליה (ניתן לבחור מספר חוקים)" : "Click on the rules that describe this anomaly (multiple selection allowed)"}
                         </p>
+                        {selectedRuleIds.size > 0 && (
+                            <p className="text-xs mt-2" style={{ 
+                                color: 'rgb(var(--color-primary))',
+                                textShadow: '0 1px 5px rgba(0,0,0,0.5)'
+                            }}>
+                                {isHebrew ? `${selectedRuleIds.size} חוקים נבחרו` : `${selectedRuleIds.size} rule(s) selected`}
+                            </p>
+                        )}
                     </div>
                     
                     {/* Floating Rules - Organized by Category */}
@@ -1138,15 +1182,11 @@ export const ReportPanel: React.FC<ReportPanelProps> = ({ anomaly, onClose, clas
                                 {/* Emergency & Safety (Red) */}
                                 {rules.filter(r => r.category === 'emergency').map((rule, idx) => {
                                     const Icon = getRuleIcon(rule.id);
-                                    const isSelected = selectedRuleId === rule.id;
+                                    const isSelected = selectedRuleIds.has(rule.id);
                                     return (
                                         <button
                                             key={rule.id}
-                                            onClick={() => {
-                                                setSelectedRuleId(rule.id);
-                                                setRuleError(false);
-                                                setShowRuleSelector(false);
-                                            }}
+                                            onClick={() => toggleRuleSelection(rule.id)}
                                             className="flex flex-col items-center gap-2 transition-all hover:scale-110 group relative opacity-0"
                                             style={{
                                                 animation: 'jumpIn 0.5s cubic-bezier(0.68, -0.55, 0.265, 1.55) forwards',
@@ -1154,7 +1194,7 @@ export const ReportPanel: React.FC<ReportPanelProps> = ({ anomaly, onClose, clas
                                             }}
                                         >
                                             <div 
-                                                className="w-20 h-20 rounded-full flex items-center justify-center transition-all group-hover:shadow-2xl"
+                                                className="w-20 h-20 rounded-full flex items-center justify-center transition-all group-hover:shadow-2xl relative"
                                                 style={{
                                                     background: isSelected 
                                                         ? 'linear-gradient(135deg, rgb(239 68 68 / 0.4), rgb(220 38 38 / 0.6))' 
@@ -1168,7 +1208,7 @@ export const ReportPanel: React.FC<ReportPanelProps> = ({ anomaly, onClose, clas
                                             >
                                                 <Icon className="size-8 text-red-300 group-hover:scale-110 transition-transform" />
                                                 {isSelected && (
-                                                    <CheckCircle className="size-5 text-red-300 absolute -top-1 -right-1 animate-in zoom-in" />
+                                                    <CheckCircle className="size-6 text-white absolute -top-1 -right-1 animate-in zoom-in bg-red-500 rounded-full p-0.5" />
                                                 )}
                                             </div>
                                             <div className="text-center max-w-[100px]">
@@ -1186,16 +1226,12 @@ export const ReportPanel: React.FC<ReportPanelProps> = ({ anomaly, onClose, clas
                                 {/* Flight Operations (Blue) */}
                                 {rules.filter(r => r.category === 'flight_ops').map((rule, idx) => {
                                     const Icon = getRuleIcon(rule.id);
-                                    const isSelected = selectedRuleId === rule.id;
+                                    const isSelected = selectedRuleIds.has(rule.id);
                                     const baseDelay = 3;
                                     return (
                                         <button
                                             key={rule.id}
-                                            onClick={() => {
-                                                setSelectedRuleId(rule.id);
-                                                setRuleError(false);
-                                                setShowRuleSelector(false);
-                                            }}
+                                            onClick={() => toggleRuleSelection(rule.id)}
                                             className="flex flex-col items-center gap-2 transition-all hover:scale-110 group relative opacity-0"
                                             style={{
                                                 animation: 'jumpIn 0.5s cubic-bezier(0.68, -0.55, 0.265, 1.55) forwards',
@@ -1203,7 +1239,7 @@ export const ReportPanel: React.FC<ReportPanelProps> = ({ anomaly, onClose, clas
                                             }}
                                         >
                                             <div 
-                                                className="w-20 h-20 rounded-full flex items-center justify-center transition-all group-hover:shadow-2xl"
+                                                className="w-20 h-20 rounded-full flex items-center justify-center transition-all group-hover:shadow-2xl relative"
                                                 style={{
                                                     background: isSelected 
                                                         ? 'linear-gradient(135deg, rgb(59 130 246 / 0.4), rgb(37 99 235 / 0.6))' 
@@ -1217,7 +1253,7 @@ export const ReportPanel: React.FC<ReportPanelProps> = ({ anomaly, onClose, clas
                                             >
                                                 <Icon className="size-8 text-blue-300 group-hover:scale-110 transition-transform" />
                                                 {isSelected && (
-                                                    <CheckCircle className="size-5 text-blue-300 absolute -top-1 -right-1 animate-in zoom-in" />
+                                                    <CheckCircle className="size-6 text-white absolute -top-1 -right-1 animate-in zoom-in bg-blue-500 rounded-full p-0.5" />
                                                 )}
                                             </div>
                                             <div className="text-center max-w-[100px]">
@@ -1235,16 +1271,12 @@ export const ReportPanel: React.FC<ReportPanelProps> = ({ anomaly, onClose, clas
                                 {/* Technical (Purple) */}
                                 {rules.filter(r => r.category === 'technical').map((rule, idx) => {
                                     const Icon = getRuleIcon(rule.id);
-                                    const isSelected = selectedRuleId === rule.id;
+                                    const isSelected = selectedRuleIds.has(rule.id);
                                     const baseDelay = 7;
                                     return (
                                         <button
                                             key={rule.id}
-                                            onClick={() => {
-                                                setSelectedRuleId(rule.id);
-                                                setRuleError(false);
-                                                setShowRuleSelector(false);
-                                            }}
+                                            onClick={() => toggleRuleSelection(rule.id)}
                                             className="flex flex-col items-center gap-2 transition-all hover:scale-110 group relative opacity-0"
                                             style={{
                                                 animation: 'jumpIn 0.5s cubic-bezier(0.68, -0.55, 0.265, 1.55) forwards',
@@ -1252,7 +1284,7 @@ export const ReportPanel: React.FC<ReportPanelProps> = ({ anomaly, onClose, clas
                                             }}
                                         >
                                             <div 
-                                                className="w-20 h-20 rounded-full flex items-center justify-center transition-all group-hover:shadow-2xl"
+                                                className="w-20 h-20 rounded-full flex items-center justify-center transition-all group-hover:shadow-2xl relative"
                                                 style={{
                                                     background: isSelected 
                                                         ? 'linear-gradient(135deg, rgb(168 85 247 / 0.4), rgb(147 51 234 / 0.6))' 
@@ -1266,7 +1298,7 @@ export const ReportPanel: React.FC<ReportPanelProps> = ({ anomaly, onClose, clas
                                             >
                                                 <Icon className="size-8 text-purple-300 group-hover:scale-110 transition-transform" />
                                                 {isSelected && (
-                                                    <CheckCircle className="size-5 text-purple-300 absolute -top-1 -right-1 animate-in zoom-in" />
+                                                    <CheckCircle className="size-6 text-white absolute -top-1 -right-1 animate-in zoom-in bg-purple-500 rounded-full p-0.5" />
                                                 )}
                                             </div>
                                             <div className="text-center max-w-[100px]">
@@ -1284,16 +1316,12 @@ export const ReportPanel: React.FC<ReportPanelProps> = ({ anomaly, onClose, clas
                                 {/* Military & Security (Green) */}
                                 {rules.filter(r => r.category === 'military').map((rule, idx) => {
                                     const Icon = getRuleIcon(rule.id);
-                                    const isSelected = selectedRuleId === rule.id;
+                                    const isSelected = selectedRuleIds.has(rule.id);
                                     const baseDelay = 9;
                                     return (
                                         <button
                                             key={rule.id}
-                                            onClick={() => {
-                                                setSelectedRuleId(rule.id);
-                                                setRuleError(false);
-                                                setShowRuleSelector(false);
-                                            }}
+                                            onClick={() => toggleRuleSelection(rule.id)}
                                             className="flex flex-col items-center gap-2 transition-all hover:scale-110 group relative opacity-0"
                                             style={{
                                                 animation: 'jumpIn 0.5s cubic-bezier(0.68, -0.55, 0.265, 1.55) forwards',
@@ -1301,7 +1329,7 @@ export const ReportPanel: React.FC<ReportPanelProps> = ({ anomaly, onClose, clas
                                             }}
                                         >
                                             <div 
-                                                className="w-20 h-20 rounded-full flex items-center justify-center transition-all group-hover:shadow-2xl"
+                                                className="w-20 h-20 rounded-full flex items-center justify-center transition-all group-hover:shadow-2xl relative"
                                                 style={{
                                                     background: isSelected 
                                                         ? 'linear-gradient(135deg, rgb(34 197 94 / 0.4), rgb(22 163 74 / 0.6))' 
@@ -1315,7 +1343,7 @@ export const ReportPanel: React.FC<ReportPanelProps> = ({ anomaly, onClose, clas
                                             >
                                                 <Icon className="size-8 text-green-300 group-hover:scale-110 transition-transform" />
                                                 {isSelected && (
-                                                    <CheckCircle className="size-5 text-green-300 absolute -top-1 -right-1 animate-in zoom-in" />
+                                                    <CheckCircle className="size-6 text-white absolute -top-1 -right-1 animate-in zoom-in bg-green-500 rounded-full p-0.5" />
                                                 )}
                                             </div>
                                             <div className="text-center max-w-[100px]">
@@ -1333,9 +1361,8 @@ export const ReportPanel: React.FC<ReportPanelProps> = ({ anomaly, onClose, clas
                         {/* Other / Custom (Yellow) */}
                             <button
                                 onClick={() => {
-                                    setSelectedRuleId('other');
+                                    setIsOtherSelected(!isOtherSelected);
                                     setRuleError(false);
-                                    setShowRuleSelector(false);
                                 }}
                                 className="flex flex-col items-center gap-2 transition-all hover:scale-110 group relative opacity-0"
                                 style={{
@@ -1344,21 +1371,21 @@ export const ReportPanel: React.FC<ReportPanelProps> = ({ anomaly, onClose, clas
                                 }}
                             >
                                 <div 
-                                    className="w-20 h-20 rounded-full flex items-center justify-center transition-all group-hover:shadow-2xl"
+                                    className="w-20 h-20 rounded-full flex items-center justify-center transition-all group-hover:shadow-2xl relative"
                                     style={{
-                                        background: selectedRuleId === 'other' 
+                                        background: isOtherSelected 
                                             ? 'linear-gradient(135deg, rgb(234 179 8 / 0.4), rgb(202 138 4 / 0.6))' 
                                             : 'linear-gradient(135deg, rgb(234 179 8 / 0.3), rgb(202 138 4 / 0.2))',
-                                        border: selectedRuleId === 'other' ? '4px solid rgb(234 179 8)' : '3px solid rgb(234 179 8 / 0.5)',
-                                        boxShadow: selectedRuleId === 'other' 
+                                        border: isOtherSelected ? '4px solid rgb(234 179 8)' : '3px solid rgb(234 179 8 / 0.5)',
+                                        boxShadow: isOtherSelected 
                                             ? '0 10px 40px rgb(234 179 8 / 0.6), inset 0 2px 10px rgb(255 255 255 / 0.1)' 
                                             : '0 5px 20px rgb(234 179 8 / 0.3)',
                                         backdropFilter: 'blur(10px)'
                                     }}
                                 >
                                     <AlertTriangle className="size-8 text-yellow-300 group-hover:scale-110 transition-transform" />
-                                    {selectedRuleId === 'other' && (
-                                        <CheckCircle className="size-5 text-yellow-300 absolute -top-1 -right-1 animate-in zoom-in" />
+                                    {isOtherSelected && (
+                                        <CheckCircle className="size-6 text-white absolute -top-1 -right-1 animate-in zoom-in bg-yellow-500 rounded-full p-0.5" />
                                     )}
                                 </div>
                                 <div className="text-center max-w-[100px]">

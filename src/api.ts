@@ -196,8 +196,9 @@ export interface FeedbackParams {
     flightId: string;
     isAnomaly: boolean;
     comments?: string;
-    ruleId?: number | null;  // null means "Other" option
-    otherDetails?: string;   // Used when ruleId is null
+    ruleId?: number | null;  // Legacy single rule - kept for backward compatibility
+    ruleIds?: number[];      // New: array of rule IDs for multiple selection
+    otherDetails?: string;   // Used when ruleId is null/Other
 }
 
 export interface FeedbackHistoryItem {
@@ -220,7 +221,11 @@ export interface UpdateFeedbackParams {
 }
 
 export const submitFeedback = async (params: FeedbackParams): Promise<void> => {
-    const { flightId, isAnomaly, comments = "", ruleId, otherDetails = "" } = params;
+    const { flightId, isAnomaly, comments = "", ruleId, ruleIds, otherDetails = "" } = params;
+    
+    // Support both old (ruleId) and new (ruleIds) format
+    // If ruleIds is provided, use it; otherwise convert ruleId to array
+    const finalRuleIds = ruleIds ?? (ruleId !== null && ruleId !== undefined ? [ruleId] : undefined);
     
     const response = await fetch(`${API_BASE}/feedback`, {
         method: 'POST',
@@ -231,7 +236,8 @@ export const submitFeedback = async (params: FeedbackParams): Promise<void> => {
             flight_id: flightId,
             is_anomaly: isAnomaly,
             comments: comments,
-            rule_id: ruleId,
+            rule_ids: finalRuleIds,  // Send as array
+            rule_id: ruleId,  // Keep for backward compatibility
             other_details: otherDetails
         }),
     });
@@ -260,10 +266,11 @@ export const fetchFeedbackHistory = async (startTs: number = 0, endTs?: number, 
 };
 
 // Fetch from the new feedback_tagged.db (clean database)
-export const fetchTaggedFeedbackHistory = async (startTs: number = 0, endTs?: number, limit: number = 100): Promise<AnomalyReport[]> => {
+export const fetchTaggedFeedbackHistory = async (startTs: number = 0, endTs?: number, limit: number = 100, includeNormal: boolean = true): Promise<AnomalyReport[]> => {
     const params = new URLSearchParams({
         start_ts: startTs.toString(),
-        limit: limit.toString()
+        limit: limit.toString(),
+        include_normal: includeNormal.toString()
     });
     
     if (endTs !== undefined) {
@@ -332,8 +339,10 @@ export interface FlightMetadata {
     signal_loss_events?: number;
     data_quality_score?: number;
     feedback?: {
-        rule_id?: number;
-        rule_name?: string;
+        rule_id?: number;  // Legacy single rule
+        rule_name?: string;  // Legacy single rule name
+        rule_ids?: number[];  // Multiple rules
+        rule_names?: string[];  // Multiple rule names
         comments?: string;
         other_details?: string;
         tagged_at?: number;
@@ -1544,6 +1553,85 @@ export interface AttackTargetRequest {
     ammoRequired: number;
 }
 
+// Mission Aircraft for strike planning
+export interface MissionAircraftRequest {
+    id: string;
+    callsign: string;
+    ammoCapacity: number;
+    color?: string;
+    type?: 'F-16' | 'F-35';
+}
+
+// Strike waypoint in a planned route
+export interface StrikeWaypoint {
+    lat: number;
+    lon: number;
+    alt_ft: number;
+    time_offset_min: number;
+    waypoint_type: 'origin' | 'ingress' | 'target' | 'egress' | 'return';
+    name?: string;
+    risk_score: number;
+}
+
+// Strike phase (ingress, strike, egress)
+export interface StrikePhase {
+    name: string;
+    waypoints: StrikeWaypoint[];
+    distance_nm: number;
+    duration_min: number;
+    avg_risk: number;
+}
+
+// Strike route for an aircraft
+export interface StrikeRoute {
+    route_id: string;
+    origin: { lat: number; lon: number; name?: string };
+    targets: AttackTargetRequest[];
+    phases: StrikePhase[];
+    total_distance_nm: number;
+    total_duration_min: number;
+    total_risk_score: number;
+    planned_path: Array<{
+        lat: number;
+        lon: number;
+        alt_ft: number;
+        time_offset_min: number;
+    }>;
+    centerline: Array<{
+        lat: number;
+        lon: number;
+        alt_ft: number;
+        time_offset_min?: number;
+    }>;
+    width_nm: number;
+}
+
+// Aircraft with assigned route
+export interface StrikeAircraftResult {
+    id: string;
+    callsign: string;
+    ammoCapacity: number;
+    color: string;
+    assignedTargets: string[];
+    route: StrikeRoute | null;
+}
+
+// Strike plan response
+export interface StrikePlanResponse {
+    aircraft: StrikeAircraftResult[];
+    summary: {
+        total_aircraft: number;
+        aircraft_with_routes: number;
+        total_targets: number;
+        targets_assigned: number;
+        total_distance_nm: number;
+        max_duration_min: number;
+        avg_risk_score: number;
+    };
+    origin: { lat: number; lon: number; name?: string };
+    targets: AttackTargetRequest[];
+}
+
 /**
  * Get available aircraft profiles (Fighter Jet vs Civil Aircraft).
  */
@@ -1586,6 +1674,41 @@ export const planAdvancedRoute = async (
     if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
         throw new Error(errorData.detail || 'Failed to plan advanced route');
+    }
+    
+    return response.json();
+};
+
+/**
+ * Plan strike routes for attack missions.
+ * Creates direct tactical routes to targets with risk assessment.
+ */
+export const planStrikeRoute = async (
+    origin: RouteWaypoint,
+    targets: AttackTargetRequest[],
+    aircraft: MissionAircraftRequest[],
+    options: {
+        aircraft_type?: 'fighter' | 'civil';
+        tactical_zones?: TacticalZoneRequest[];
+        return_to_base?: boolean;
+    } = {}
+): Promise<StrikePlanResponse> => {
+    const response = await fetch(`${API_BASE}/route/plan-strike`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            origin,
+            targets,
+            aircraft,
+            aircraft_type: options.aircraft_type || 'fighter',
+            tactical_zones: options.tactical_zones || [],
+            return_to_base: options.return_to_base ?? true,
+        })
+    });
+    
+    if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.detail || 'Failed to plan strike route');
     }
     
     return response.json();

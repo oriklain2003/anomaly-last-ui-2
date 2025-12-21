@@ -45,7 +45,9 @@ export interface AnomalyReport {
     full_report: any;
     feedback_id?: number;  // For history mode
     feedback_comments?: string;  // For history mode
-    feedback_rule_id?: number | null;  // For history mode
+    feedback_rule_id?: number | null;  // For history mode (legacy single rule)
+    feedback_rule_ids?: number[];  // For history mode (multiple rules)
+    feedback_rule_names?: string[];  // For history mode (multiple rule names)
     feedback_other_details?: string;  // For history mode
     user_label?: number; // 0: Normal, 1: Anomaly
 }

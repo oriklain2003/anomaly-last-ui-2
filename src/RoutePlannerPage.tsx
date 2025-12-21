@@ -6,6 +6,7 @@ import {
     fetchRouteAirports, 
     fetchAircraftProfiles,
     planAdvancedRoute,
+    planStrikeRoute,
     fetchRouteTraffic,
     refreshRouteTraffic,
     addSimulatedAircraft,
@@ -18,6 +19,8 @@ import {
     type AircraftProfile,
     type RouteWaypoint,
     type LearnedPath,
+    type StrikePlanResponse,
+    type TacticalZoneRequest,
 } from './api';
 import { SimulationModal } from './components/SimulationModal';
 import { MissionSimulationModal } from './components/MissionSimulationModal';
@@ -92,6 +95,9 @@ interface AttackTarget {
     ammoRequired: number;
 }
 
+// Aircraft type for mission planning
+type FighterAircraftType = 'F-16' | 'F-35';
+
 // Aircraft in attack mission
 interface MissionAircraft {
     id: string;
@@ -100,6 +106,7 @@ interface MissionAircraft {
     assignedTargets: string[];
     route?: AdvancedPlannedRoute;
     color: string;
+    type: FighterAircraftType;
 }
 
 // Mission plan
@@ -163,6 +170,7 @@ export const RoutePlannerPage: React.FC = () => {
     const [currentTargetPriority, setCurrentTargetPriority] = useState<AttackTarget['priority']>('high');
     const [newAircraftCallsign, setNewAircraftCallsign] = useState('');
     const [newAircraftAmmo, setNewAircraftAmmo] = useState('4');
+    const [newAircraftType, setNewAircraftType] = useState<FighterAircraftType>('F-16');
     const [missionPlan, setMissionPlan] = useState<AttackMission | null>(null);
     const [showMissionPanel, setShowMissionPanel] = useState(false);
     
@@ -1096,11 +1104,12 @@ export const RoutePlannerPage: React.FC = () => {
             ammoCapacity: parseInt(newAircraftAmmo) || 4,
             assignedTargets: [],
             color: colors[missionAircraft.length % colors.length],
+            type: newAircraftType,
         };
 
         setMissionAircraft(prev => [...prev, newAircraft]);
         setNewAircraftCallsign('');
-    }, [newAircraftCallsign, newAircraftAmmo, missionAircraft.length]);
+    }, [newAircraftCallsign, newAircraftAmmo, missionAircraft.length, newAircraftType]);
 
     // Remove mission aircraft
     const handleRemoveMissionAircraft = useCallback((aircraftId: string) => {
@@ -1136,66 +1145,58 @@ export const RoutePlannerPage: React.FC = () => {
                 return;
             }
 
-            // Sort targets by priority (high first)
-            const sortedTargets = [...attackTargets].sort((a, b) => {
-                const priorityOrder = { high: 0, medium: 1, low: 2 };
-                return priorityOrder[a.priority] - priorityOrder[b.priority];
-            });
-
-            // Assign targets to aircraft (greedy algorithm)
-            const assignedAircraft = missionAircraft.map(a => ({
-                ...a,
-                assignedTargets: [] as string[],
-                remainingAmmo: a.ammoCapacity,
+            // Convert tactical zones to API format
+            const zonesForApi: TacticalZoneRequest[] = tacticalZones.map(z => ({
+                id: z.id,
+                type: z.type,
+                points: z.points,
+                altitude: z.altitude,
+                speed: z.speed,
             }));
 
-            for (const target of sortedTargets) {
-                // Find aircraft with enough ammo that's closest to the target or has least assignments
-                const availableAircraft = assignedAircraft
-                    .filter(a => a.remainingAmmo >= target.ammoRequired)
-                    .sort((a, b) => a.assignedTargets.length - b.assignedTargets.length);
-
-                if (availableAircraft.length > 0) {
-                    availableAircraft[0].assignedTargets.push(target.id);
-                    availableAircraft[0].remainingAmmo -= target.ammoRequired;
+            // Use the new strike route planner API
+            const strikePlan: StrikePlanResponse = await planStrikeRoute(
+                origin,
+                attackTargets.map(t => ({
+                    id: t.id,
+                    lat: t.lat,
+                    lon: t.lon,
+                    name: t.name,
+                    priority: t.priority,
+                    ammoRequired: t.ammoRequired,
+                })),
+                missionAircraft.map(a => ({
+                    id: a.id,
+                    callsign: a.callsign,
+                    ammoCapacity: a.ammoCapacity,
+                    color: a.color,
+                    type: a.type,
+                })),
+                {
+                    aircraft_type: 'fighter',
+                    tactical_zones: zonesForApi,
+                    return_to_base: true,
                 }
-            }
-
-            // Plan routes for each aircraft
-            const aircraftWithRoutes = await Promise.all(
-                assignedAircraft
-                    .filter(a => a.assignedTargets.length > 0)
-                    .map(async (aircraft) => {
-                        // Build waypoints from assigned targets
-                        const targetWaypoints = aircraft.assignedTargets.map(tid => {
-                            const target = attackTargets.find(t => t.id === tid)!;
-                            return {
-                                lat: target.lat,
-                                lon: target.lon,
-                                name: target.name,
-                            };
-                        });
-
-                        // Plan route through targets, returning to base
-                        try {
-                            const result = await planAdvancedRoute(
-                                origin,
-                                origin, // Return to base
-                                {
-                                    waypoints: targetWaypoints,
-                                    aircraft_type: 'fighter',
-                                    check_conflicts: true,
-                                }
-                            );
-                            return {
-                                ...aircraft,
-                                route: result.best_route || undefined,
-                            };
-                        } catch {
-                            return aircraft;
-                        }
-                    })
             );
+
+            // Convert the strike plan response to our internal format
+            const aircraftWithRoutes = strikePlan.aircraft.map(a => {
+                // Find the original aircraft to preserve all fields
+                const originalAircraft = missionAircraft.find(ma => ma.id === a.id);
+                return {
+                    ...originalAircraft!,
+                    callsign: a.callsign,
+                    ammoCapacity: a.ammoCapacity,
+                    color: a.color,
+                    assignedTargets: a.assignedTargets,
+                    route: a.route ? {
+                        ...a.route,
+                        // Ensure planned_path has the right format
+                        planned_path: a.route.planned_path || a.route.centerline || [],
+                        centerline: a.route.centerline || a.route.planned_path || [],
+                    } : undefined,
+                };
+            });
 
             // Create mission plan
             const mission: AttackMission = {
@@ -1803,6 +1804,14 @@ export const RoutePlannerPage: React.FC = () => {
                                             onChange={(e) => setNewAircraftCallsign(e.target.value)}
                                             className="flex-1 bg-slate-800 border border-slate-700 rounded px-2 py-1 text-sm"
                                         />
+                                        <select
+                                            value={newAircraftType}
+                                            onChange={(e) => setNewAircraftType(e.target.value as FighterAircraftType)}
+                                            className="w-20 bg-slate-800 border border-slate-700 rounded px-2 py-1 text-sm"
+                                        >
+                                            <option value="F-16">F-16</option>
+                                            <option value="F-35">F-35</option>
+                                        </select>
                                         <input
                                             type="number"
                                             placeholder="Ammo"
@@ -1828,6 +1837,9 @@ export const RoutePlannerPage: React.FC = () => {
                                                     <div className="flex items-center gap-2">
                                                         <Plane className="w-3 h-3" style={{ color: aircraft.color }} />
                                                         <span className="font-mono">{aircraft.callsign}</span>
+                                                        <span className={`text-xs px-1.5 py-0.5 rounded ${aircraft.type === 'F-35' ? 'bg-purple-600/30 text-purple-300' : 'bg-blue-600/30 text-blue-300'}`}>
+                                                            {aircraft.type}
+                                                        </span>
                                                         <span className="text-slate-500">({aircraft.ammoCapacity} ammo)</span>
                                                         {aircraft.assignedTargets.length > 0 && (
                                                             <span className="text-xs bg-slate-700 px-1 rounded">

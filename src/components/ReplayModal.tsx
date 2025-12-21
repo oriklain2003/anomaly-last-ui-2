@@ -54,13 +54,71 @@ const AIRPORTS = [
     { code: "OSDI", name: "Damascus Intl", lat: 33.411, lon: 36.516, elevation_ft: 2020 }
 ];
 
+// Loading overlay component
+const LoadingOverlay = () => (
+    <div className="absolute inset-0 z-[100] bg-black/90 flex items-center justify-center backdrop-blur-sm">
+        <style>{`
+            .u-loading {
+                width: 128px;
+                height: 128px;
+                display: block;
+            }
+            .u-loading__symbol {
+                background-color: var(--color-background);
+                padding: 8px;
+                animation: loading 3s infinite;
+                border-radius: 5px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                width: 100%;
+                height: 100%;
+            }
+            .u-loading__content {
+                 display: block;
+                 width: 100%;
+                 animation: loading-icon 3s infinite;
+            }
+            @keyframes loading {
+                0% { transform: perspective(250px) rotateX(0deg) rotateY(0deg); }
+                15% { background-color: var(--color-background); }
+                16% { background-color: rgb(var(--color-primary)); }
+                50% { transform: perspective(250px) rotateX(180deg) rotateY(0deg); background-color: rgb(var(--color-primary)); }
+                65% { background-color: rgb(var(--color-primary)); }
+                66% { background-color: var(--color-background); }
+                100% { transform: perspective(250px) rotateX(180deg) rotateY(-180deg); }
+            }
+            @keyframes loading-icon {
+                0% { transform: perspective(250px) rotateX(0deg) rotateY(0deg); }
+                15% { transform: perspective(250px) rotateX(0deg) rotateY(0deg); }
+                16% { transform: perspective(250px) rotateX(180deg) rotateY(0deg); }
+                50% { transform: perspective(250px) rotateX(180deg) rotateY(0deg); }
+                65% { transform: perspective(250px) rotateX(180deg) rotateY(0deg); }
+                66% { transform: perspective(250px) rotateX(180deg) rotateY(180deg); }
+                100% { transform: perspective(250px) rotateX(180deg) rotateY(180deg); }
+            }
+        `}</style>
+        
+        <div className="u-loading">
+            <div className="u-loading__symbol shadow-[0_0_30px_rgba(59,130,246,0.6)]">
+                <div className="u-loading__content">
+                     <svg viewBox="0 0 100 40" className="w-full h-full" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <text x="50" y="28" textAnchor="middle" fontFamily="sans-serif" fontWeight="900" fontSize="28" fill="white" letterSpacing="2">ONYX</text>
+                     </svg>
+                </div>
+            </div>
+        </div>
+    </div>
+);
+
 export const ReplayModal: React.FC<ReplayModalProps> = ({ mainFlightId, secondaryFlightIds = [], events = [], onClose }) => {
     const mapContainer = useRef<HTMLDivElement>(null);
     const map = useRef<maplibregl.Map | null>(null);
     const popupRef = useRef<maplibregl.Popup | null>(null);
     
     const [flights, setFlights] = useState<FlightData[]>([]);
-    const [loading, setLoading] = useState(true);
+    const [tracksLoading, setTracksLoading] = useState(true);
+    const [mapReady, setMapReady] = useState(false);
     const [isPlaying, setIsPlaying] = useState(false);
     const [currentTime, setCurrentTime] = useState<number>(0);
     const [speed, setSpeed] = useState<number>(1);
@@ -74,6 +132,9 @@ export const ReplayModal: React.FC<ReplayModalProps> = ({ mainFlightId, secondar
 
     const animationRef = useRef<number | undefined>(undefined);
     const lastFrameTime = useRef<number>(0);
+
+    // Computed loading state - show loading until both tracks and map are ready
+    const loading = tracksLoading || (flights.length > 0 && !mapReady);
 
     // Helper: Haversine Distance in NM
     const getDistanceNM = (lat1: number, lon1: number, lat2: number, lon2: number) => {
@@ -123,7 +184,8 @@ export const ReplayModal: React.FC<ReplayModalProps> = ({ mainFlightId, secondar
     // Fetch data
     useEffect(() => {
         const loadData = async () => {
-            setLoading(true);
+            setTracksLoading(true);
+            setMapReady(false);
             try {
                 // Ensure unique IDs and remove any empty strings
                 const ids = [mainFlightId, ...new Set(secondaryFlightIds)].filter(Boolean);
@@ -157,7 +219,7 @@ export const ReplayModal: React.FC<ReplayModalProps> = ({ mainFlightId, secondar
                     setCurrentTime(min);
                 }
             } finally {
-                setLoading(false);
+                setTracksLoading(false);
             }
         };
 
@@ -166,7 +228,7 @@ export const ReplayModal: React.FC<ReplayModalProps> = ({ mainFlightId, secondar
 
     // Initialize Map
     useEffect(() => {
-        if (!mapContainer.current || loading || flights.length === 0) return;
+        if (!mapContainer.current || tracksLoading || flights.length === 0) return;
 
         map.current = new maplibregl.Map({
             container: mapContainer.current,
@@ -328,12 +390,24 @@ export const ReplayModal: React.FC<ReplayModalProps> = ({ mainFlightId, secondar
                 map.current?.on('mouseleave', `layer-${flight.id}-pos`, hidePopup);
                 map.current?.on('click', `layer-${flight.id}-pos`, showPopup); // Also work on click
             });
+
+            // Mark map as ready after all sources and layers are added
+            setMapReady(true);
         });
 
         return () => {
-            map.current?.remove();
+            // Safely cleanup map to avoid abort errors
+            if (map.current) {
+                try {
+                    map.current.remove();
+                } catch (e) {
+                    // Ignore errors during cleanup (e.g., aborted fetch requests)
+                }
+                map.current = null;
+            }
+            setMapReady(false);
         };
-    }, [loading, flights]);
+    }, [tracksLoading, flights]);
 
     // Animation Loop
     useEffect(() => {
@@ -488,67 +562,12 @@ export const ReplayModal: React.FC<ReplayModalProps> = ({ mainFlightId, secondar
         return nearest;
     };
 
-    if (loading) {
-        return (
-            <div className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center backdrop-blur-sm">
-                <style>{`
-                    .u-loading {
-                        width: 128px;
-                        height: 128px;
-                        display: block;
-                    }
-                    .u-loading__symbol {
-                        background-color: var(--color-background); /* primary: background */
-                        padding: 8px;
-                        animation: loading 3s infinite;
-                        border-radius: 5px;
-                        display: flex;
-                        align-items: center;
-                        justify-content: center;
-                        width: 100%;
-                        height: 100%;
-                    }
-                    .u-loading__content {
-                         display: block;
-                         width: 100%;
-                         animation: loading-icon 3s infinite;
-                    }
-                    @keyframes loading {
-                        0% { transform: perspective(250px) rotateX(0deg) rotateY(0deg); }
-                        15% { background-color: var(--color-background); }
-                        16% { background-color: rgb(var(--color-primary)); } /* secondary: accent */
-                        50% { transform: perspective(250px) rotateX(180deg) rotateY(0deg); background-color: rgb(var(--color-primary)); }
-                        65% { background-color: rgb(var(--color-primary)); }
-                        66% { background-color: var(--color-background); }
-                        100% { transform: perspective(250px) rotateX(180deg) rotateY(-180deg); }
-                    }
-                    @keyframes loading-icon {
-                        0% { transform: perspective(250px) rotateX(0deg) rotateY(0deg); }
-                        15% { transform: perspective(250px) rotateX(0deg) rotateY(0deg); }
-                        16% { transform: perspective(250px) rotateX(180deg) rotateY(0deg); }
-                        50% { transform: perspective(250px) rotateX(180deg) rotateY(0deg); }
-                        65% { transform: perspective(250px) rotateX(180deg) rotateY(0deg); }
-                        66% { transform: perspective(250px) rotateX(180deg) rotateY(180deg); }
-                        100% { transform: perspective(250px) rotateX(180deg) rotateY(180deg); }
-                    }
-                `}</style>
-                
-                <div className="u-loading">
-                    <div className="u-loading__symbol shadow-[0_0_30px_rgba(59,130,246,0.6)]">
-                        <div className="u-loading__content">
-                             <svg viewBox="0 0 100 40" className="w-full h-full" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                <text x="50" y="28" textAnchor="middle" fontFamily="sans-serif" fontWeight="900" fontSize="28" fill="white" letterSpacing="2">ONYX</text>
-                             </svg>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        );
-    }
-
     return (
         <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-8 backdrop-blur-sm animate-in fade-in">
             <div className="bg-surface w-full h-full rounded-2xl overflow-hidden flex flex-col border border-white/10 shadow-2xl relative">
+                
+                {/* Loading Overlay */}
+                {loading && <LoadingOverlay />}
                 
                 {/* Header / Close */}
                 <div className="absolute top-4 right-4 z-50 flex gap-2">
@@ -647,13 +666,13 @@ export const ReplayModal: React.FC<ReplayModalProps> = ({ mainFlightId, secondar
                                 const tel = getCurrentTelemetry(f);
                                 if (!tel) return null;
 
-                                                const distances = (tel.status !== 'waiting' && 'lat' in tel)
-                                                    ? getDistancesToOthers(f.id, tel.lat, tel.lon)
-                                                    : [];
-                                                
-                                                const nearestAirport = (tel.status !== 'waiting' && 'lat' in tel)
-                                                    ? getNearestAirport(tel.lat, tel.lon)
-                                                    : null;
+                                const distances = (tel.status !== 'waiting' && 'lat' in tel)
+                                    ? getDistancesToOthers(f.id, tel.lat, tel.lon)
+                                    : [];
+                                
+                                const nearestAirport = (tel.status !== 'waiting' && 'lat' in tel)
+                                    ? getNearestAirport(tel.lat, tel.lon)
+                                    : null;
 
                                 return (
                                     <div key={f.id} className="bg-black/60 backdrop-blur border border-white/10 p-3 rounded-lg text-xs w-48 shadow-lg transition-all pointer-events-auto">

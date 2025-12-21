@@ -70,6 +70,33 @@ interface MissionSimulationModalProps {
 }
 
 // ============================================================
+// Missile Types and Physics
+// ============================================================
+
+interface Missile {
+    id: string;
+    launcherId: string;
+    targetId: string;
+    lat: number;
+    lon: number;
+    alt_ft: number;
+    heading_deg: number;
+    speed_kts: number;
+    launchTime: number;
+    status: 'flying' | 'hit' | 'miss';
+    trail: Array<{ lat: number; lon: number }>;
+    guidanceMode: 'midcourse' | 'terminal';
+    prev_los_angle: number | null;
+}
+
+// Missile constants
+const MISSILE_SPEED_KTS = 2000; // Mach 3 ~ 2000 kts
+const MISSILE_MAX_RANGE_NM = 30;
+const MISSILE_HIT_RADIUS_NM = 0.5;
+const MISSILE_MAX_FLIGHT_TIME_MIN = 1.5;
+const NAV_CONSTANT = 4; // Proportional Navigation constant (N)
+
+// ============================================================
 // Constants
 // ============================================================
 
@@ -138,6 +165,137 @@ const interpolatePosition = (
 };
 
 // ============================================================
+// Missile Physics - Proportional Navigation
+// ============================================================
+
+/**
+ * Update missile position using Proportional Navigation guidance law.
+ * PN commands acceleration proportional to LOS rate: a_c = N * V_c * LOS_rate
+ */
+const updateMissilePN = (
+    missile: Missile,
+    targetLat: number,
+    targetLon: number,
+    deltaTimeMin: number
+): Missile => {
+    const dtHours = deltaTimeMin / 60;
+    
+    // Calculate current LOS angle to target
+    const losAngle = getBearing(missile.lat, missile.lon, targetLat, targetLon);
+    
+    // Calculate LOS rate (deg/min)
+    let losRate = 0;
+    if (missile.prev_los_angle !== null) {
+        let angleDiff = losAngle - missile.prev_los_angle;
+        // Normalize to -180 to 180
+        while (angleDiff > 180) angleDiff -= 360;
+        while (angleDiff < -180) angleDiff += 360;
+        losRate = angleDiff / deltaTimeMin;
+    }
+    
+    // Closing velocity (simplified - assume directly approaching)
+    const distToTarget = getDistanceNM(missile.lat, missile.lon, targetLat, targetLon);
+    const closingVelocity = MISSILE_SPEED_KTS; // Simplified
+    
+    // PN commanded turn rate: turn_rate = N * LOS_rate
+    const commandedTurnRate = NAV_CONSTANT * losRate; // deg/min
+    
+    // Calculate new heading
+    let newHeading = missile.heading_deg + commandedTurnRate * deltaTimeMin;
+    // Normalize
+    while (newHeading >= 360) newHeading -= 360;
+    while (newHeading < 0) newHeading += 360;
+    
+    // Move missile along new heading
+    const distanceTraveled = MISSILE_SPEED_KTS * dtHours; // NM
+    
+    // Convert heading to radians
+    const headingRad = newHeading * Math.PI / 180;
+    
+    // Approximate lat/lon change
+    const latDegPerNm = 1 / 60;
+    const lonDegPerNm = 1 / (60 * Math.cos(missile.lat * Math.PI / 180));
+    
+    const newLat = missile.lat + distanceTraveled * Math.cos(headingRad) * latDegPerNm;
+    const newLon = missile.lon + distanceTraveled * Math.sin(headingRad) * lonDegPerNm;
+    
+    // Update trail (keep last 20 points)
+    const newTrail = [...missile.trail, { lat: missile.lat, lon: missile.lon }];
+    if (newTrail.length > 20) newTrail.shift();
+    
+    // Check for hit
+    const newDistToTarget = getDistanceNM(newLat, newLon, targetLat, targetLon);
+    const isHit = newDistToTarget < MISSILE_HIT_RADIUS_NM;
+    
+    // Check for miss (flew past or timed out)
+    const flightTime = (missile.launchTime > 0) ? deltaTimeMin : 0; // Simplified
+    const isMiss = newDistToTarget > distToTarget && distToTarget < 2; // Flew past
+    
+    return {
+        ...missile,
+        lat: newLat,
+        lon: newLon,
+        heading_deg: newHeading,
+        prev_los_angle: losAngle,
+        trail: newTrail,
+        status: isHit ? 'hit' : (isMiss ? 'miss' : 'flying'),
+        guidanceMode: distToTarget < 5 ? 'terminal' : 'midcourse',
+    };
+};
+
+/**
+ * Check if aircraft should launch missile at target
+ */
+const shouldLaunchMissile = (
+    aircraftLat: number,
+    aircraftLon: number,
+    targetLat: number,
+    targetLon: number,
+    existingMissiles: Missile[],
+    targetId: string
+): boolean => {
+    const distance = getDistanceNM(aircraftLat, aircraftLon, targetLat, targetLon);
+    
+    // Check if within launch range
+    if (distance > MISSILE_MAX_RANGE_NM || distance < 2) return false;
+    
+    // Check if already have active missile on this target
+    const hasActiveMissile = existingMissiles.some(
+        m => m.targetId === targetId && m.status === 'flying'
+    );
+    if (hasActiveMissile) return false;
+    
+    return true;
+};
+
+/**
+ * Create a new missile
+ */
+const createMissile = (
+    launcherId: string,
+    targetId: string,
+    launcherLat: number,
+    launcherLon: number,
+    launcherAlt: number,
+    launcherHeading: number,
+    launchTime: number
+): Missile => ({
+    id: `missile_${launcherId}_${targetId}_${Date.now()}`,
+    launcherId,
+    targetId,
+    lat: launcherLat,
+    lon: launcherLon,
+    alt_ft: launcherAlt,
+    heading_deg: launcherHeading,
+    speed_kts: MISSILE_SPEED_KTS,
+    launchTime,
+    status: 'flying',
+    trail: [],
+    guidanceMode: 'midcourse',
+    prev_los_angle: null,
+});
+
+// ============================================================
 // Main Component
 // ============================================================
 
@@ -168,6 +326,9 @@ export const MissionSimulationModal: React.FC<MissionSimulationModalProps> = ({
     const [maxTime, setMaxTime] = useState(120);
     const [expandedPanel, setExpandedPanel] = useState<'mission' | 'warnings'>('mission');
     const [destroyedTargets, setDestroyedTargets] = useState<Set<string>>(new Set());
+    const [missiles, setMissiles] = useState<Missile[]>([]);
+    const [missileEvents, setMissileEvents] = useState<Array<{ time: number; type: 'launch' | 'hit' | 'miss'; targetName: string; aircraftCallsign: string }>>([]);
+    const prevTimeRef = useRef<number>(0);
 
     // Initialize flights from mission
     useEffect(() => {
@@ -379,6 +540,61 @@ export const MissionSimulationModal: React.FC<MissionSimulationModalProps> = ({
                 }
             });
 
+            // Add missile trails source
+            map.current!.addSource('missile-trails', {
+                type: 'geojson',
+                data: { type: 'FeatureCollection', features: [] }
+            });
+
+            map.current!.addLayer({
+                id: 'missile-trails-line',
+                type: 'line',
+                source: 'missile-trails',
+                paint: {
+                    'line-color': '#ff6b6b',
+                    'line-width': 2,
+                    'line-opacity': 0.7,
+                    'line-dasharray': [2, 2],
+                }
+            });
+
+            // Add missiles source
+            map.current!.addSource('missiles', {
+                type: 'geojson',
+                data: { type: 'FeatureCollection', features: [] }
+            });
+
+            map.current!.addLayer({
+                id: 'missiles-circle',
+                type: 'circle',
+                source: 'missiles',
+                paint: {
+                    'circle-radius': 5,
+                    'circle-color': '#ff6b6b',
+                    'circle-stroke-width': 2,
+                    'circle-stroke-color': '#ffffff',
+                }
+            });
+
+            // Add explosions source
+            map.current!.addSource('explosions', {
+                type: 'geojson',
+                data: { type: 'FeatureCollection', features: [] }
+            });
+
+            map.current!.addLayer({
+                id: 'explosions-circle',
+                type: 'circle',
+                source: 'explosions',
+                paint: {
+                    'circle-radius': 15,
+                    'circle-color': '#ff8c00',
+                    'circle-opacity': 0.8,
+                    'circle-stroke-width': 3,
+                    'circle-stroke-color': '#ffff00',
+                }
+            });
+
             // Add base marker
             new maplibregl.Marker({ color: '#22c55e' })
                 .setLngLat([origin.lon, origin.lat])
@@ -465,7 +681,55 @@ export const MissionSimulationModal: React.FC<MissionSimulationModalProps> = ({
             });
             aircraftSource.setData({ type: 'FeatureCollection', features: aircraftFeatures });
         }
-    }, [flights, currentTime, attackTargets, destroyedTargets]);
+
+        // Update missiles
+        const missileSource = map.current.getSource('missiles') as maplibregl.GeoJSONSource;
+        if (missileSource) {
+            const missileFeatures = missiles
+                .filter(m => m.status === 'flying')
+                .map(m => ({
+                    type: 'Feature' as const,
+                    properties: { id: m.id, heading: m.heading_deg },
+                    geometry: {
+                        type: 'Point' as const,
+                        coordinates: [m.lon, m.lat]
+                    }
+                }));
+            missileSource.setData({ type: 'FeatureCollection', features: missileFeatures });
+        }
+
+        // Update missile trails
+        const trailSource = map.current.getSource('missile-trails') as maplibregl.GeoJSONSource;
+        if (trailSource) {
+            const trailFeatures = missiles
+                .filter(m => m.trail.length > 1)
+                .map(m => ({
+                    type: 'Feature' as const,
+                    properties: { id: m.id },
+                    geometry: {
+                        type: 'LineString' as const,
+                        coordinates: [...m.trail.map(p => [p.lon, p.lat]), [m.lon, m.lat]]
+                    }
+                }));
+            trailSource.setData({ type: 'FeatureCollection', features: trailFeatures });
+        }
+
+        // Update explosions (recently hit missiles)
+        const explosionSource = map.current.getSource('explosions') as maplibregl.GeoJSONSource;
+        if (explosionSource) {
+            const explosionFeatures = missiles
+                .filter(m => m.status === 'hit')
+                .map(m => ({
+                    type: 'Feature' as const,
+                    properties: { id: m.id },
+                    geometry: {
+                        type: 'Point' as const,
+                        coordinates: [m.lon, m.lat]
+                    }
+                }));
+            explosionSource.setData({ type: 'FeatureCollection', features: explosionFeatures });
+        }
+    }, [flights, currentTime, attackTargets, destroyedTargets, missiles]);
 
     // Check for target destruction
     useEffect(() => {
@@ -484,10 +748,20 @@ export const MissionSimulationModal: React.FC<MissionSimulationModalProps> = ({
                 if (newDestroyed.has(targetId)) continue;
                 
                 const target = attackTargets.find(t => t.id === targetId);
-                if (!target) continue;
+                if (!target) {
+                    console.warn(`Target ${targetId} not found in attackTargets`, attackTargets.map(t => t.id));
+                    continue;
+                }
 
                 const dist = getDistanceNM(pos.lat, pos.lon, target.lat, target.lon);
+                
+                // Log distance to targets periodically
+                if (Math.floor(currentTime) % 5 === 0 && currentTime - Math.floor(currentTime) < 0.2) {
+                    console.log(`T+${currentTime.toFixed(1)}: ${flight.callsign} -> ${target.name}: ${dist.toFixed(1)}nm (pos: ${pos.lat.toFixed(3)}, ${pos.lon.toFixed(3)})`);
+                }
+                
                 if (dist < 2) { // Within 2nm = target destroyed
+                    console.log(`TARGET DESTROYED: ${target.name} at T+${currentTime.toFixed(1)}`);
                     newDestroyed.add(targetId);
                 }
             }
@@ -498,13 +772,92 @@ export const MissionSimulationModal: React.FC<MissionSimulationModalProps> = ({
         }
     }, [currentTime, flights, attackTargets, destroyedTargets]);
 
-    // Playback timer
+    // Playback timer with missile physics
     useEffect(() => {
         if (!isPlaying) return;
 
         const interval = setInterval(() => {
             setCurrentTime(prev => {
                 const next = prev + (playbackSpeed / 60);
+                const deltaTime = next - prevTimeRef.current;
+                prevTimeRef.current = next;
+                
+                // Update missiles with PN guidance
+                setMissiles(currentMissiles => {
+                    const updatedMissiles = currentMissiles.map(missile => {
+                        if (missile.status !== 'flying') return missile;
+                        
+                        // Find target position
+                        const target = attackTargets.find(t => t.id === missile.targetId);
+                        if (!target) return { ...missile, status: 'miss' as const };
+                        
+                        // Update missile using Proportional Navigation
+                        return updateMissilePN(missile, target.lat, target.lon, deltaTime);
+                    });
+                    
+                    // Check for hits and update destroyed targets
+                    const newHits = updatedMissiles.filter(m => m.status === 'hit' && currentMissiles.find(cm => cm.id === m.id)?.status === 'flying');
+                    if (newHits.length > 0) {
+                        setDestroyedTargets(prev => {
+                            const newSet = new Set(prev);
+                            newHits.forEach(m => newSet.add(m.targetId));
+                            return newSet;
+                        });
+                        
+                        // Log events
+                        newHits.forEach(m => {
+                            const target = attackTargets.find(t => t.id === m.targetId);
+                            const aircraft = flights.find(f => f.flight_id === m.launcherId);
+                            setMissileEvents(evts => [...evts, {
+                                time: next,
+                                type: 'hit',
+                                targetName: target?.name || 'Unknown',
+                                aircraftCallsign: aircraft?.callsign || 'Unknown'
+                            }]);
+                        });
+                    }
+                    
+                    return updatedMissiles;
+                });
+                
+                // Check for new missile launches
+                const missionFlights = flights.filter(f => f.is_mission_aircraft);
+                for (const flight of missionFlights) {
+                    const pos = flight.predicted_path.length > 0
+                        ? interpolatePosition(flight.predicted_path, next)
+                        : null;
+                    if (!pos) continue;
+                    
+                    for (const targetId of flight.assigned_targets) {
+                        const target = attackTargets.find(t => t.id === targetId);
+                        if (!target || destroyedTargets.has(targetId)) continue;
+                        
+                        setMissiles(currentMissiles => {
+                            if (shouldLaunchMissile(pos.lat, pos.lon, target.lat, target.lon, currentMissiles, targetId)) {
+                                const newMissile = createMissile(
+                                    flight.flight_id,
+                                    targetId,
+                                    pos.lat,
+                                    pos.lon,
+                                    pos.alt,
+                                    pos.heading,
+                                    next
+                                );
+                                
+                                setMissileEvents(evts => [...evts, {
+                                    time: next,
+                                    type: 'launch',
+                                    targetName: target.name,
+                                    aircraftCallsign: flight.callsign
+                                }]);
+                                
+                                return [...currentMissiles, newMissile];
+                            }
+                            return currentMissiles;
+                        });
+                    }
+                }
+                
                 if (next >= maxTime) {
                     setIsPlaying(false);
                     return maxTime;
@@ -514,7 +867,7 @@ export const MissionSimulationModal: React.FC<MissionSimulationModalProps> = ({
         }, 100);
 
         return () => clearInterval(interval);
-    }, [isPlaying, playbackSpeed, maxTime]);
+    }, [isPlaying, playbackSpeed, maxTime, flights, attackTargets, destroyedTargets]);
 
     // Get proximity warnings
     const getProximityWarnings = useCallback(() => {
@@ -618,8 +971,24 @@ export const MissionSimulationModal: React.FC<MissionSimulationModalProps> = ({
                                 <Shield className="w-4 h-4 text-green-400" />
                                 <span className="text-white">{destroyedTargets.size} destroyed</span>
                             </div>
+                            <div className="flex items-center gap-2">
+                                <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+                                <span className="text-white">{missiles.filter(m => m.status === 'flying').length} missiles</span>
+                            </div>
                         </div>
                     </div>
+
+                    {/* Missile events log */}
+                    {missileEvents.length > 0 && (
+                        <div className="absolute bottom-20 left-4 bg-slate-900/90 backdrop-blur-sm rounded-lg px-3 py-2 border border-slate-700 max-h-32 overflow-y-auto w-64">
+                            <div className="text-xs text-slate-400 mb-1 font-medium">Missile Activity</div>
+                            {missileEvents.slice(-5).reverse().map((evt, i) => (
+                                <div key={i} className={`text-xs py-0.5 ${evt.type === 'hit' ? 'text-green-400' : evt.type === 'launch' ? 'text-orange-400' : 'text-red-400'}`}>
+                                    T+{evt.time.toFixed(1)}: {evt.aircraftCallsign} {evt.type === 'launch' ? '→' : evt.type === 'hit' ? '✓' : '✗'} {evt.targetName}
+                                </div>
+                            ))}
+                        </div>
+                    )}
                 </div>
 
                 {/* Side panel */}

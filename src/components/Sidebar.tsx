@@ -345,9 +345,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
         const cutoffTimestampV2 = new Date('2025-07-08T20:00:00Z').getTime() / 1000;
         const cutoffTimestampV3 = new Date('2025-07-17T00:00:00Z').getTime() / 1000;
         const cutoffTimestampV4 = new Date('2025-10-21T00:00:00Z').getTime() / 1000;
+        const cutoffTimestampV5 = new Date('2025-11-09T00:00:00Z').getTime() / 1000;
         
         let version = 'v1';
-        if (a.timestamp >= cutoffTimestampV4) {
+        if (a.timestamp >= cutoffTimestampV5) {
+            version = 'v5';
+        } else if (a.timestamp >= cutoffTimestampV4) {
             version = 'v4';
         } else if (a.timestamp >= cutoffTimestampV3) {
             version = 'v3';
@@ -765,13 +768,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
                              const cutoffTimestampV2 = new Date('2025-07-08T20:00:00Z').getTime() / 1000;
                              const cutoffTimestampV3 = new Date('2025-07-21T00:00:00Z').getTime() / 1000;
                              const cutoffTimestampV4 = new Date('2025-10-21T00:00:00Z').getTime() / 1000;
+                             const cutoffTimestampV5 = new Date('2025-11-09T00:00:00Z').getTime() / 1000;
                              
                              let versionLabel = 'v1 OLD';
                              let versionStyle = "bg-zinc-800 text-zinc-500 border-zinc-700";
 
-                             if (anomaly.timestamp >= cutoffTimestampV4) {
-                                 versionLabel = 'v4 NEW';
-                                 versionStyle = "badge-v4 animate-gradient-x";
+                             if (anomaly.timestamp >= cutoffTimestampV5) {
+                                 versionLabel = 'v5 NEW';
+                                 versionStyle = "badge-v5 animate-gradient-x";
+                             } else if (anomaly.timestamp >= cutoffTimestampV4) {
+                                 versionLabel = 'v4 OLD';
+                                 versionStyle = "bg-zinc-800 text-zinc-500 border-zinc-700";
                              } else if (anomaly.timestamp >= cutoffTimestampV3) {
                                  versionLabel = 'v3 OLD';
                                  versionStyle = "bg-zinc-800 text-zinc-500 border-zinc-700";
