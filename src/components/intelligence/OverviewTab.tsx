@@ -3,13 +3,8 @@ import { AlertTriangle, Plane, TrendingUp, AlertCircle, Radar, Shield, Target, A
 import { StatCard } from './StatCard';
 import { ChartCard } from './ChartCard';
 import { 
-  fetchStatsOverview, 
-  fetchFlightsPerDay, 
-  fetchGPSJamming, 
-  fetchMilitaryPatterns, 
-  fetchAirspaceRisk,
-  fetchFlightsPerMonth,
-  // New tagged API functions (optimized for feedback_tagged.db)
+  fetchOverviewBatch,
+  // Tagged API functions (optimized for feedback_tagged.db)
   fetchTaggedStatsOverview,
   fetchTaggedFlightsPerDay,
   fetchTaggedMilitaryStats,
@@ -58,23 +53,25 @@ export function OverviewTab({ startTs, endTs, cacheKey = 0, useTaggedDb = true }
     try {
       if (useTaggedDb) {
         // Try to load from feedback_tagged.db first (optimized queries)
-        const [taggedOverview, taggedFlights, taggedMilitary, jammingData, riskData, monthlyData] = await Promise.all([
+        const [taggedOverview, taggedFlights, taggedMilitary] = await Promise.all([
           fetchTaggedStatsOverview(startTs, endTs).catch(() => null),
           fetchTaggedFlightsPerDay(startTs, endTs).catch(() => []),
-          fetchTaggedMilitaryStats(startTs, endTs).catch(() => null),
-          fetchGPSJamming(startTs, endTs).catch(() => []),
-          fetchAirspaceRisk().catch(() => null),
-          fetchFlightsPerMonth(startTs, endTs).catch(() => [])
+          fetchTaggedMilitaryStats(startTs, endTs).catch(() => null)
         ]);
 
         if (taggedOverview && taggedOverview.total_flights > 0) {
-          // Use tagged data
+          // Use tagged data - fetch batch for remaining data
+          // NOTE: Excluding gps_jamming - it's slow and shown in Intelligence tab
+          const batchData = await fetchOverviewBatch(startTs, endTs, 
+            ['airspace_risk', 'monthly_flights']
+          ).catch(() => ({}));
+          
           setStats(taggedOverview);
           setFlightsPerDay(taggedFlights);
           setMilitaryStats(taggedMilitary);
-          setGpsJamming(jammingData);
-          setAirspaceRisk(riskData);
-          setMonthlyFlights(monthlyData);
+          setGpsJamming([]); // Don't load here - too slow
+          setAirspaceRisk(batchData.airspace_risk || null);
+          setMonthlyFlights(batchData.monthly_flights || []);
           setDataSource('tagged');
           
           // Convert military stats to patterns format for compatibility
@@ -100,21 +97,18 @@ export function OverviewTab({ startTs, endTs, cacheKey = 0, useTaggedDb = true }
         }
       }
       
-      // Fallback to research.db (original queries)
-      const [overviewData, flightsData, jammingData, militaryData, riskData, monthlyData] = await Promise.all([
-        fetchStatsOverview(startTs, endTs),
-        fetchFlightsPerDay(startTs, endTs),
-        fetchGPSJamming(startTs, endTs).catch(() => []),
-        fetchMilitaryPatterns(startTs, endTs).catch(() => []),
-        fetchAirspaceRisk().catch(() => null),
-        fetchFlightsPerMonth(startTs, endTs).catch(() => [])
+      // Use batch API for research.db (single request instead of 6)
+      // NOTE: Excluding gps_jamming and military from overview - they're slow and shown in Intelligence tab
+      const batchData = await fetchOverviewBatch(startTs, endTs, [
+        'stats', 'flights_per_day', 'airspace_risk', 'monthly_flights'
       ]);
-      setStats(overviewData);
-      setFlightsPerDay(flightsData);
-      setGpsJamming(jammingData);
-      setMilitaryPatterns(militaryData);
-      setAirspaceRisk(riskData);
-      setMonthlyFlights(monthlyData);
+      
+      setStats(batchData.stats || null);
+      setFlightsPerDay(batchData.flights_per_day || []);
+      setGpsJamming([]); // Don't load here - too slow, shown in Intelligence tab
+      setMilitaryPatterns([]); // Don't load here - shown in Intelligence tab
+      setAirspaceRisk(batchData.airspace_risk || null);
+      setMonthlyFlights(batchData.monthly_flights || []);
       setDataSource('research');
     } catch (error) {
       console.error('Failed to load overview data:', error);

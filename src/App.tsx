@@ -6,6 +6,7 @@ import { TestNewAirspacePage } from './TestNewAirspacePage';
 import { DataExplorerPage } from './DataExplorerPage';
 import { IntelligencePage } from './IntelligencePage';
 import { RoutePlannerPage } from './RoutePlannerPage';
+import { FlightImportPage } from './FlightImportPage';
 
 function App() {
   return (
@@ -18,6 +19,7 @@ function App() {
         <Route path="/explorer" element={<DataExplorerPage />} />
         <Route path="/intelligence" element={<IntelligencePage />} />
         <Route path="/route-planner" element={<RoutePlannerPage />} />
+        <Route path="/import" element={<FlightImportPage />} />
       </Routes>
     </BrowserRouter>
   );

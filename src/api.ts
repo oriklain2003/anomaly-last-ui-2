@@ -4,7 +4,7 @@ import {
     OverviewStats, EmergencyCodeStat, NearMissEvent, GoAroundStat,
     FlightPerDay, SignalLossLocation, SignalLossMonthly, SignalLossHourly,
     AirlineEfficiency, HoldingPatternAnalysis,
-    GPSJammingPoint, MilitaryPattern, AirspaceRisk
+    GPSJammingPoint, MilitaryPattern, AirspaceRisk, BusiestAirport
 } from './types';
 import type { AIAction } from './utils/aiActions';
 import type { ChatMessage } from './chatTypes';
@@ -878,6 +878,169 @@ export const fetchTaggedRoutesStats = async (startTs: number, endTs: number, lim
     return response.json();
 };
 
+// ============================================================================
+// BATCH APIs - Reduces multiple API calls to single requests for better performance
+// ============================================================================
+
+export interface SafetyBatchResponse {
+    emergency_codes?: EmergencyCodeStat[];
+    near_miss?: NearMissEvent[];
+    go_arounds?: GoAroundStat[];
+    go_arounds_hourly?: GoAroundHourly[];
+    safety_monthly?: SafetyMonthly[];
+    near_miss_locations?: NearMissLocation[];
+    safety_by_phase?: SafetyByPhase;
+    emergency_aftermath?: EmergencyAftermath[];
+    top_airline_emergencies?: TopAirlineEmergency[];
+    near_miss_by_country?: NearMissByCountry;
+}
+
+export interface IntelligenceBatchResponse {
+    airline_efficiency?: AirlineEfficiency[];
+    holding_patterns?: HoldingPatternAnalysis;
+    gps_jamming?: GPSJammingPoint[];
+    military_patterns?: MilitaryPattern[];
+    pattern_clusters?: PatternCluster[];
+    military_routes?: MilitaryRoutes | null;
+    airline_activity?: AirlineActivityTrends | null;
+}
+
+/**
+ * Fetch all safety statistics in a single request.
+ * Replaces 10 parallel API calls with 1 for much faster loading.
+ */
+export const fetchSafetyBatch = async (
+    startTs: number, 
+    endTs: number, 
+    include?: string[]
+): Promise<SafetyBatchResponse> => {
+    const response = await fetch(`${API_BASE}/stats/safety/batch`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            start_ts: Math.floor(startTs),
+            end_ts: Math.floor(endTs),
+            include: include || [
+                'emergency_codes', 'near_miss', 'go_arounds', 'hourly',
+                'monthly', 'locations', 'phase', 'aftermath', 'top_airlines', 'by_country'
+            ]
+        })
+    });
+    if (!response.ok) {
+        throw new Error('Failed to fetch safety batch');
+    }
+    return response.json();
+};
+
+/**
+ * Fetch all intelligence statistics in a single request.
+ * Replaces 7 parallel API calls with 1 for much faster loading.
+ */
+export const fetchIntelligenceBatch = async (
+    startTs: number, 
+    endTs: number, 
+    include?: string[]
+): Promise<IntelligenceBatchResponse> => {
+    const response = await fetch(`${API_BASE}/intel/batch`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            start_ts: Math.floor(startTs),
+            end_ts: Math.floor(endTs),
+            include: include || [
+                'efficiency', 'holding', 'gps_jamming', 'military',
+                'clusters', 'routes', 'activity'
+            ]
+        })
+    });
+    if (!response.ok) {
+        throw new Error('Failed to fetch intelligence batch');
+    }
+    return response.json();
+};
+
+// Overview Batch Response
+export interface OverviewBatchResponse {
+    stats?: OverviewStats;
+    flights_per_day?: FlightPerDay[];
+    gps_jamming?: GPSJammingPoint[];
+    military_patterns?: MilitaryPattern[];
+    airspace_risk?: AirspaceRisk;
+    monthly_flights?: MonthlyFlightStats[];
+}
+
+/**
+ * Fetch all overview statistics in a single request.
+ * Replaces 6 parallel API calls with 1 for much faster loading.
+ */
+export const fetchOverviewBatch = async (
+    startTs: number, 
+    endTs: number, 
+    include?: string[]
+): Promise<OverviewBatchResponse> => {
+    const response = await fetch(`${API_BASE}/stats/overview/batch`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            start_ts: Math.floor(startTs),
+            end_ts: Math.floor(endTs),
+            include: include || [
+                'stats', 'flights_per_day', 'gps_jamming', 'military',
+                'airspace_risk', 'monthly_flights'
+            ]
+        })
+    });
+    if (!response.ok) {
+        throw new Error('Failed to fetch overview batch');
+    }
+    return response.json();
+};
+
+// Traffic Batch Response
+export interface TrafficBatchResponse {
+    flights_per_day?: FlightPerDay[];
+    busiest_airports?: BusiestAirport[];
+    signal_loss?: SignalLossLocation[];
+    signal_loss_monthly?: SignalLossMonthly[];
+    signal_loss_hourly?: SignalLossHourly[];
+    peak_hours?: PeakHoursAnalysis;
+    diversion_stats?: DiversionStats;
+    diversions_monthly?: DiversionMonthly[];
+    alternate_airports?: AlternateAirport[];
+    rtb_events?: RTBEvent[];
+    missing_info?: FlightsMissingInfo;
+    deviations_by_type?: DeviationByType[];
+    bottleneck_zones?: BottleneckZone[];
+}
+
+/**
+ * Fetch all traffic statistics in a single request.
+ * Replaces 13 parallel API calls with 1 for much faster loading.
+ */
+export const fetchTrafficBatch = async (
+    startTs: number, 
+    endTs: number, 
+    include?: string[]
+): Promise<TrafficBatchResponse> => {
+    const response = await fetch(`${API_BASE}/stats/traffic/batch`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            start_ts: Math.floor(startTs),
+            end_ts: Math.floor(endTs),
+            include: include || [
+                'flights_per_day', 'airports', 'signal_loss', 'signal_monthly',
+                'signal_hourly', 'peak_hours', 'diversions', 'diversions_monthly',
+                'alternates', 'rtb', 'missing_info', 'deviations', 'bottlenecks'
+            ]
+        })
+    });
+    if (!response.ok) {
+        throw new Error('Failed to fetch traffic batch');
+    }
+    return response.json();
+};
+
 // Level 2: Insights
 export const fetchAirlineEfficiency = async (startTs?: number, endTs?: number, route?: string): Promise<AirlineEfficiency[]> => {
     const params = new URLSearchParams();
@@ -1094,6 +1257,200 @@ export const fetchRunwayUsage = async (airport: string, startTs: number, endTs: 
     if (!response.ok) throw new Error('Failed to fetch runway usage');
     return response.json();
 };
+
+// ============================================================
+// Seasonal Trends Types & Functions
+// ============================================================
+
+export interface YearComparison {
+    year: number;
+    total_flights: number;
+    anomalies: number;
+    safety_events: number;
+    military_flights: number;
+}
+
+export interface MonthComparison {
+    month: string;
+    month_name: string;
+    current_year: number;
+    previous_year: number;
+    change_percent: number;
+}
+
+export interface SeasonalYearComparison {
+    years: YearComparison[];
+    month_comparison: MonthComparison[];
+    insights: string[];
+}
+
+export interface HourlyCorrelation {
+    hour: number;
+    traffic_count: number;
+    safety_count: number;
+    safety_per_1000: number;
+}
+
+export interface TrafficSafetyCorrelation {
+    hourly_correlation: HourlyCorrelation[];
+    correlation_score: number;
+    peak_risk_hours: number[];
+    insights: string[];
+}
+
+export interface DetectedEvent {
+    date: string;
+    event_name: string;
+    traffic_change_percent: number;
+    flights: number;
+    expected_flights: number;
+}
+
+export interface WeeklyPattern {
+    day_of_week: number;
+    day_name: string;
+    avg_traffic: number;
+    avg_anomalies: number;
+}
+
+export interface SpecialEventsImpact {
+    detected_events: DetectedEvent[];
+    weekly_pattern: WeeklyPattern[];
+    insights: string[];
+}
+
+export const fetchSeasonalYearComparison = async (startTs: number, endTs: number): Promise<SeasonalYearComparison> => {
+    const response = await fetch(`${API_BASE}/stats/seasonal/year-comparison?start_ts=${startTs}&end_ts=${endTs}`);
+    if (!response.ok) throw new Error('Failed to fetch seasonal year comparison');
+    return response.json();
+};
+
+export const fetchTrafficSafetyCorrelation = async (startTs: number, endTs: number): Promise<TrafficSafetyCorrelation> => {
+    const response = await fetch(`${API_BASE}/stats/seasonal/traffic-safety-correlation?start_ts=${startTs}&end_ts=${endTs}`);
+    if (!response.ok) throw new Error('Failed to fetch traffic-safety correlation');
+    return response.json();
+};
+
+export const fetchSpecialEventsImpact = async (startTs: number, endTs: number): Promise<SpecialEventsImpact> => {
+    const response = await fetch(`${API_BASE}/stats/seasonal/special-events?start_ts=${startTs}&end_ts=${endTs}`);
+    if (!response.ok) throw new Error('Failed to fetch special events impact');
+    return response.json();
+};
+
+// ============================================================
+// Route Efficiency Types & Functions
+// ============================================================
+
+export interface AirlineEfficiencyData {
+    airline: string;
+    flights: number;
+    avg_duration_min: number;
+    avg_deviation_nm: number;
+    anomaly_rate: number;
+    efficiency_score: number;
+}
+
+export interface RouteEfficiencyComparison {
+    route: string;
+    airlines: AirlineEfficiencyData[];
+    best_performer: string | null;
+    worst_performer: string | null;
+    time_difference_min: number;
+    insights: string[];
+}
+
+export interface RoutesSummary {
+    summary: string;
+    routes: Array<{
+        route: string;
+        flight_count: number;
+        avg_duration_min: number;
+        anomaly_rate: number;
+        airline_count: number;
+    }>;
+    note: string;
+}
+
+export const fetchRouteEfficiency = async (
+    startTs: number, 
+    endTs: number, 
+    route?: string
+): Promise<RouteEfficiencyComparison | RoutesSummary> => {
+    let url = `${API_BASE}/stats/routes/efficiency?start_ts=${startTs}&end_ts=${endTs}`;
+    if (route) {
+        url += `&route=${encodeURIComponent(route)}`;
+    }
+    const response = await fetch(url);
+    if (!response.ok) throw new Error('Failed to fetch route efficiency');
+    return response.json();
+};
+
+export const fetchAvailableRoutes = async (
+    startTs: number, 
+    endTs: number, 
+    minFlights: number = 5
+): Promise<string[]> => {
+    const response = await fetch(`${API_BASE}/stats/routes/available?start_ts=${startTs}&end_ts=${endTs}&min_flights=${minFlights}`);
+    if (!response.ok) throw new Error('Failed to fetch available routes');
+    return response.json();
+};
+
+// ============================================================
+// Weather Impact Types & Functions
+// ============================================================
+
+export interface WeatherDiversion {
+    airport: string;
+    count: number;
+    dates: string[];
+}
+
+export interface WeatherGoAround {
+    airport: string;
+    count: number;
+    peak_hour: number;
+}
+
+export interface MonthlyWeatherImpact {
+    month: string;
+    diversion_count: number;
+    go_around_count: number;
+    deviation_count: number;
+}
+
+export interface WeatherImpactAnalysis {
+    weather_correlated_anomalies: number;
+    diversions_likely_weather: WeatherDiversion[];
+    go_arounds_weather_pattern: WeatherGoAround[];
+    monthly_weather_impact: MonthlyWeatherImpact[];
+    total_diversions: number;
+    total_go_arounds: number;
+    total_deviations: number;
+    insights: string[];
+}
+
+export interface AirportWeatherData {
+    airport: string;
+    diversions_to: number;
+    diversions_from: number;
+    go_arounds: number;
+    monthly_breakdown: Array<{ month: string; diversions: number; go_arounds: number }>;
+    hourly_distribution: Array<{ hour: number; count: number }>;
+}
+
+export const fetchWeatherImpact = async (startTs: number, endTs: number): Promise<WeatherImpactAnalysis> => {
+    const response = await fetch(`${API_BASE}/stats/weather/impact?start_ts=${startTs}&end_ts=${endTs}`);
+    if (!response.ok) throw new Error('Failed to fetch weather impact analysis');
+    return response.json();
+};
+
+export const fetchAirportWeather = async (airport: string, startTs: number, endTs: number): Promise<AirportWeatherData> => {
+    const response = await fetch(`${API_BASE}/stats/weather/airport/${airport}?start_ts=${startTs}&end_ts=${endTs}`);
+    if (!response.ok) throw new Error('Failed to fetch airport weather data');
+    return response.json();
+};
+
+// ============================================================
 
 // Trajectory Prediction with Restricted Zones
 export interface TrajectoryPrediction {
@@ -1799,5 +2156,112 @@ export const predictAircraftPosition = async (
 ): Promise<PredictionResponse> => {
     const response = await fetch(`${API_BASE}/route/traffic/predict/${encodeURIComponent(flight_id)}?minutes_ahead=${minutes_ahead}`);
     if (!response.ok) throw new Error('Failed to predict aircraft position');
+    return response.json();
+};
+
+// ============================================================
+// Flight Import API - Search and import flights to feedback_tagged.db
+// ============================================================
+
+export interface FlightSearchResult {
+    flight_id: string;
+    callsign: string | null;
+    origin: string | null;
+    destination: string | null;
+    airline: string | null;
+    aircraft_type: string | null;
+    scheduled_departure: string | null;
+    scheduled_arrival: string | null;
+    status: string | null;
+}
+
+export interface FlightSearchResponse {
+    flights: FlightSearchResult[];
+    message: string;
+}
+
+export interface FlightTracksResponse {
+    flight_id: string;
+    points: TrackPoint[];
+}
+
+export interface FlightImportResponse {
+    status: string;
+    flight_id: string;
+    track_count: number;
+    rule_ids: number[];
+    rule_names: string[];
+    is_anomaly: boolean;
+    pipeline_ran: boolean;
+    callsign: string | null;
+    origin: string | null;
+    destination: string | null;
+}
+
+/**
+ * Search for flights by callsign within a time range.
+ */
+export const searchFlightsByCallsign = async (
+    callsign: string,
+    startTs: number,
+    endTs: number
+): Promise<FlightSearchResponse> => {
+    const response = await fetch(`${API_BASE}/import/search`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            callsign,
+            start_ts: Math.floor(startTs),
+            end_ts: Math.floor(endTs)
+        })
+    });
+    
+    if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.detail || 'Failed to search flights');
+    }
+    
+    return response.json();
+};
+
+/**
+ * Fetch tracks for a flight from FR24 (for preview before import).
+ */
+export const fetchImportFlightTracks = async (flightId: string): Promise<FlightTracksResponse> => {
+    const response = await fetch(`${API_BASE}/import/tracks/${encodeURIComponent(flightId)}`);
+    if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.detail || 'Failed to fetch flight tracks');
+    }
+    return response.json();
+};
+
+/**
+ * Import a flight to feedback_tagged.db with selected rules.
+ */
+export const importFlightToFeedback = async (
+    flightId: string,
+    ruleIds: number[],
+    comments: string = '',
+    isAnomaly: boolean = true,
+    runPipeline: boolean = true
+): Promise<FlightImportResponse> => {
+    const response = await fetch(`${API_BASE}/import/save`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            flight_id: flightId,
+            rule_ids: ruleIds,
+            comments,
+            is_anomaly: isAnomaly,
+            run_pipeline: runPipeline
+        })
+    });
+    
+    if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.detail || 'Failed to import flight');
+    }
+    
     return response.json();
 };

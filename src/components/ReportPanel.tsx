@@ -425,7 +425,16 @@ export const ReportPanel: React.FC<ReportPanelProps> = ({ anomaly, onClose, clas
     }, [localAnomaly]);
 
     const frUrl = React.useMemo(() => {
-        if (!localAnomaly?.callsign || !localAnomaly?.flight_id) return '';
+        if (!localAnomaly?.flight_id) return '';
+        
+        // Prefer flight_number directly from the anomaly object (e.g., "LY123", "J9253")
+        const flightNumber = localAnomaly.flight_number || localAnomaly.full_report?.summary?.flight_number;
+        if (flightNumber) {
+            return `https://www.flightradar24.com/data/flights/${flightNumber}#${localAnomaly.flight_id}`;
+        }
+        
+        // Fallback to transformed callsign if no flight_number available
+        if (!localAnomaly.callsign) return '';
         
         let callsignForUrl = localAnomaly.callsign;
         const upperCallsign = callsignForUrl.toUpperCase();
@@ -434,12 +443,12 @@ export const ReportPanel: React.FC<ReportPanelProps> = ({ anomaly, onClose, clas
             callsignForUrl = 'RJ' + callsignForUrl.substring(3);
         } else if (upperCallsign.startsWith('ELY')) {
             callsignForUrl = 'LY' + callsignForUrl.substring(3);
-        }else if (upperCallsign.startsWith('ISR')) {
+        } else if (upperCallsign.startsWith('ISR')) {
             callsignForUrl = '6H' + callsignForUrl.substring(4);
         }
         
         return `https://www.flightradar24.com/data/flights/${callsignForUrl}#${localAnomaly.flight_id}`;
-    }, [localAnomaly?.callsign, localAnomaly?.flight_id]);
+    }, [localAnomaly?.callsign, localAnomaly?.flight_id, localAnomaly?.flight_number, localAnomaly?.full_report?.summary?.flight_number]);
 
 
 

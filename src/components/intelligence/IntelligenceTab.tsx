@@ -7,14 +7,15 @@ import { SignalLossMap } from './SignalLossMap';
 import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { 
-  fetchAirlineEfficiency, 
-  fetchHoldingPatterns, 
-  fetchGPSJamming,
-  fetchMilitaryPatterns,
-  fetchPatternClusters,
+  fetchIntelligenceBatch,
   fetchAnomalyDNAEnhanced,
-  fetchAirlineActivityTrends,
-  fetchMilitaryRoutes
+  fetchRouteEfficiency,
+  fetchAvailableRoutes
+} from '../../api';
+import type { 
+  RouteEfficiencyComparison, 
+  RoutesSummary,
+  AirlineEfficiencyData
 } from '../../api';
 import type { AirlineEfficiency, HoldingPatternAnalysis, GPSJammingPoint, MilitaryPattern, PatternCluster, AnomalyDNA } from '../../types';
 import type { AirlineActivityTrends, MilitaryRoutes } from '../../api';
@@ -42,6 +43,15 @@ export function IntelligenceTab({ startTs, endTs, cacheKey = 0 }: IntelligenceTa
   const [dnaLoading, setDnaLoading] = useState(false);
   const [dnaError, setDnaError] = useState<string | null>(null);
   
+  // Route efficiency state
+  const [availableRoutes, setAvailableRoutes] = useState<string[]>([]);
+  const [selectedRoute, setSelectedRoute] = useState<string>('');
+  const [routeEfficiency, setRouteEfficiency] = useState<RouteEfficiencyComparison | RoutesSummary | null>(null);
+  const [routeLoading, setRouteLoading] = useState(false);
+  
+  // Military filter state
+  const [militaryTypeFilter, setMilitaryTypeFilter] = useState<string>('all');
+  
   // Military map ref
   const militaryMapContainer = useRef<HTMLDivElement>(null);
   const militaryMap = useRef<maplibregl.Map | null>(null);
@@ -49,27 +59,56 @@ export function IntelligenceTab({ startTs, endTs, cacheKey = 0 }: IntelligenceTa
 
   useEffect(() => {
     loadData();
+    loadAvailableRoutes();
   }, [startTs, endTs, cacheKey]);
+
+  const loadAvailableRoutes = async () => {
+    try {
+      const routes = await fetchAvailableRoutes(startTs, endTs, 5);
+      setAvailableRoutes(routes);
+      // Load initial summary (without specific route)
+      const summary = await fetchRouteEfficiency(startTs, endTs);
+      setRouteEfficiency(summary);
+    } catch (error) {
+      console.error('Failed to load available routes:', error);
+    }
+  };
+
+  const loadRouteEfficiency = async (route: string) => {
+    setRouteLoading(true);
+    try {
+      const data = await fetchRouteEfficiency(startTs, endTs, route);
+      setRouteEfficiency(data);
+    } catch (error) {
+      console.error('Failed to load route efficiency:', error);
+    } finally {
+      setRouteLoading(false);
+    }
+  };
+
+  const handleRouteSelect = (route: string) => {
+    setSelectedRoute(route);
+    if (route) {
+      loadRouteEfficiency(route);
+    } else {
+      // Clear selection and reload summary
+      loadAvailableRoutes();
+    }
+  };
 
   const loadData = async () => {
     setLoading(true);
     try {
-      const [efficiencyData, holdingData, jammingData, militaryData, clustersData, routesData, activityData] = await Promise.all([
-        fetchAirlineEfficiency(startTs, endTs),
-        fetchHoldingPatterns(startTs, endTs),
-        fetchGPSJamming(startTs, endTs),
-        fetchMilitaryPatterns(startTs, endTs),
-        fetchPatternClusters(startTs, endTs),
-        fetchMilitaryRoutes(startTs, endTs).catch(() => null),
-        fetchAirlineActivityTrends(startTs, endTs, 30).catch(() => null)
-      ]);
-      setAirlineEfficiency(efficiencyData);
-      setHoldingPatterns(holdingData);
-      setGpsJamming(jammingData);
-      setMilitaryPatterns(militaryData);
-      setPatternClusters(clustersData);
-      setMilitaryRoutes(routesData);
-      setAirlineActivity(activityData);
+      // Use batch API - single request instead of 7 parallel calls
+      const data = await fetchIntelligenceBatch(startTs, endTs);
+      
+      setAirlineEfficiency(data.airline_efficiency || []);
+      setHoldingPatterns(data.holding_patterns || null);
+      setGpsJamming(data.gps_jamming || []);
+      setMilitaryPatterns(data.military_patterns || []);
+      setPatternClusters(data.pattern_clusters || []);
+      setMilitaryRoutes(data.military_routes || null);
+      setAirlineActivity(data.airline_activity || null);
     } catch (error) {
       console.error('Failed to load intelligence data:', error);
     } finally {
@@ -673,6 +712,223 @@ export function IntelligenceTab({ startTs, endTs, cacheKey = 0 }: IntelligenceTa
         data={airlineEfficiency}
       />
 
+      {/* Route Efficiency Comparison */}
+      <div className="border-b border-white/10 pb-4 pt-8">
+        <h2 className="text-white text-xl font-bold mb-2 flex items-center gap-2">
+          <Plane className="w-5 h-5 text-cyan-500" />
+          Route Efficiency Comparison
+        </h2>
+        <p className="text-white/60 text-sm">
+          Compare airline performance on the same route - "Why does Airline A fly 15 minutes longer than B?"
+        </p>
+      </div>
+
+      <div className="bg-surface rounded-xl border border-white/10 overflow-hidden">
+        <div className="px-6 py-4 border-b border-white/10">
+          <div className="flex flex-col md:flex-row md:items-center gap-4">
+            <label className="text-white/70 text-sm font-medium">Select Route:</label>
+            <select
+              value={selectedRoute}
+              onChange={(e) => handleRouteSelect(e.target.value)}
+              className="bg-surface-highlight text-white px-4 py-2 rounded-lg border border-white/20 focus:outline-none focus:border-cyan-500"
+            >
+              <option value="">All Routes Overview</option>
+              {availableRoutes.map(route => (
+                <option key={route} value={route}>{route}</option>
+              ))}
+            </select>
+            {routeLoading && <span className="text-white/50 text-sm">Loading...</span>}
+          </div>
+        </div>
+
+        <div className="p-6">
+          {routeEfficiency && (
+            <>
+              {/* Check if it's a summary (has 'routes' property) or comparison (has 'airlines' property) */}
+              {'routes' in routeEfficiency ? (
+                // Routes Summary View
+                <div>
+                  <p className="text-white/60 text-sm mb-4">{routeEfficiency.note}</p>
+                  <div className="space-y-3">
+                    {routeEfficiency.routes.map((route) => (
+                      <div 
+                        key={route.route}
+                        className="bg-surface-highlight rounded-lg p-4 cursor-pointer hover:bg-white/10 transition-colors"
+                        onClick={() => handleRouteSelect(route.route)}
+                      >
+                        <div className="flex justify-between items-center mb-2">
+                          <span className="text-white font-bold text-lg">{route.route}</span>
+                          <span className="px-3 py-1 bg-cyan-500/20 text-cyan-400 rounded text-sm font-medium">
+                            {route.flight_count} flights
+                          </span>
+                        </div>
+                        <div className="grid grid-cols-3 gap-4 text-sm">
+                          <div>
+                            <span className="text-white/50">Avg Duration</span>
+                            <div className="text-white font-medium">{route.avg_duration_min} min</div>
+                          </div>
+                          <div>
+                            <span className="text-white/50">Anomaly Rate</span>
+                            <div className="text-orange-400 font-medium">{route.anomaly_rate}%</div>
+                          </div>
+                          <div>
+                            <span className="text-white/50">Airlines</span>
+                            <div className="text-white font-medium">{route.airline_count}</div>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                // Airline Comparison View
+                <div>
+                  <div className="flex items-center gap-2 mb-4">
+                    <span className="text-white text-lg font-bold">{routeEfficiency.route}</span>
+                    <button 
+                      onClick={() => handleRouteSelect('')}
+                      className="text-cyan-400 text-sm hover:underline"
+                    >
+                      ← Back to all routes
+                    </button>
+                  </div>
+                  
+                  {/* Insights */}
+                  {routeEfficiency.insights.length > 0 && (
+                    <div className="bg-cyan-500/10 border border-cyan-500/30 rounded-lg p-4 mb-6">
+                      <h4 className="text-cyan-400 font-medium mb-2">Insights</h4>
+                      <ul className="space-y-1">
+                        {routeEfficiency.insights.map((insight, idx) => (
+                          <li key={idx} className="text-white/80 text-sm flex items-start gap-2">
+                            <span className="text-cyan-400">•</span>
+                            {insight}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+                  {/* Performance Summary */}
+                  {routeEfficiency.best_performer && (
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                      <div className="bg-green-500/10 border border-green-500/30 rounded-lg p-4 text-center">
+                        <div className="text-green-400 text-sm mb-1">Best Performer</div>
+                        <div className="text-white text-2xl font-bold">{routeEfficiency.best_performer}</div>
+                      </div>
+                      {routeEfficiency.worst_performer && routeEfficiency.worst_performer !== routeEfficiency.best_performer && (
+                        <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-4 text-center">
+                          <div className="text-red-400 text-sm mb-1">Needs Improvement</div>
+                          <div className="text-white text-2xl font-bold">{routeEfficiency.worst_performer}</div>
+                        </div>
+                      )}
+                      {routeEfficiency.time_difference_min > 0 && (
+                        <div className="bg-amber-500/10 border border-amber-500/30 rounded-lg p-4 text-center">
+                          <div className="text-amber-400 text-sm mb-1">Time Difference</div>
+                          <div className="text-white text-2xl font-bold">{routeEfficiency.time_difference_min} min</div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Airlines Comparison Chart */}
+                  {routeEfficiency.airlines.length > 0 && (
+                    <ChartCard title={`Airline Comparison on ${routeEfficiency.route}`}>
+                      <ResponsiveContainer width="100%" height={280}>
+                        <BarChart data={routeEfficiency.airlines} layout="vertical">
+                          <CartesianGrid strokeDasharray="3 3" stroke="#ffffff20" />
+                          <XAxis type="number" stroke="#ffffff60" tick={{ fill: '#ffffff60' }} />
+                          <YAxis 
+                            type="category" 
+                            dataKey="airline" 
+                            stroke="#ffffff60" 
+                            tick={{ fill: '#ffffff60' }}
+                            width={60}
+                          />
+                          <Tooltip
+                            contentStyle={{
+                              backgroundColor: '#1a1a1a',
+                              border: '1px solid #ffffff20',
+                              borderRadius: '8px'
+                            }}
+                            formatter={(value: number, name: string) => [
+                              name === 'efficiency_score' ? `${value}` : `${value}`,
+                              name === 'efficiency_score' ? 'Efficiency Score' :
+                              name === 'avg_duration_min' ? 'Avg Duration (min)' :
+                              name === 'avg_deviation_nm' ? 'Avg Deviation (nm)' : name
+                            ]}
+                          />
+                          <Bar dataKey="efficiency_score" fill="#22c55e" name="efficiency_score" radius={[0, 4, 4, 0]} />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </ChartCard>
+                  )}
+
+                  {/* Airlines Details Table */}
+                  {routeEfficiency.airlines.length > 0 && (
+                    <div className="mt-4 overflow-x-auto">
+                      <table className="w-full">
+                        <thead>
+                          <tr className="border-b border-white/10">
+                            <th className="text-left text-white/60 text-sm font-medium px-4 py-3">Airline</th>
+                            <th className="text-left text-white/60 text-sm font-medium px-4 py-3">Flights</th>
+                            <th className="text-left text-white/60 text-sm font-medium px-4 py-3">Avg Duration</th>
+                            <th className="text-left text-white/60 text-sm font-medium px-4 py-3">Deviation</th>
+                            <th className="text-left text-white/60 text-sm font-medium px-4 py-3">Anomaly Rate</th>
+                            <th className="text-left text-white/60 text-sm font-medium px-4 py-3">Score</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {routeEfficiency.airlines.map((airline, idx) => (
+                            <tr key={airline.airline} className={`border-b border-white/5 ${idx === 0 ? 'bg-green-500/10' : ''}`}>
+                              <td className="px-4 py-3 text-white font-medium">{airline.airline}</td>
+                              <td className="px-4 py-3 text-white/80">{airline.flights}</td>
+                              <td className="px-4 py-3 text-white/80">{airline.avg_duration_min} min</td>
+                              <td className="px-4 py-3 text-white/80">{airline.avg_deviation_nm} nm</td>
+                              <td className="px-4 py-3">
+                                <span className={`px-2 py-1 rounded text-xs ${
+                                  airline.anomaly_rate > 20 ? 'bg-red-500/20 text-red-400' :
+                                  airline.anomaly_rate > 10 ? 'bg-yellow-500/20 text-yellow-400' :
+                                  'bg-green-500/20 text-green-400'
+                                }`}>
+                                  {airline.anomaly_rate}%
+                                </span>
+                              </td>
+                              <td className="px-4 py-3">
+                                <span className={`px-2 py-1 rounded font-bold text-sm ${
+                                  airline.efficiency_score >= 80 ? 'bg-green-500/20 text-green-400' :
+                                  airline.efficiency_score >= 60 ? 'bg-yellow-500/20 text-yellow-400' :
+                                  'bg-red-500/20 text-red-400'
+                                }`}>
+                                  {airline.efficiency_score}
+                                </span>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                  
+                  {routeEfficiency.airlines.length === 0 && (
+                    <div className="text-center py-8 text-white/40">
+                      <Plane className="w-12 h-12 mx-auto mb-3 opacity-50" />
+                      <p>No airline data available for this route</p>
+                    </div>
+                  )}
+                </div>
+              )}
+            </>
+          )}
+          
+          {!routeEfficiency && !routeLoading && (
+            <div className="text-center py-8 text-white/40">
+              <Plane className="w-12 h-12 mx-auto mb-3 opacity-50" />
+              <p>Select a route to compare airline efficiency</p>
+            </div>
+          )}
+        </div>
+      </div>
+
       {/* Level 3: Deep Intelligence */}
       <div className="border-b border-white/10 pb-4 pt-8">
         <h2 className="text-white text-xl font-bold mb-4 flex items-center gap-2">
@@ -883,12 +1139,154 @@ export function IntelligenceTab({ startTs, endTs, cacheKey = 0 }: IntelligenceTa
         data={gpsJamming.slice(0, 15)}
       />
 
-      {/* Military Aircraft Patterns */}
-      <TableCard
-        title="Military Aircraft Patterns"
-        columns={militaryColumns}
-        data={militaryPatterns.slice(0, 20)}
-      />
+      {/* Military Aircraft Patterns with Type Filter */}
+      <div className="bg-surface rounded-xl border border-white/10 overflow-hidden">
+        <div className="px-6 py-4 border-b border-white/10">
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+            <div>
+              <h3 className="text-lg font-semibold text-white flex items-center gap-2">
+                <Shield className="w-5 h-5 text-purple-500" />
+                Military Aircraft Patterns
+              </h3>
+              <p className="text-white/60 text-sm mt-1">
+                Identify tankers, ISR, fighters, and transport aircraft
+              </p>
+            </div>
+            
+            {/* Military Type Filter Buttons */}
+            <div className="flex flex-wrap gap-2">
+              {[
+                { id: 'all', label: 'All', color: 'bg-gray-500' },
+                { id: 'tanker', label: 'Tankers', color: 'bg-amber-500' },
+                { id: 'ISR', label: 'ISR', color: 'bg-cyan-500' },
+                { id: 'fighter', label: 'Fighters', color: 'bg-red-500' },
+                { id: 'transport', label: 'Transport', color: 'bg-blue-500' },
+              ].map(filter => {
+                const count = filter.id === 'all' 
+                  ? militaryPatterns.length 
+                  : militaryPatterns.filter(p => p.type?.toLowerCase() === filter.id.toLowerCase()).length;
+                return (
+                  <button
+                    key={filter.id}
+                    onClick={() => setMilitaryTypeFilter(filter.id)}
+                    className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all flex items-center gap-2 ${
+                      militaryTypeFilter === filter.id
+                        ? `${filter.color} text-white shadow-lg`
+                        : 'bg-surface-highlight text-white/60 hover:text-white hover:bg-white/10'
+                    }`}
+                  >
+                    {filter.label}
+                    <span className={`px-1.5 py-0.5 rounded text-xs ${
+                      militaryTypeFilter === filter.id ? 'bg-white/20' : 'bg-black/20'
+                    }`}>
+                      {count}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+        
+        {/* Filtered Military Stats */}
+        <div className="px-6 py-4 border-b border-white/10 bg-surface-highlight/30">
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+            <div className="text-center">
+              <div className="text-2xl font-bold text-amber-400">
+                {militaryPatterns.filter(p => p.type?.toLowerCase() === 'tanker').length}
+              </div>
+              <div className="text-xs text-white/50">Tankers</div>
+              <div className="text-xs text-white/40">Aerial Refueling</div>
+            </div>
+            <div className="text-center">
+              <div className="text-2xl font-bold text-cyan-400">
+                {militaryPatterns.filter(p => p.type?.toLowerCase() === 'isr').length}
+              </div>
+              <div className="text-xs text-white/50">ISR</div>
+              <div className="text-xs text-white/40">Surveillance</div>
+            </div>
+            <div className="text-center">
+              <div className="text-2xl font-bold text-red-400">
+                {militaryPatterns.filter(p => p.type?.toLowerCase() === 'fighter').length}
+              </div>
+              <div className="text-xs text-white/50">Fighters</div>
+              <div className="text-xs text-white/40">Combat Aircraft</div>
+            </div>
+            <div className="text-center">
+              <div className="text-2xl font-bold text-blue-400">
+                {militaryPatterns.filter(p => p.type?.toLowerCase() === 'transport').length}
+              </div>
+              <div className="text-xs text-white/50">Transport</div>
+              <div className="text-xs text-white/40">Cargo/Personnel</div>
+            </div>
+            <div className="text-center">
+              <div className="text-2xl font-bold text-gray-400">
+                {militaryPatterns.filter(p => !['tanker', 'isr', 'fighter', 'transport'].includes(p.type?.toLowerCase() || '')).length}
+              </div>
+              <div className="text-xs text-white/50">Other</div>
+              <div className="text-xs text-white/40">VIP, Medical, etc.</div>
+            </div>
+          </div>
+        </div>
+        
+        {/* Filtered Table */}
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <thead>
+              <tr className="border-b border-white/10">
+                <th className="text-left text-white/60 text-sm font-medium px-4 py-3">Callsign</th>
+                <th className="text-left text-white/60 text-sm font-medium px-4 py-3">Country</th>
+                <th className="text-left text-white/60 text-sm font-medium px-4 py-3">Type</th>
+                <th className="text-left text-white/60 text-sm font-medium px-4 py-3">Pattern</th>
+                <th className="text-left text-white/60 text-sm font-medium px-4 py-3">Details</th>
+              </tr>
+            </thead>
+            <tbody>
+              {militaryPatterns
+                .filter(p => militaryTypeFilter === 'all' || p.type?.toLowerCase() === militaryTypeFilter.toLowerCase())
+                .slice(0, 20)
+                .map((pattern, idx) => (
+                  <tr key={pattern.flight_id || idx} className="border-b border-white/5 hover:bg-white/5">
+                    <td className="px-4 py-3 text-white font-medium">{pattern.callsign}</td>
+                    <td className="px-4 py-3">
+                      <span className={`px-2 py-1 rounded text-xs font-medium ${
+                        pattern.country === 'US' ? 'bg-blue-500/20 text-blue-400' :
+                        pattern.country === 'GB' ? 'bg-red-500/20 text-red-400' :
+                        pattern.country === 'RU' ? 'bg-orange-500/20 text-orange-400' :
+                        pattern.country === 'IL' ? 'bg-green-500/20 text-green-400' :
+                        'bg-purple-500/20 text-purple-400'
+                      }`}>
+                        {pattern.country}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className={`px-2 py-1 rounded text-xs font-bold ${
+                        pattern.type?.toLowerCase() === 'tanker' ? 'bg-amber-500/20 text-amber-400' :
+                        pattern.type?.toLowerCase() === 'isr' ? 'bg-cyan-500/20 text-cyan-400' :
+                        pattern.type?.toLowerCase() === 'fighter' ? 'bg-red-500/20 text-red-400' :
+                        pattern.type?.toLowerCase() === 'transport' ? 'bg-blue-500/20 text-blue-400' :
+                        'bg-gray-500/20 text-gray-400'
+                      }`}>
+                        {pattern.type || 'Unknown'}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className="text-white/70">{pattern.pattern_type}</span>
+                    </td>
+                    <td className="px-4 py-3 text-white/50 text-sm">
+                      {pattern.type_name || '-'}
+                    </td>
+                  </tr>
+                ))}
+            </tbody>
+          </table>
+          {militaryPatterns.filter(p => militaryTypeFilter === 'all' || p.type?.toLowerCase() === militaryTypeFilter.toLowerCase()).length === 0 && (
+            <div className="py-8 text-center text-white/40">
+              No military aircraft of this type detected
+            </div>
+          )}
+        </div>
+      </div>
 
       {/* Military Locations Map */}
       {militaryPatterns.length > 0 && (
@@ -928,15 +1326,16 @@ export function IntelligenceTab({ startTs, endTs, cacheKey = 0 }: IntelligenceTa
                 </div>
               </div>
             </div>
-            {/* Pattern Type Legend */}
-            <div className="mt-3 flex gap-4">
+            {/* Pattern Type & Aircraft Type Legend */}
+            <div className="mt-3 flex flex-wrap gap-4">
+              <div className="text-white/50 text-xs">Pattern:</div>
               <div className="flex items-center gap-2">
                 <span className="text-white text-sm">●</span>
-                <span className="text-white/50 text-xs">Orbit</span>
+                <span className="text-white/50 text-xs">Orbit (Tanker)</span>
               </div>
               <div className="flex items-center gap-2">
                 <span className="text-white text-sm">◆</span>
-                <span className="text-white/50 text-xs">Racetrack</span>
+                <span className="text-white/50 text-xs">Racetrack (ISR)</span>
               </div>
               <div className="flex items-center gap-2">
                 <span className="text-white text-sm">▶</span>

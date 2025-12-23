@@ -1,14 +1,19 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { Settings, Bell, Home, Calendar, RefreshCw, History, X, Clock, HelpCircle } from 'lucide-react';
+import { Settings, Bell, Home, Calendar, RefreshCw, History, X, Clock, HelpCircle, AlertTriangle } from 'lucide-react';
 import { OverviewTab } from './components/intelligence/OverviewTab';
 import { SafetyTab } from './components/intelligence/SafetyTab';
 import { TrafficTab } from './components/intelligence/TrafficTab';
 import { IntelligenceTab } from './components/intelligence/IntelligenceTab';
 import { PredictTab } from './components/intelligence/PredictTab';
 import { IntelligenceHelpModal } from './components/intelligence/IntelligenceHelpModal';
+import { QuickQuestionsPanel } from './components/intelligence/QuickQuestionsPanel';
 
 type TabType = 'overview' | 'safety' | 'traffic' | 'intelligence' | 'predict';
+
+// Time range limits
+const MAX_QUERY_DAYS = 90;
+const LARGE_QUERY_WARNING_DAYS = 30;
 
 // Saved filter interface
 interface SavedFilter {
@@ -108,6 +113,21 @@ export function IntelligencePage() {
   const [savedFilters, setSavedFilters] = useState<SavedFilter[]>(getSavedFilters());
   const [showSavedFilters, setShowSavedFilters] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
+  
+  // Calculate date range info and warnings
+  const dateRangeInfo = useMemo(() => {
+    const days = (dateRange.endTs - dateRange.startTs) / 86400;
+    return {
+      days: Math.round(days * 10) / 10,
+      isLarge: days > LARGE_QUERY_WARNING_DAYS,
+      exceedsMax: days > MAX_QUERY_DAYS,
+      warning: days > MAX_QUERY_DAYS 
+        ? `Time range exceeds ${MAX_QUERY_DAYS} day limit. Queries may fail.`
+        : days > LARGE_QUERY_WARNING_DAYS
+        ? `Large date range (${Math.round(days)} days) - loading may take longer.`
+        : null
+    };
+  }, [dateRange]);
   
   // Update URL when tab or date range changes
   useEffect(() => {
@@ -429,6 +449,27 @@ export function IntelligencePage() {
         </div>
       </div>
 
+      {/* Time Range Warning */}
+      {dateRangeInfo.warning && (
+        <div className={`px-6 py-3 flex items-center gap-3 ${
+          dateRangeInfo.exceedsMax 
+            ? 'bg-red-500/20 border-b border-red-500/30' 
+            : 'bg-amber-500/20 border-b border-amber-500/30'
+        }`}>
+          <AlertTriangle className={`h-5 w-5 shrink-0 ${
+            dateRangeInfo.exceedsMax ? 'text-red-400' : 'text-amber-400'
+          }`} />
+          <span className={`text-sm ${
+            dateRangeInfo.exceedsMax ? 'text-red-300' : 'text-amber-300'
+          }`}>
+            {dateRangeInfo.warning}
+          </span>
+          <span className="text-xs text-white/50 ml-auto">
+            Current range: {dateRangeInfo.days} days (max: {MAX_QUERY_DAYS})
+          </span>
+        </div>
+      )}
+
       {/* Tab Content */}
       <main className="flex-1 overflow-auto p-6">
         <div className="max-w-[1600px] mx-auto">
@@ -441,6 +482,11 @@ export function IntelligencePage() {
       </main>
 
       <IntelligenceHelpModal open={showHelp} onClose={() => setShowHelp(false)} />
+      
+      {/* Quick Questions Floating Panel */}
+      <QuickQuestionsPanel 
+        onNavigateTab={(tab) => setActiveTab(tab as TabType)} 
+      />
     </div>
   );
 }

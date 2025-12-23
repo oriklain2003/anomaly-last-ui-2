@@ -1,20 +1,10 @@
 import { useState, useEffect, useRef } from 'react';
-import { AlertTriangle, AlertOctagon, Activity, Calendar, Clock, MapPin, TrendingUp, Plane } from 'lucide-react';
+import { AlertTriangle, AlertOctagon, Activity, Calendar, Clock, MapPin, TrendingUp, Plane, Cloud, CloudRain } from 'lucide-react';
 import { StatCard } from './StatCard';
 import { TableCard, Column } from './TableCard';
 import { ChartCard } from './ChartCard';
-import { 
-  fetchEmergencyCodes, 
-  fetchNearMissEvents, 
-  fetchGoArounds,
-  fetchGoAroundsHourly,
-  fetchSafetyMonthly,
-  fetchNearMissLocations,
-  fetchSafetyByPhase,
-  fetchEmergencyAftermath,
-  fetchTopAirlineEmergencies,
-  fetchNearMissByCountry
-} from '../../api';
+import { fetchSafetyBatch, fetchWeatherImpact } from '../../api';
+import type { WeatherImpactAnalysis } from '../../api';
 import type { GoAroundHourly, SafetyMonthly, NearMissLocation, SafetyByPhase, EmergencyAftermath, TopAirlineEmergency, NearMissByCountry } from '../../api';
 import type { EmergencyCodeStat, NearMissEvent, GoAroundStat } from '../../types';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ComposedChart, Line } from 'recharts';
@@ -38,6 +28,7 @@ export function SafetyTab({ startTs, endTs, cacheKey = 0 }: SafetyTabProps) {
   const [emergencyAftermath, setEmergencyAftermath] = useState<EmergencyAftermath[]>([]);
   const [topAirlineEmergencies, setTopAirlineEmergencies] = useState<TopAirlineEmergency[]>([]);
   const [nearMissByCountry, setNearMissByCountry] = useState<NearMissByCountry | null>(null);
+  const [weatherImpact, setWeatherImpact] = useState<WeatherImpactAnalysis | null>(null);
   const [loading, setLoading] = useState(true);
 
   // Map refs for near-miss heatmap
@@ -52,28 +43,27 @@ export function SafetyTab({ startTs, endTs, cacheKey = 0 }: SafetyTabProps) {
   const loadData = async () => {
     setLoading(true);
     try {
-      const [codesData, nearMissData, goAroundData, hourlyData, monthlyData, locationsData, phaseData, aftermathData, topAirlineData, nearMissCountryData] = await Promise.all([
-        fetchEmergencyCodes(startTs, endTs),
-        fetchNearMissEvents(startTs, endTs),
-        fetchGoArounds(startTs, endTs),
-        fetchGoAroundsHourly(startTs, endTs).catch(() => []),
-        fetchSafetyMonthly(startTs, endTs).catch(() => []),
-        fetchNearMissLocations(startTs, endTs).catch(() => []),
-        fetchSafetyByPhase(startTs, endTs).catch(() => null),
-        fetchEmergencyAftermath(startTs, endTs).catch(() => []),
-        fetchTopAirlineEmergencies(startTs, endTs).catch(() => []),
-        fetchNearMissByCountry(startTs, endTs).catch(() => null)
-      ]);
-      setEmergencyCodes(codesData);
-      setNearMiss(nearMissData);
-      setGoArounds(goAroundData);
-      setGoAroundsHourly(hourlyData);
-      setSafetyMonthly(monthlyData);
-      setNearMissLocations(locationsData);
-      setSafetyByPhase(phaseData);
-      setEmergencyAftermath(aftermathData);
-      setTopAirlineEmergencies(topAirlineData);
-      setNearMissByCountry(nearMissCountryData);
+      // Use batch API - single request instead of 10 parallel calls
+      const data = await fetchSafetyBatch(startTs, endTs);
+      
+      setEmergencyCodes(data.emergency_codes || []);
+      setNearMiss(data.near_miss || []);
+      setGoArounds(data.go_arounds || []);
+      setGoAroundsHourly(data.go_arounds_hourly || []);
+      setSafetyMonthly(data.safety_monthly || []);
+      setNearMissLocations(data.near_miss_locations || []);
+      setSafetyByPhase(data.safety_by_phase || null);
+      setEmergencyAftermath(data.emergency_aftermath || []);
+      setTopAirlineEmergencies(data.top_airline_emergencies || []);
+      setNearMissByCountry(data.near_miss_by_country || null);
+      
+      // Load weather impact separately
+      try {
+        const weather = await fetchWeatherImpact(startTs, endTs);
+        setWeatherImpact(weather);
+      } catch (e) {
+        console.error('Failed to load weather impact:', e);
+      }
     } catch (error) {
       console.error('Failed to load safety data:', error);
     } finally {
@@ -856,6 +846,158 @@ export function SafetyTab({ startTs, endTs, cacheKey = 0 }: SafetyTabProps) {
         columns={nearMissColumns}
         data={nearMiss.slice(0, 20)}
       />
+
+      {/* Weather Impact Section */}
+      {weatherImpact && (
+        <>
+          <div className="border-b border-white/10 pb-4 pt-8">
+            <h2 className="text-white text-xl font-bold mb-2 flex items-center gap-2">
+              <CloudRain className="w-5 h-5 text-blue-400" />
+              Weather Impact Analysis
+            </h2>
+            <p className="text-white/60 text-sm">
+              Diversions, go-arounds, and deviations potentially caused by weather
+            </p>
+          </div>
+
+          {/* Weather Stats Overview */}
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <StatCard
+              title="Weather-Related Events"
+              value={weatherImpact.weather_correlated_anomalies}
+              subtitle="Total weather-correlated"
+              icon={<Cloud className="w-6 h-6" />}
+            />
+            <StatCard
+              title="Diversions"
+              value={weatherImpact.total_diversions}
+              subtitle="Likely weather-caused"
+              icon={<Plane className="w-6 h-6" />}
+            />
+            <StatCard
+              title="Go-Arounds"
+              value={weatherImpact.total_go_arounds}
+              subtitle="Weather pattern"
+              icon={<Activity className="w-6 h-6" />}
+            />
+            <StatCard
+              title="Route Deviations"
+              value={weatherImpact.total_deviations}
+              subtitle="Storm avoidance"
+              icon={<TrendingUp className="w-6 h-6" />}
+            />
+          </div>
+
+          {/* Weather Insights */}
+          {weatherImpact.insights.length > 0 && (
+            <div className="bg-gradient-to-r from-blue-500/10 to-cyan-500/10 border border-blue-500/30 rounded-xl p-4">
+              <h3 className="text-blue-400 font-medium mb-3 flex items-center gap-2">
+                <Cloud className="w-4 h-4" />
+                Weather Impact Insights
+              </h3>
+              <ul className="space-y-2">
+                {weatherImpact.insights.map((insight, idx) => (
+                  <li key={idx} className="text-white/80 text-sm flex items-start gap-2">
+                    <span className="text-blue-400">•</span>
+                    {insight}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {/* Weather by Airport */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            {/* Diversions by Airport */}
+            {weatherImpact.diversions_likely_weather.length > 0 && (
+              <div className="bg-surface rounded-xl border border-white/10 p-5">
+                <h3 className="text-white font-bold mb-4 flex items-center gap-2">
+                  <Plane className="w-4 h-4 text-orange-400" />
+                  Diversions by Destination Airport
+                </h3>
+                <div className="space-y-2 max-h-[250px] overflow-y-auto">
+                  {weatherImpact.diversions_likely_weather.map((d, idx) => (
+                    <div key={d.airport} className="bg-surface-highlight rounded-lg p-3">
+                      <div className="flex justify-between items-center mb-1">
+                        <span className="text-white font-medium">{d.airport}</span>
+                        <span className="text-orange-400 font-bold">{d.count} diversions</span>
+                      </div>
+                      {d.dates.length > 0 && (
+                        <div className="text-white/50 text-xs">
+                          Dates: {d.dates.slice(0, 3).join(', ')}{d.dates.length > 3 ? '...' : ''}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Go-Arounds by Airport */}
+            {weatherImpact.go_arounds_weather_pattern.length > 0 && (
+              <div className="bg-surface rounded-xl border border-white/10 p-5">
+                <h3 className="text-white font-bold mb-4 flex items-center gap-2">
+                  <Activity className="w-4 h-4 text-purple-400" />
+                  Go-Arounds by Airport
+                </h3>
+                <div className="space-y-2 max-h-[250px] overflow-y-auto">
+                  {weatherImpact.go_arounds_weather_pattern.map((g, idx) => (
+                    <div key={g.airport} className="bg-surface-highlight rounded-lg p-3">
+                      <div className="flex justify-between items-center mb-1">
+                        <span className="text-white font-medium">{g.airport}</span>
+                        <span className="text-purple-400 font-bold">{g.count} go-arounds</span>
+                      </div>
+                      <div className="text-white/50 text-xs">
+                        Peak hour: {g.peak_hour}:00
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Monthly Weather Impact Chart */}
+          {weatherImpact.monthly_weather_impact.length > 0 && (
+            <ChartCard title="Monthly Weather Impact">
+              <ResponsiveContainer width="100%" height={300}>
+                <ComposedChart data={weatherImpact.monthly_weather_impact}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#ffffff20" />
+                  <XAxis 
+                    dataKey="month" 
+                    stroke="#ffffff60"
+                    tick={{ fill: '#ffffff60', fontSize: 11 }}
+                  />
+                  <YAxis stroke="#ffffff60" tick={{ fill: '#ffffff60' }} />
+                  <Tooltip
+                    contentStyle={{
+                      backgroundColor: '#1a1a1a',
+                      border: '1px solid #ffffff20',
+                      borderRadius: '8px'
+                    }}
+                    formatter={(value: number, name: string) => [
+                      value,
+                      name === 'diversion_count' ? 'Diversions' :
+                      name === 'go_around_count' ? 'Go-Arounds' :
+                      name === 'deviation_count' ? 'Deviations' : name
+                    ]}
+                  />
+                  <Bar dataKey="diversion_count" fill="#f97316" name="diversion_count" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="go_around_count" fill="#8b5cf6" name="go_around_count" radius={[4, 4, 0, 0]} />
+                  <Line 
+                    type="monotone" 
+                    dataKey="deviation_count" 
+                    stroke="#22c55e" 
+                    strokeWidth={2}
+                    name="deviation_count"
+                    dot={{ fill: '#22c55e', strokeWidth: 2 }}
+                  />
+                </ComposedChart>
+              </ResponsiveContainer>
+            </ChartCard>
+          )}
+        </>
+      )}
     </div>
   );
 }

@@ -6,23 +6,19 @@ import { ChartCard } from './ChartCard';
 import { SignalLossMap } from './SignalLossMap';
 import { BottleneckMap } from './BottleneckMap';
 import { 
-  fetchFlightsPerDay, 
-  fetchBusiestAirports, 
-  fetchSignalLoss,
-  fetchSignalLossMonthly,
-  fetchSignalLossHourly,
-  fetchPeakHoursAnalysis,
-  fetchDiversionStats,
-  fetchDiversionsMonthly,
-  fetchAlternateAirportsData,
+  fetchTrafficBatch,
   fetchRunwayUsage,
-  fetchRTBEvents,
-  fetchFlightsMissingInfo,
-  fetchDeviationsByType,
-  fetchBottleneckZones,
-  fetchAirportHourlyTraffic
+  fetchAirportHourlyTraffic,
+  fetchSeasonalYearComparison,
+  fetchTrafficSafetyCorrelation,
+  fetchSpecialEventsImpact
 } from '../../api';
-import type { FlightPerDay, SignalLossLocation, SignalLossMonthly, SignalLossHourly } from '../../types';
+import type { 
+  SeasonalYearComparison, 
+  TrafficSafetyCorrelation, 
+  SpecialEventsImpact 
+} from '../../api';
+import type { FlightPerDay, SignalLossLocation, SignalLossMonthly, SignalLossHourly, BusiestAirport } from '../../types';
 import type { PeakHoursAnalysis, DiversionStats, AlternateAirport, RunwayUsage, DiversionMonthly, RTBEvent, FlightsMissingInfo, DeviationByType, BottleneckZone, AirportHourlyTraffic } from '../../api';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, ComposedChart, Area } from 'recharts';
 
@@ -34,7 +30,7 @@ interface TrafficTabProps {
 
 export function TrafficTab({ startTs, endTs, cacheKey = 0 }: TrafficTabProps) {
   const [flightsPerDay, setFlightsPerDay] = useState<FlightPerDay[]>([]);
-  const [airports, setAirports] = useState<any[]>([]);
+  const [airports, setAirports] = useState<BusiestAirport[]>([]);
   const [signalLoss, setSignalLoss] = useState<SignalLossLocation[]>([]);
   const [signalLossMonthly, setSignalLossMonthly] = useState<SignalLossMonthly[]>([]);
   const [signalLossHourly, setSignalLossHourly] = useState<SignalLossHourly[]>([]);
@@ -50,9 +46,16 @@ export function TrafficTab({ startTs, endTs, cacheKey = 0 }: TrafficTabProps) {
   const [airportHourly, setAirportHourly] = useState<AirportHourlyTraffic[]>([]);
   const [selectedAirport, setSelectedAirport] = useState('LLBG');
   const [loading, setLoading] = useState(true);
+  
+  // Seasonal trends state
+  const [yearComparison, setYearComparison] = useState<SeasonalYearComparison | null>(null);
+  const [trafficSafetyCorr, setTrafficSafetyCorr] = useState<TrafficSafetyCorrelation | null>(null);
+  const [specialEvents, setSpecialEvents] = useState<SpecialEventsImpact | null>(null);
+  const [seasonalLoading, setSeasonalLoading] = useState(false);
 
   useEffect(() => {
     loadData();
+    loadSeasonalData();
   }, [startTs, endTs, cacheKey]);
 
   useEffect(() => {
@@ -74,37 +77,22 @@ export function TrafficTab({ startTs, endTs, cacheKey = 0 }: TrafficTabProps) {
   const loadData = async () => {
     setLoading(true);
     try {
-      const [
-        flightsData, airportsData, signalData, signalMonthlyData, signalHourlyData,
-        peakData, diversionData, diversionMonthlyData, alternateData, rtbData, missingData, deviationsData, bottleneckData
-      ] = await Promise.all([
-        fetchFlightsPerDay(startTs, endTs),
-        fetchBusiestAirports(startTs, endTs, 10),
-        fetchSignalLoss(startTs, endTs),
-        fetchSignalLossMonthly(startTs, endTs).catch(() => []),
-        fetchSignalLossHourly(startTs, endTs).catch(() => []),
-        fetchPeakHoursAnalysis(startTs, endTs).catch(() => null),
-        fetchDiversionStats(startTs, endTs).catch(() => null),
-        fetchDiversionsMonthly(startTs, endTs).catch(() => []),
-        fetchAlternateAirportsData(startTs, endTs).catch(() => []),
-        fetchRTBEvents(startTs, endTs).catch(() => []),
-        fetchFlightsMissingInfo(startTs, endTs).catch(() => null),
-        fetchDeviationsByType(startTs, endTs).catch(() => []),
-        fetchBottleneckZones(startTs, endTs).catch(() => [])
-      ]);
-      setFlightsPerDay(flightsData);
-      setAirports(airportsData);
-      setSignalLoss(signalData);
-      setSignalLossMonthly(signalMonthlyData);
-      setSignalLossHourly(signalHourlyData);
-      setPeakHours(peakData);
-      setDiversionStats(diversionData);
-      setDiversionsMonthly(diversionMonthlyData);
-      setAlternateAirports(alternateData);
-      setRtbEvents(rtbData);
-      setMissingInfo(missingData);
-      setDeviationsByType(deviationsData);
-      setBottleneckZones(bottleneckData);
+      // Use batch API - single request instead of 13 parallel calls
+      const batchData = await fetchTrafficBatch(startTs, endTs);
+      
+      setFlightsPerDay(batchData.flights_per_day || []);
+      setAirports(batchData.busiest_airports || []);
+      setSignalLoss(batchData.signal_loss || []);
+      setSignalLossMonthly(batchData.signal_loss_monthly || []);
+      setSignalLossHourly(batchData.signal_loss_hourly || []);
+      setPeakHours(batchData.peak_hours || null);
+      setDiversionStats(batchData.diversion_stats || null);
+      setDiversionsMonthly(batchData.diversions_monthly || []);
+      setAlternateAirports(batchData.alternate_airports || []);
+      setRtbEvents(batchData.rtb_events || []);
+      setMissingInfo(batchData.missing_info || null);
+      setDeviationsByType(batchData.deviations_by_type || []);
+      setBottleneckZones(batchData.bottleneck_zones || []);
     } catch (error) {
       console.error('Failed to load traffic data:', error);
     } finally {
@@ -119,6 +107,24 @@ export function TrafficTab({ startTs, endTs, cacheKey = 0 }: TrafficTabProps) {
     } catch (error) {
       console.error('Failed to load runway usage:', error);
       setRunwayUsage([]);
+    }
+  };
+
+  const loadSeasonalData = async () => {
+    setSeasonalLoading(true);
+    try {
+      const [yearData, corrData, eventsData] = await Promise.all([
+        fetchSeasonalYearComparison(startTs, endTs),
+        fetchTrafficSafetyCorrelation(startTs, endTs),
+        fetchSpecialEventsImpact(startTs, endTs)
+      ]);
+      setYearComparison(yearData);
+      setTrafficSafetyCorr(corrData);
+      setSpecialEvents(eventsData);
+    } catch (error) {
+      console.error('Failed to load seasonal data:', error);
+    } finally {
+      setSeasonalLoading(false);
     }
   };
 
@@ -362,6 +368,307 @@ export function TrafficTab({ startTs, endTs, cacheKey = 0 }: TrafficTabProps) {
             </div>
           </div>
         </>
+      )}
+
+      {/* Seasonal Trends Section */}
+      <div className="mt-8 mb-4">
+        <h2 className="text-xl font-bold text-white flex items-center gap-3">
+          <div className="p-2 bg-indigo-500/20 rounded-lg">
+            <Calendar className="w-5 h-5 text-indigo-400" />
+          </div>
+          Seasonal Trends & Patterns
+        </h2>
+        <p className="text-white/50 text-sm mt-1 ml-12">Year-over-year comparison, weekly patterns, and special event detection</p>
+      </div>
+
+      {seasonalLoading ? (
+        <div className="bg-surface rounded-xl border border-white/10 p-8 text-center">
+          <div className="text-white/60">Loading seasonal data...</div>
+        </div>
+      ) : (
+        <div className="space-y-6">
+          {/* Year-over-Year Comparison */}
+          {yearComparison && yearComparison.years.length > 0 && (
+            <div className="bg-surface rounded-xl border border-white/10 overflow-hidden">
+              <div className="px-6 py-4 border-b border-white/10">
+                <h3 className="text-lg font-semibold text-white flex items-center gap-2">
+                  <TrendingUp className="w-5 h-5 text-indigo-400" />
+                  Year-over-Year Comparison
+                </h3>
+                <p className="text-white/60 text-sm mt-1">
+                  Compare traffic and safety metrics across years
+                </p>
+              </div>
+              
+              <div className="p-6">
+                {/* Insights */}
+                {yearComparison.insights.length > 0 && (
+                  <div className="bg-indigo-500/10 border border-indigo-500/30 rounded-lg p-4 mb-4">
+                    <h4 className="text-indigo-400 font-medium mb-2">Insights</h4>
+                    <ul className="space-y-1">
+                      {yearComparison.insights.map((insight, idx) => (
+                        <li key={idx} className="text-white/80 text-sm flex items-start gap-2">
+                          <span className="text-indigo-400">•</span>
+                          {insight}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                
+                {/* Year Stats Grid */}
+                <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-4 mb-6">
+                  {yearComparison.years.map((year) => (
+                    <div key={year.year} className="bg-surface-highlight rounded-lg p-4">
+                      <div className="text-2xl font-bold text-white mb-3">{year.year}</div>
+                      <div className="space-y-2 text-sm">
+                        <div className="flex justify-between">
+                          <span className="text-white/60">Total Flights</span>
+                          <span className="text-white font-medium">{year.total_flights.toLocaleString()}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-white/60">Anomalies</span>
+                          <span className="text-orange-400 font-medium">{year.anomalies.toLocaleString()}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-white/60">Safety Events</span>
+                          <span className="text-red-400 font-medium">{year.safety_events.toLocaleString()}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-white/60">Military</span>
+                          <span className="text-purple-400 font-medium">{year.military_flights.toLocaleString()}</span>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                
+                {/* Month Comparison Chart */}
+                {yearComparison.month_comparison.length > 0 && (
+                  <ChartCard title="Month-by-Month Comparison">
+                    <ResponsiveContainer width="100%" height={280}>
+                      <BarChart data={yearComparison.month_comparison}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#ffffff20" />
+                        <XAxis 
+                          dataKey="month_name" 
+                          stroke="#ffffff60"
+                          tick={{ fill: '#ffffff60', fontSize: 10 }}
+                          tickFormatter={(v) => v.substring(0, 3)}
+                        />
+                        <YAxis stroke="#ffffff60" tick={{ fill: '#ffffff60' }} />
+                        <Tooltip
+                          contentStyle={{
+                            backgroundColor: '#1a1a1a',
+                            border: '1px solid #ffffff20',
+                            borderRadius: '8px'
+                          }}
+                          formatter={(value: number, name: string) => [
+                            value.toLocaleString(),
+                            name === 'current_year' ? 'Current Year' : 'Previous Year'
+                          ]}
+                        />
+                        <Bar dataKey="previous_year" fill="#6366f1" name="previous_year" radius={[4, 4, 0, 0]} />
+                        <Bar dataKey="current_year" fill="#22c55e" name="current_year" radius={[4, 4, 0, 0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </ChartCard>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Weekly Pattern */}
+          {specialEvents && specialEvents.weekly_pattern.length > 0 && (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              {/* Weekly Pattern Chart */}
+              <ChartCard title="Weekly Traffic Pattern">
+                <ResponsiveContainer width="100%" height={250}>
+                  <BarChart data={specialEvents.weekly_pattern}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#ffffff20" />
+                    <XAxis 
+                      dataKey="day_name" 
+                      stroke="#ffffff60"
+                      tick={{ fill: '#ffffff60', fontSize: 10 }}
+                      tickFormatter={(v) => v.substring(0, 3)}
+                    />
+                    <YAxis stroke="#ffffff60" tick={{ fill: '#ffffff60' }} />
+                    <Tooltip
+                      contentStyle={{
+                        backgroundColor: '#1a1a1a',
+                        border: '1px solid #ffffff20',
+                        borderRadius: '8px'
+                      }}
+                    />
+                    <Bar dataKey="avg_traffic" fill="#3b82f6" name="Avg Traffic" radius={[4, 4, 0, 0]} />
+                    <Bar dataKey="avg_anomalies" fill="#f97316" name="Avg Anomalies" radius={[4, 4, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </ChartCard>
+
+              {/* Detected Events */}
+              <div className="bg-surface rounded-xl border border-white/10 p-5">
+                <h3 className="text-white font-bold mb-4 flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4 text-amber-400" />
+                  Unusual Traffic Days Detected
+                </h3>
+                {specialEvents.detected_events.length > 0 ? (
+                  <div className="space-y-3 max-h-[200px] overflow-y-auto">
+                    {specialEvents.detected_events.map((event, idx) => (
+                      <div key={idx} className="bg-surface-highlight rounded-lg p-3">
+                        <div className="flex justify-between items-center mb-1">
+                          <span className="text-white font-medium">{event.date}</span>
+                          <span className={`px-2 py-0.5 rounded text-xs font-bold ${
+                            event.traffic_change_percent < -50 
+                              ? 'bg-red-500/20 text-red-400' 
+                              : 'bg-yellow-500/20 text-yellow-400'
+                          }`}>
+                            {event.traffic_change_percent.toFixed(0)}%
+                          </span>
+                        </div>
+                        <div className="text-amber-400 text-sm">{event.event_name}</div>
+                        <div className="text-white/50 text-xs mt-1">
+                          {event.flights} flights vs {event.expected_flights} expected
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-center py-8 text-white/40">
+                    <Calendar className="w-8 h-8 mx-auto mb-2 opacity-50" />
+                    <p>No unusual traffic patterns detected</p>
+                  </div>
+                )}
+                
+                {/* Insights */}
+                {specialEvents.insights.length > 0 && (
+                  <div className="mt-4 pt-4 border-t border-white/10">
+                    {specialEvents.insights.map((insight, idx) => (
+                      <p key={idx} className="text-white/70 text-sm flex items-start gap-2">
+                        <span className="text-amber-400">•</span>
+                        {insight}
+                      </p>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Traffic-Safety Correlation */}
+          {trafficSafetyCorr && (
+            <div className="bg-surface rounded-xl border border-white/10 overflow-hidden">
+              <div className="px-6 py-4 border-b border-white/10">
+                <h3 className="text-lg font-semibold text-white flex items-center gap-2">
+                  <TrendingUp className="w-5 h-5 text-rose-400" />
+                  Traffic-Safety Correlation Analysis
+                </h3>
+                <p className="text-white/60 text-sm mt-1">
+                  How does traffic volume correlate with safety events?
+                </p>
+              </div>
+              
+              <div className="p-6">
+                {/* Correlation Stats */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                  <div className={`rounded-xl p-5 border-2 ${
+                    trafficSafetyCorr.correlation_score > 0.7 ? 'bg-red-500/10 border-red-500/50' :
+                    trafficSafetyCorr.correlation_score > 0.4 ? 'bg-yellow-500/10 border-yellow-500/50' : 
+                    'bg-green-500/10 border-green-500/50'
+                  }`}>
+                    <div className="text-white/60 text-sm mb-1">Correlation Score</div>
+                    <div className={`text-4xl font-bold ${
+                      trafficSafetyCorr.correlation_score > 0.7 ? 'text-red-400' :
+                      trafficSafetyCorr.correlation_score > 0.4 ? 'text-yellow-400' : 'text-green-400'
+                    }`}>
+                      {(trafficSafetyCorr.correlation_score * 100).toFixed(0)}%
+                    </div>
+                    <div className="text-white/50 text-xs mt-2">
+                      {trafficSafetyCorr.correlation_score > 0.7 
+                        ? 'Strong positive correlation'
+                        : trafficSafetyCorr.correlation_score > 0.4 
+                        ? 'Moderate correlation' 
+                        : 'Weak correlation'}
+                    </div>
+                  </div>
+                  
+                  <div className="bg-surface-highlight rounded-xl p-5">
+                    <div className="text-white/60 text-sm mb-1">Peak Risk Hours</div>
+                    <div className="text-2xl font-bold text-rose-400">
+                      {trafficSafetyCorr.peak_risk_hours.slice(0, 3).map(h => `${h}:00`).join(', ')}
+                    </div>
+                    <div className="text-white/50 text-xs mt-2">
+                      Hours with highest safety events per 1000 flights
+                    </div>
+                  </div>
+                  
+                  <div className="bg-surface-highlight rounded-xl p-5">
+                    <div className="text-white/60 text-sm mb-1">Insights</div>
+                    <div className="space-y-1">
+                      {trafficSafetyCorr.insights.slice(0, 2).map((insight, idx) => (
+                        <p key={idx} className="text-white/80 text-sm">{insight}</p>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Hourly Correlation Chart */}
+                <ChartCard title="Hourly Traffic vs Safety Events">
+                  <ResponsiveContainer width="100%" height={280}>
+                    <ComposedChart data={trafficSafetyCorr.hourly_correlation}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#ffffff20" />
+                      <XAxis 
+                        dataKey="hour" 
+                        stroke="#ffffff60"
+                        tick={{ fill: '#ffffff60' }}
+                        tickFormatter={(h) => `${h}:00`}
+                      />
+                      <YAxis 
+                        yAxisId="left"
+                        stroke="#3b82f6"
+                        tick={{ fill: '#3b82f6' }}
+                      />
+                      <YAxis 
+                        yAxisId="right"
+                        orientation="right"
+                        stroke="#ef4444"
+                        tick={{ fill: '#ef4444' }}
+                      />
+                      <Tooltip
+                        contentStyle={{
+                          backgroundColor: '#1a1a1a',
+                          border: '1px solid #ffffff20',
+                          borderRadius: '8px'
+                        }}
+                        formatter={(value: number, name: string) => [
+                          value.toLocaleString(),
+                          name === 'traffic_count' ? 'Traffic' : 
+                          name === 'safety_count' ? 'Safety Events' : 
+                          name === 'safety_per_1000' ? 'Per 1000 Flights' : name
+                        ]}
+                      />
+                      <Area 
+                        yAxisId="left"
+                        type="monotone" 
+                        dataKey="traffic_count" 
+                        fill="#3b82f620" 
+                        stroke="#3b82f6"
+                        strokeWidth={2}
+                        name="traffic_count"
+                      />
+                      <Bar 
+                        yAxisId="right"
+                        dataKey="safety_count" 
+                        fill="#ef4444" 
+                        name="safety_count"
+                        radius={[4, 4, 0, 0]}
+                      />
+                    </ComposedChart>
+                  </ResponsiveContainer>
+                </ChartCard>
+              </div>
+            </div>
+          )}
+        </div>
       )}
 
       {/* Section: Flight Volume */}
@@ -689,19 +996,20 @@ export function TrafficTab({ startTs, endTs, cacheKey = 0 }: TrafficTabProps) {
             </div>
             <StatCard
               title="Peak Traffic Hours"
-              value={peakHours.peak_traffic_hours.slice(0, 3).map(h => `${h}:00`).join(', ')}
+              value={(peakHours.peak_traffic_hours || []).slice(0, 3).map(h => `${h}:00`).join(', ') || 'N/A'}
               subtitle="Busiest times"
               icon={<Plane className="w-6 h-6" />}
             />
             <StatCard
               title="Peak Safety Hours"
-              value={peakHours.peak_safety_hours.slice(0, 3).map(h => `${h}:00`).join(', ')}
+              value={(peakHours.peak_safety_hours || []).slice(0, 3).map(h => `${h}:00`).join(', ') || 'N/A'}
               subtitle="Most events"
               icon={<AlertTriangle className="w-6 h-6" />}
             />
           </div>
 
           {/* Hourly Chart */}
+          {peakHours.hourly_data && peakHours.hourly_data.length > 0 && (
           <ChartCard title="Traffic vs Safety Events by Hour">
             <ResponsiveContainer width="100%" height={300}>
               <ComposedChart data={peakHours.hourly_data}>
@@ -753,6 +1061,7 @@ export function TrafficTab({ startTs, endTs, cacheKey = 0 }: TrafficTabProps) {
               </ComposedChart>
             </ResponsiveContainer>
           </ChartCard>
+          )}
         </div>
       )}
 

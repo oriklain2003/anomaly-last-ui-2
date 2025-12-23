@@ -38,6 +38,7 @@ export interface LayerResult {
 export interface AnomalyReport {
     flight_id: string;
     callsign?: string;
+    flight_number?: string;  // IATA flight number (e.g., "LY123")
     timestamp: number;
     is_anomaly: boolean;
     severity_cnn: number;
@@ -113,6 +114,13 @@ export interface FlightPerDay {
   count: number;
   military_count: number;
   civilian_count: number;
+}
+
+export interface BusiestAirport {
+  airport: string;
+  arrivals: number;
+  departures: number;
+  total: number;
 }
 
 export interface SignalLossLocation {
