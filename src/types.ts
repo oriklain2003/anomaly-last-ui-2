@@ -216,7 +216,13 @@ export interface MilitaryPattern {
   callsign: string;
   country: string;
   type: string;
+  type_name?: string;
+  aircraft_type?: string;
   pattern_type: string;
+  duration_minutes?: number;
+  avg_altitude_ft?: number;
+  lat?: number;
+  lon?: number;
   locations: any[];
   frequency: number;
 }

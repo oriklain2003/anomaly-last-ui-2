@@ -14,8 +14,7 @@ import {
 } from '../../api';
 import type { 
   RouteEfficiencyComparison, 
-  RoutesSummary,
-  AirlineEfficiencyData
+  RoutesSummary
 } from '../../api';
 import type { AirlineEfficiency, HoldingPatternAnalysis, GPSJammingPoint, MilitaryPattern, PatternCluster, AnomalyDNA } from '../../types';
 import type { AirlineActivityTrends, MilitaryRoutes } from '../../api';
@@ -423,13 +422,6 @@ export function IntelligenceTab({ startTs, endTs, cacheKey = 0 }: IntelligenceTa
       title: 'First Seen',
       render: (value: number) => value ? new Date(value * 1000).toLocaleDateString() : 'N/A'
     }
-  ];
-
-  const militaryColumns: Column[] = [
-    { key: 'callsign', title: 'Callsign' },
-    { key: 'country', title: 'Country' },
-    { key: 'type', title: 'Type' },
-    { key: 'pattern_type', title: 'Pattern' }
   ];
 
   const jammingColumns: Column[] = [

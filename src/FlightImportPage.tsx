@@ -1,19 +1,19 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { 
     Search, Plane, ArrowLeft, Calendar, Clock, MapPin, 
     CheckCircle, X, AlertTriangle, Loader2, Navigation,
     Radio, RotateCcw, Compass, ShieldAlert, Wifi, Shield,
-    Target, GraduationCap, Satellite
+    Target, GraduationCap
 } from 'lucide-react';
 import { MapComponent, type MapComponentHandle } from './components/MapComponent';
 import { 
     searchFlightsByCallsign, 
     fetchImportFlightTracks, 
     importFlightToFeedback,
-    type FlightSearchResult,
-    type TrackPoint 
+    type FlightSearchResult
 } from './api';
+import type { TrackPoint } from './types';
 import clsx from 'clsx';
 import { LanguageProvider, useLanguage } from './contexts/LanguageContext';
 
@@ -344,8 +344,21 @@ function FlightImportContent() {
                                             <span className="text-white/30">→</span>
                                             <span>{flight.destination || '?'}</span>
                                         </div>
-                                        {flight.airline && (
-                                            <p className="text-xs text-white/50 mt-1">{flight.airline}</p>
+                                        <div className="flex items-center gap-2 mt-1 text-xs">
+                                            {flight.airline && (
+                                                <span className="text-white/50">{flight.airline}</span>
+                                            )}
+                                            {flight.aircraft_type && (
+                                                <span className="text-white/40">• {flight.aircraft_type}</span>
+                                            )}
+                                            {flight.is_military && (
+                                                <span className="px-1.5 py-0.5 rounded bg-green-500/20 text-green-400 text-[10px] font-medium">
+                                                    MILITARY
+                                                </span>
+                                            )}
+                                        </div>
+                                        {flight.aircraft_registration && (
+                                            <p className="text-[10px] text-white/40 mt-0.5">{flight.aircraft_registration}</p>
                                         )}
                                     </div>
                                 ))}
@@ -469,11 +482,18 @@ function FlightImportContent() {
 
                     {/* Flight Info Overlay */}
                     {selectedFlight && flightTracks.length > 0 && (
-                        <div className="absolute top-4 left-4 bg-surface/90 backdrop-blur-sm rounded-lg p-4 border border-white/10 max-w-xs">
+                        <div className="absolute top-4 left-4 bg-surface/90 backdrop-blur-sm rounded-lg p-4 border border-white/10 max-w-sm">
                             <div className="flex items-center gap-3 mb-3">
                                 <Plane className="size-5 text-primary" />
-                                <div>
-                                    <p className="font-bold">{selectedFlight.callsign || selectedFlight.flight_id}</p>
+                                <div className="flex-1">
+                                    <div className="flex items-center gap-2">
+                                        <p className="font-bold">{selectedFlight.callsign || selectedFlight.flight_id}</p>
+                                        {selectedFlight.is_military && (
+                                            <span className="px-1.5 py-0.5 rounded bg-green-500/20 text-green-400 text-[10px] font-bold">
+                                                MIL
+                                            </span>
+                                        )}
+                                    </div>
                                     <p className="text-xs text-white/60">{selectedFlight.airline}</p>
                                 </div>
                             </div>
@@ -481,10 +501,16 @@ function FlightImportContent() {
                                 <div>
                                     <p className="text-white/50">{isHebrew ? 'מוצא' : 'Origin'}</p>
                                     <p className="font-medium">{selectedFlight.origin || '-'}</p>
+                                    {selectedFlight.origin_name && (
+                                        <p className="text-[10px] text-white/40 truncate">{selectedFlight.origin_name}</p>
+                                    )}
                                 </div>
                                 <div>
                                     <p className="text-white/50">{isHebrew ? 'יעד' : 'Destination'}</p>
                                     <p className="font-medium">{selectedFlight.destination || '-'}</p>
+                                    {selectedFlight.destination_name && (
+                                        <p className="text-[10px] text-white/40 truncate">{selectedFlight.destination_name}</p>
+                                    )}
                                 </div>
                                 <div>
                                     <p className="text-white/50">{isHebrew ? 'נקודות' : 'Points'}</p>
@@ -494,6 +520,18 @@ function FlightImportContent() {
                                     <p className="text-white/50">{isHebrew ? 'מטוס' : 'Aircraft'}</p>
                                     <p className="font-medium">{selectedFlight.aircraft_type || '-'}</p>
                                 </div>
+                                {selectedFlight.aircraft_registration && (
+                                    <div>
+                                        <p className="text-white/50">{isHebrew ? 'רישום' : 'Registration'}</p>
+                                        <p className="font-medium">{selectedFlight.aircraft_registration}</p>
+                                    </div>
+                                )}
+                                {selectedFlight.flight_number && (
+                                    <div>
+                                        <p className="text-white/50">{isHebrew ? 'מספר טיסה' : 'Flight #'}</p>
+                                        <p className="font-medium">{selectedFlight.flight_number}</p>
+                                    </div>
+                                )}
                             </div>
                         </div>
                     )}

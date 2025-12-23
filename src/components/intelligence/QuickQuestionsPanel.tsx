@@ -1,11 +1,11 @@
-import { useState } from 'react';
+import React, { useState } from 'react';
 import { MessageCircle, X, Search, ChevronRight, Plane, Shield, Signal, TrendingUp, MapPin, AlertTriangle } from 'lucide-react';
 
 interface QuickQuestion {
   id: string;
   question: string;
   category: string;
-  icon: JSX.Element;
+  icon: React.ReactNode;
   description?: string;
   tab?: string; // Which tab this relates to
 }

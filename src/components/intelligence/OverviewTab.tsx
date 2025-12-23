@@ -64,7 +64,7 @@ export function OverviewTab({ startTs, endTs, cacheKey = 0, useTaggedDb = true }
           // NOTE: Excluding gps_jamming - it's slow and shown in Intelligence tab
           const batchData = await fetchOverviewBatch(startTs, endTs, 
             ['airspace_risk', 'monthly_flights']
-          ).catch(() => ({}));
+          ).catch(() => ({ airspace_risk: null, monthly_flights: [] }));
           
           setStats(taggedOverview);
           setFlightsPerDay(taggedFlights);

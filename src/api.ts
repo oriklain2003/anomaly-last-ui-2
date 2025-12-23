@@ -2166,13 +2166,26 @@ export const predictAircraftPosition = async (
 export interface FlightSearchResult {
     flight_id: string;
     callsign: string | null;
+    flight_number: string | null;
     origin: string | null;
+    origin_name: string | null;
+    origin_lat: number | null;
+    origin_lon: number | null;
     destination: string | null;
+    destination_name: string | null;
+    dest_lat: number | null;
+    dest_lon: number | null;
     airline: string | null;
+    airline_code: string | null;
     aircraft_type: string | null;
+    aircraft_model: string | null;
+    aircraft_registration: string | null;
     scheduled_departure: string | null;
     scheduled_arrival: string | null;
+    actual_departure: string | null;
+    actual_arrival: string | null;
     status: string | null;
+    is_military: boolean;
 }
 
 export interface FlightSearchResponse {

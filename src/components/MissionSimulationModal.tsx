@@ -93,7 +93,6 @@ interface Missile {
 const MISSILE_SPEED_KTS = 2000; // Mach 3 ~ 2000 kts
 const MISSILE_MAX_RANGE_NM = 30;
 const MISSILE_HIT_RADIUS_NM = 0.5;
-const MISSILE_MAX_FLIGHT_TIME_MIN = 1.5;
 const NAV_CONSTANT = 4; // Proportional Navigation constant (N)
 
 // ============================================================
@@ -193,9 +192,8 @@ const updateMissilePN = (
         losRate = angleDiff / deltaTimeMin;
     }
     
-    // Closing velocity (simplified - assume directly approaching)
+    // Distance to target
     const distToTarget = getDistanceNM(missile.lat, missile.lon, targetLat, targetLon);
-    const closingVelocity = MISSILE_SPEED_KTS; // Simplified
     
     // PN commanded turn rate: turn_rate = N * LOS_rate
     const commandedTurnRate = NAV_CONSTANT * losRate; // deg/min
@@ -227,8 +225,7 @@ const updateMissilePN = (
     const newDistToTarget = getDistanceNM(newLat, newLon, targetLat, targetLon);
     const isHit = newDistToTarget < MISSILE_HIT_RADIUS_NM;
     
-    // Check for miss (flew past or timed out)
-    const flightTime = (missile.launchTime > 0) ? deltaTimeMin : 0; // Simplified
+    // Check for miss (flew past)
     const isMiss = newDistToTarget > distToTarget && distToTarget < 2; // Flew past
     
     return {

@@ -1180,9 +1180,35 @@ export const RoutePlannerPage: React.FC = () => {
             );
 
             // Convert the strike plan response to our internal format
-            const aircraftWithRoutes = strikePlan.aircraft.map(a => {
+            const aircraftWithRoutes: MissionAircraft[] = strikePlan.aircraft.map(a => {
                 // Find the original aircraft to preserve all fields
                 const originalAircraft = missionAircraft.find(ma => ma.id === a.id);
+                
+                // Transform route points to include required fields
+                type RoutePoint = { lat: number; lon: number; alt_ft: number; time_offset_min?: number };
+                const transformPoints = (points: RoutePoint[] | undefined) => {
+                    let cumulativeDist = 0;
+                    return (points || []).map((p, i, arr) => {
+                        if (i > 0) {
+                            // Approximate distance calculation
+                            const prev = arr[i - 1];
+                            const latDiff = p.lat - prev.lat;
+                            const lonDiff = p.lon - prev.lon;
+                            cumulativeDist += Math.sqrt(latDiff * latDiff + lonDiff * lonDiff) * 60;
+                        }
+                        return {
+                            lat: p.lat,
+                            lon: p.lon,
+                            alt_ft: p.alt_ft,
+                            time_offset_min: p.time_offset_min || 0,
+                            cumulative_distance_nm: cumulativeDist,
+                        };
+                    });
+                };
+                
+                const plannedPath = a.route ? transformPoints(a.route.planned_path || a.route.centerline) : [];
+                const centerline = a.route ? transformPoints(a.route.centerline || a.route.planned_path) : [];
+                
                 return {
                     ...originalAircraft!,
                     callsign: a.callsign,
@@ -1190,11 +1216,27 @@ export const RoutePlannerPage: React.FC = () => {
                     color: a.color,
                     assignedTargets: a.assignedTargets,
                     route: a.route ? {
-                        ...a.route,
-                        // Ensure planned_path has the right format
-                        planned_path: a.route.planned_path || a.route.centerline || [],
-                        centerline: a.route.centerline || a.route.planned_path || [],
-                    } : undefined,
+                        // Required AdvancedPlannedRoute properties
+                        path_id: a.route.route_id || `route_${a.id}`,
+                        origin: a.route.origin?.name || null,
+                        destination: null,
+                        distance_nm: a.route.total_distance_nm || 0,
+                        score: 1.0 - (a.route.total_risk_score || 0),
+                        distance_score: 1.0,
+                        safety_score: 1.0 - (a.route.total_risk_score || 0),
+                        coverage_score: 1.0,
+                        conflict_score: 1.0,
+                        recommendation: 'Strike route',
+                        waypoint_count: plannedPath.length,
+                        conflicts: [],
+                        conflict_count: 0,
+                        warning_count: 0,
+                        eta_minutes: a.route.total_duration_min || 0,
+                        corridor_ids: [],
+                        width_nm: a.route.width_nm || 1,
+                        planned_path: plannedPath,
+                        centerline: centerline,
+                    } as AdvancedPlannedRoute : undefined,
                 };
             });
 

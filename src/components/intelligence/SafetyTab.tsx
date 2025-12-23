@@ -916,7 +916,7 @@ export function SafetyTab({ startTs, endTs, cacheKey = 0 }: SafetyTabProps) {
                   Diversions by Destination Airport
                 </h3>
                 <div className="space-y-2 max-h-[250px] overflow-y-auto">
-                  {weatherImpact.diversions_likely_weather.map((d, idx) => (
+                  {weatherImpact.diversions_likely_weather.map((d) => (
                     <div key={d.airport} className="bg-surface-highlight rounded-lg p-3">
                       <div className="flex justify-between items-center mb-1">
                         <span className="text-white font-medium">{d.airport}</span>
@@ -941,7 +941,7 @@ export function SafetyTab({ startTs, endTs, cacheKey = 0 }: SafetyTabProps) {
                   Go-Arounds by Airport
                 </h3>
                 <div className="space-y-2 max-h-[250px] overflow-y-auto">
-                  {weatherImpact.go_arounds_weather_pattern.map((g, idx) => (
+                  {weatherImpact.go_arounds_weather_pattern.map((g) => (
                     <div key={g.airport} className="bg-surface-highlight rounded-lg p-3">
                       <div className="flex justify-between items-center mb-1">
                         <span className="text-white font-medium">{g.airport}</span>
