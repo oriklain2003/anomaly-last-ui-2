@@ -115,14 +115,26 @@ export function SignalLossMap({
   
   const apiKey = 'r7kaQpfNDVZdaVp23F1r'; // Same key as main app
   
+  // Define cluster type with optional polygon
+  type ClusterWithPolygon = {
+    points: { lat: number; lon: number; count: number; avgDuration?: number }[];
+    centroid: [number, number];
+    totalCount: number;
+    polygon?: [number, number][] | null;
+  };
+
   // Use precomputed clusters if available, otherwise compute client-side
-  const { clusters, singles, useBackendPolygons } = useMemo(() => {
+  const { clusters, singles, useBackendPolygons } = useMemo((): {
+    clusters: ClusterWithPolygon[];
+    singles: SignalLossLocation[];
+    useBackendPolygons: boolean;
+  } => {
     if (precomputedClusters && precomputedClusters.clusters.length > 0) {
       // Use backend-computed clusters with polygon coordinates
       return {
         clusters: precomputedClusters.clusters.map(c => ({
           points: c.points.map(p => ({ lat: p.lat, lon: p.lon, count: p.event_count, avgDuration: 300 })),
-          centroid: c.centroid,
+          centroid: c.centroid as [number, number],
           totalCount: c.total_events,
           polygon: c.polygon // Backend-computed polygon coordinates
         })),
@@ -138,7 +150,11 @@ export function SignalLossMap({
     // Fallback to client-side clustering
     if (!showPolygonClusters) return { clusters: [], singles: locations, useBackendPolygons: false };
     const result = clusterPoints(locations, clusterThresholdNm);
-    return { ...result, useBackendPolygons: false };
+    return { 
+      clusters: result.clusters.map(c => ({ ...c, polygon: null })), 
+      singles: result.singles, 
+      useBackendPolygons: false 
+    };
   }, [locations, showPolygonClusters, clusterThresholdNm, precomputedClusters]);
 
   // Initialize map
