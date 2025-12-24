@@ -2,12 +2,14 @@ import { useEffect, useRef, useState, useMemo } from 'react';
 import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import type { SignalLossLocation } from '../../types';
+import type { GPSJammingClustersResponse } from '../../api';
 
 interface SignalLossMapProps {
   locations: SignalLossLocation[];
   height?: number;
   showPolygonClusters?: boolean; // Enable polygon visualization for clusters
   clusterThresholdNm?: number; // Distance threshold for clustering (in nautical miles)
+  precomputedClusters?: GPSJammingClustersResponse | null; // Backend-computed clusters with polygons
 }
 
 // Haversine distance in nautical miles
@@ -103,7 +105,8 @@ export function SignalLossMap({
   locations, 
   height = 400, 
   showPolygonClusters = true,
-  clusterThresholdNm = 50 // Default 50nm for GPS jamming regional clusters
+  clusterThresholdNm = 50, // Default 50nm for GPS jamming regional clusters
+  precomputedClusters = null // Backend-computed clusters with polygons
 }: SignalLossMapProps) {
   const mapContainer = useRef<HTMLDivElement>(null);
   const map = useRef<maplibregl.Map | null>(null);
@@ -112,11 +115,31 @@ export function SignalLossMap({
   
   const apiKey = 'r7kaQpfNDVZdaVp23F1r'; // Same key as main app
   
-  // Compute clusters from locations using the threshold prop
-  const { clusters, singles } = useMemo(() => {
-    if (!showPolygonClusters) return { clusters: [], singles: locations };
-    return clusterPoints(locations, clusterThresholdNm);
-  }, [locations, showPolygonClusters, clusterThresholdNm]);
+  // Use precomputed clusters if available, otherwise compute client-side
+  const { clusters, singles, useBackendPolygons } = useMemo(() => {
+    if (precomputedClusters && precomputedClusters.clusters.length > 0) {
+      // Use backend-computed clusters with polygon coordinates
+      return {
+        clusters: precomputedClusters.clusters.map(c => ({
+          points: c.points.map(p => ({ lat: p.lat, lon: p.lon, count: p.event_count, avgDuration: 300 })),
+          centroid: c.centroid,
+          totalCount: c.total_events,
+          polygon: c.polygon // Backend-computed polygon coordinates
+        })),
+        singles: precomputedClusters.singles.map(s => ({
+          lat: s.lat,
+          lon: s.lon,
+          count: s.event_count,
+          avgDuration: 300
+        })),
+        useBackendPolygons: true
+      };
+    }
+    // Fallback to client-side clustering
+    if (!showPolygonClusters) return { clusters: [], singles: locations, useBackendPolygons: false };
+    const result = clusterPoints(locations, clusterThresholdNm);
+    return { ...result, useBackendPolygons: false };
+  }, [locations, showPolygonClusters, clusterThresholdNm, precomputedClusters]);
 
   // Initialize map
   useEffect(() => {
@@ -177,14 +200,20 @@ export function SignalLossMap({
       const polygonFeatures: GeoJSON.Feature[] = [];
       
       clusters.forEach((cluster, idx) => {
-        // Get hull points for polygon
-        const hullPoints: [number, number][] = cluster.points.map(p => [p.lon, p.lat]);
-        const hull = computeConvexHull(hullPoints);
+        let coordinates: [number, number][];
         
-        if (hull.length >= 3) {
-          // Close the polygon
-          const coordinates = [...hull, hull[0]];
-          
+        // Use backend-computed polygon if available, otherwise compute client-side
+        if (useBackendPolygons && cluster.polygon && cluster.polygon.length >= 3) {
+          coordinates = cluster.polygon as [number, number][];
+        } else {
+          // Fallback: compute convex hull client-side
+          const hullPoints: [number, number][] = cluster.points.map(p => [p.lon, p.lat]);
+          const hull = computeConvexHull(hullPoints);
+          if (hull.length < 3) return; // Skip if not enough points
+          coordinates = [...hull, hull[0]]; // Close the polygon
+        }
+        
+        if (coordinates.length >= 3) {
           polygonFeatures.push({
             type: 'Feature',
             properties: {

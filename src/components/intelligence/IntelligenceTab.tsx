@@ -11,12 +11,14 @@ import {
   fetchAnomalyDNAEnhanced,
   fetchRouteEfficiency,
   fetchAvailableRoutes,
-  fetchGPSJammingTemporal
+  fetchGPSJammingTemporal,
+  fetchGPSJammingClusters
 } from '../../api';
 import type { 
   RouteEfficiencyComparison, 
   RoutesSummary,
-  GPSJammingTemporal
+  GPSJammingTemporal,
+  GPSJammingClustersResponse
 } from '../../api';
 import type { AirlineEfficiency, HoldingPatternAnalysis, GPSJammingPoint, MilitaryPattern, PatternCluster, AnomalyDNA } from '../../types';
 import type { AirlineActivityTrends, MilitaryRoutes } from '../../api';
@@ -55,6 +57,9 @@ export function IntelligenceTab({ startTs, endTs, cacheKey = 0 }: IntelligenceTa
   
   // GPS Jamming Temporal state
   const [gpsJammingTemporal, setGpsJammingTemporal] = useState<GPSJammingTemporal | null>(null);
+  
+  // GPS Jamming Clusters (backend-computed polygons)
+  const [gpsJammingClusters, setGpsJammingClusters] = useState<GPSJammingClustersResponse | null>(null);
   
   // Military map ref
   const militaryMapContainer = useRef<HTMLDivElement>(null);
@@ -104,9 +109,10 @@ export function IntelligenceTab({ startTs, endTs, cacheKey = 0 }: IntelligenceTa
     setLoading(true);
     try {
       // Use batch API - single request instead of 7 parallel calls
-      const [data, temporalData] = await Promise.all([
+      const [data, temporalData, clustersData] = await Promise.all([
         fetchIntelligenceBatch(startTs, endTs),
-        fetchGPSJammingTemporal(startTs, endTs).catch(() => null)
+        fetchGPSJammingTemporal(startTs, endTs).catch(() => null),
+        fetchGPSJammingClusters(startTs, endTs, 50, 3).catch(() => null) // 50nm threshold, 3 points min
       ]);
       
       setAirlineEfficiency(data.airline_efficiency || []);
@@ -117,6 +123,7 @@ export function IntelligenceTab({ startTs, endTs, cacheKey = 0 }: IntelligenceTa
       setMilitaryRoutes(data.military_routes || null);
       setAirlineActivity(data.airline_activity || null);
       setGpsJammingTemporal(temporalData);
+      setGpsJammingClusters(clustersData);
     } catch (error) {
       console.error('Failed to load intelligence data:', error);
     } finally {
@@ -987,7 +994,7 @@ export function IntelligenceTab({ startTs, endTs, cacheKey = 0 }: IntelligenceTa
           <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
             {/* Map */}
             <div className="xl:col-span-2">
-              {gpsJamming.length > 0 ? (
+              {gpsJamming.length > 0 || (gpsJammingClusters && gpsJammingClusters.total_points > 0) ? (
                 <SignalLossMap 
                   locations={gpsJamming.map(j => ({
                     lat: j.lat,
@@ -999,7 +1006,8 @@ export function IntelligenceTab({ startTs, endTs, cacheKey = 0 }: IntelligenceTa
                   }))} 
                   height={400}
                   showPolygonClusters={true}
-                  clusterThresholdNm={50} // 50nm threshold for regional GPS jamming clusters
+                  clusterThresholdNm={50}
+                  precomputedClusters={gpsJammingClusters} // Backend-computed polygon clusters
                 />
               ) : (
                 <div className="h-[400px] flex items-center justify-center bg-surface-highlight rounded-lg border border-white/10">

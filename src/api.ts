@@ -2356,6 +2356,56 @@ export const fetchGPSJammingTemporal = async (startTs: number, endTs: number): P
 };
 
 
+// GPS Jamming Clusters with Polygons
+export interface GPSJammingCluster {
+    id: number;
+    polygon: [number, number][] | null;  // [lon, lat] coordinates in GeoJSON format
+    centroid: [number, number];  // [lon, lat]
+    point_count: number;
+    total_events: number;
+    affected_flights: number;
+    avg_intensity: number;
+    points: Array<{
+        lat: number;
+        lon: number;
+        event_count: number;
+        intensity: number;
+    }>;
+}
+
+export interface GPSJammingClustersResponse {
+    clusters: GPSJammingCluster[];
+    singles: Array<{
+        lat: number;
+        lon: number;
+        event_count: number;
+        intensity: number;
+        jamming_score?: number;
+        jamming_indicators?: string[];
+        affected_flights?: number;
+    }>;
+    total_points: number;
+    total_clusters: number;
+}
+
+export const fetchGPSJammingClusters = async (
+    startTs: number, 
+    endTs: number,
+    clusterThresholdNm: number = 50,
+    minPoints: number = 3
+): Promise<GPSJammingClustersResponse> => {
+    const params = new URLSearchParams({
+        start_ts: startTs.toString(),
+        end_ts: endTs.toString(),
+        cluster_threshold_nm: clusterThresholdNm.toString(),
+        min_points: minPoints.toString()
+    });
+    const response = await fetch(`${API_BASE}/stats/gps-jamming/clusters?${params}`);
+    if (!response.ok) throw new Error('Failed to fetch GPS jamming clusters');
+    return response.json();
+};
+
+
 // Diversions Seasonal Analysis
 export interface DiversionsSeasonal {
     by_season: { season: string; count: number }[];
