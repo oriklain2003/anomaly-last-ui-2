@@ -1,6 +1,6 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { Settings, Bell, Home, Calendar, RefreshCw, History, X, Clock, HelpCircle, AlertTriangle } from 'lucide-react';
+import { Settings, Bell, Home, RefreshCw, HelpCircle, Zap } from 'lucide-react';
 import { OverviewTab } from './components/intelligence/OverviewTab';
 import { SafetyTab } from './components/intelligence/SafetyTab';
 import { TrafficTab } from './components/intelligence/TrafficTab';
@@ -11,132 +11,36 @@ import { QuickQuestionsPanel } from './components/intelligence/QuickQuestionsPan
 
 type TabType = 'overview' | 'safety' | 'traffic' | 'intelligence' | 'predict';
 
-// Time range limits
-const MAX_QUERY_DAYS = 90;
-const LARGE_QUERY_WARNING_DAYS = 30;
+// Fixed date range (Nov 1 - Dec 31, 2025) - pre-computed for instant loading
+const CACHED_START_TS = 1761955200;
+const CACHED_END_TS = 1767225599;
 
-// Saved filter interface
-interface SavedFilter {
-  startTs: number;
-  endTs: number;
-  savedAt: number; // timestamp when saved
-  label?: string;
-}
-
-// Local storage key for saved filters
-const SAVED_FILTERS_KEY = 'intelligence_saved_filters';
-
-// Get saved filters from localStorage
-function getSavedFilters(): SavedFilter[] {
-  try {
-    const stored = localStorage.getItem(SAVED_FILTERS_KEY);
-    if (stored) {
-      return JSON.parse(stored);
-    }
-  } catch (e) {
-    console.error('Error reading saved filters:', e);
-  }
-  return [];
-}
-
-// Save filter to localStorage (keep last 5)
-function saveFilter(filter: SavedFilter): SavedFilter[] {
-  try {
-    let filters = getSavedFilters();
-    
-    // Check if this exact filter already exists
-    const exists = filters.some(f => f.startTs === filter.startTs && f.endTs === filter.endTs);
-    if (exists) {
-      // Move it to the top by removing and re-adding
-      filters = filters.filter(f => !(f.startTs === filter.startTs && f.endTs === filter.endTs));
-    }
-    
-    // Add new filter at the beginning
-    filters.unshift(filter);
-    
-    // Keep only last 5
-    filters = filters.slice(0, 5);
-    
-    localStorage.setItem(SAVED_FILTERS_KEY, JSON.stringify(filters));
-    return filters;
-  } catch (e) {
-    console.error('Error saving filter:', e);
-    return getSavedFilters();
-  }
-}
-
-// Clear saved filters
-function clearSavedFilters(): void {
-  localStorage.removeItem(SAVED_FILTERS_KEY);
-}
-
-// Parse URL params for initial state
-function getInitialState() {
+// Parse URL params for initial tab only
+function getInitialTab(): TabType {
   const params = new URLSearchParams(window.location.search);
-  
-  // Parse tab
   const tabParam = params.get('tab');
   const validTabs = ['overview', 'safety', 'traffic', 'intelligence', 'predict'];
-  const initialTab = validTabs.includes(tabParam || '') ? (tabParam as TabType) : 'overview';
-  
-  // Parse dates
-  const startParam = params.get('start');
-  const endParam = params.get('end');
-  
-  let startTs = Math.floor((Date.now() - 30 * 24 * 60 * 60 * 1000) / 1000); // Default: 30 days ago
-  let endTs = Math.floor(Date.now() / 1000); // Default: now
-  
-  if (startParam && !isNaN(Number(startParam))) {
-    startTs = Number(startParam);
-  }
-  if (endParam && !isNaN(Number(endParam))) {
-    endTs = Number(endParam);
-  }
-  
-  return { initialTab, startTs, endTs };
+  return validTabs.includes(tabParam || '') ? (tabParam as TabType) : 'overview';
 }
 
 export function IntelligencePage() {
   const [, setSearchParams] = useSearchParams();
-  const { initialTab, startTs: initialStartTs, endTs: initialEndTs } = getInitialState();
+  const initialTab = getInitialTab();
   
   const [activeTab, setActiveTab] = useState<TabType>(initialTab);
-  const [dateRange, setDateRange] = useState({
-    startTs: initialStartTs,
-    endTs: initialEndTs
-  });
-  const [showCustomDate, setShowCustomDate] = useState(false);
-  const [customStartDate, setCustomStartDate] = useState('');
-  const [customEndDate, setCustomEndDate] = useState('');
   const [cacheKey, setCacheKey] = useState(0); // Used to force refresh data
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
-  const [savedFilters, setSavedFilters] = useState<SavedFilter[]>(getSavedFilters());
-  const [showSavedFilters, setShowSavedFilters] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
   
-  // Calculate date range info and warnings
-  const dateRangeInfo = useMemo(() => {
-    const days = (dateRange.endTs - dateRange.startTs) / 86400;
-    return {
-      days: Math.round(days * 10) / 10,
-      isLarge: days > LARGE_QUERY_WARNING_DAYS,
-      exceedsMax: days > MAX_QUERY_DAYS,
-      warning: days > MAX_QUERY_DAYS 
-        ? `Time range exceeds ${MAX_QUERY_DAYS} day limit. Queries may fail.`
-        : days > LARGE_QUERY_WARNING_DAYS
-        ? `Large date range (${Math.round(days)} days) - loading may take longer.`
-        : null
-    };
-  }, [dateRange]);
+  // Fixed date range - always use cached data
+  const dateRange = { startTs: CACHED_START_TS, endTs: CACHED_END_TS };
   
-  // Update URL when tab or date range changes
+  // Update URL when tab changes
   useEffect(() => {
     const newParams = new URLSearchParams();
     newParams.set('tab', activeTab);
-    newParams.set('start', dateRange.startTs.toString());
-    newParams.set('end', dateRange.endTs.toString());
     setSearchParams(newParams, { replace: true });
-  }, [activeTab, dateRange, setSearchParams]);
+  }, [activeTab, setSearchParams]);
   
   // Force refresh handler
   const handleForceRefresh = useCallback(() => {
@@ -151,73 +55,6 @@ export function IntelligencePage() {
     { id: 'intelligence', label: 'Intelligence' },
     { id: 'predict', label: 'Predict' }
   ];
-
-  const handleDateRangeChange = (value: string) => {
-    if (value === 'custom') {
-      setShowCustomDate(true);
-      return;
-    }
-    
-    const days = Number(value);
-    const endTs = Math.floor(Date.now() / 1000);
-    const startTs = Math.floor((Date.now() - days * 24 * 60 * 60 * 1000) / 1000);
-    setDateRange({ startTs, endTs });
-    setShowCustomDate(false);
-    
-    // Save this filter to history
-    const newFilters = saveFilter({ startTs, endTs, savedAt: Date.now() });
-    setSavedFilters(newFilters);
-    
-    handleForceRefresh(); // Refresh data when date changes
-  };
-
-  const applyCustomDateRange = () => {
-    if (customStartDate && customEndDate) {
-      const startTs = Math.floor(new Date(customStartDate).getTime() / 1000);
-      const endTs = Math.floor(new Date(customEndDate + 'T23:59:59').getTime() / 1000);
-      setDateRange({ startTs, endTs });
-      setShowCustomDate(false);
-      
-      // Save this filter to history
-      const newFilters = saveFilter({ startTs, endTs, savedAt: Date.now() });
-      setSavedFilters(newFilters);
-      
-      handleForceRefresh(); // Refresh data when date changes
-    }
-  };
-  
-  const applySavedFilter = (filter: SavedFilter) => {
-    setDateRange({ startTs: filter.startTs, endTs: filter.endTs });
-    setShowSavedFilters(false);
-    handleForceRefresh();
-  };
-  
-  const handleClearSavedFilters = () => {
-    clearSavedFilters();
-    setSavedFilters([]);
-  };
-  
-  // Format date range for display
-  const formatDateRange = (startTs: number, endTs: number) => {
-    const start = new Date(startTs * 1000);
-    const end = new Date(endTs * 1000);
-    return `${start.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} - ${end.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`;
-  };
-  
-  // Calculate which preset matches current range
-  const getSelectedPreset = () => {
-    const now = Math.floor(Date.now() / 1000);
-    const diffDays = Math.round((now - dateRange.startTs) / 86400);
-    if (Math.abs(dateRange.endTs - now) < 3600) { // Within 1 hour of now
-      if (diffDays <= 1) return '1';
-      if (diffDays <= 7) return '7';
-      if (diffDays <= 30) return '30';
-      if (diffDays <= 90) return '90';
-      if (diffDays <= 180) return '180';
-      if (diffDays <= 365) return '365';
-    }
-    return 'custom';
-  };
 
   return (
     <div className="flex h-screen w-full flex-col bg-background-light dark:bg-background-dark text-white overflow-hidden">
@@ -301,174 +138,20 @@ export function IntelligencePage() {
               </span>
             )}
             
-            {/* Current Date Range Display */}
-            <div className="text-sm text-white/70 bg-surface-highlight px-3 py-2 rounded-lg border border-white/10">
-              <span className="text-white/50">Showing: </span>
-              <span className="text-white font-medium">
-                {new Date(dateRange.startTs * 1000).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+            {/* Fixed Date Range Display */}
+            <div className="flex items-center gap-3 bg-emerald-500/10 px-4 py-2 rounded-lg border border-emerald-500/30">
+              <Zap className="h-4 w-4 text-emerald-400" />
+              <span className="text-emerald-300 font-medium text-sm">
+                Nov 1 – Dec 31, 2025
               </span>
-              <span className="text-white/50 mx-1">–</span>
-              <span className="text-white font-medium">
-                {new Date(dateRange.endTs * 1000).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+              <span className="text-emerald-400/60 text-xs">
+                (Pre-computed • Instant Load)
               </span>
             </div>
-            
-            {!showCustomDate ? (
-              <>
-                <select
-                  onChange={(e) => handleDateRangeChange(e.target.value)}
-                  value={getSelectedPreset()}
-                  className="bg-surface-highlight text-white text-sm border border-white/10 rounded-lg px-3 py-2 focus:outline-none focus:border-primary"
-                >
-                  <option value="1">Last 24 Hours</option>
-                  <option value="7">Last 7 Days</option>
-                  <option value="30">Last 30 Days</option>
-                  <option value="90">Last 90 Days</option>
-                  <option value="180">Last 6 Months</option>
-                  <option value="365">Last Year</option>
-                  <option value="custom">Custom Range...</option>
-                </select>
-                <button
-                  onClick={() => setShowCustomDate(true)}
-                  className="flex h-10 items-center justify-center rounded-lg bg-surface-highlight text-white/80 hover:text-white transition-colors border border-white/10 px-3"
-                  title="Custom date range"
-                >
-                  <Calendar className="h-4 w-4" />
-                </button>
-                
-                {/* Saved Filters Button */}
-                <div className="relative">
-                  <button
-                    onClick={() => setShowSavedFilters(!showSavedFilters)}
-                    className={`flex h-10 items-center justify-center gap-2 rounded-lg transition-colors border px-3 ${
-                      showSavedFilters 
-                        ? 'bg-amber-500/20 text-amber-400 border-amber-500/30' 
-                        : 'bg-surface-highlight text-white/80 hover:text-white border-white/10'
-                    }`}
-                    title="Recent date filters"
-                  >
-                    <History className="h-4 w-4" />
-                    {savedFilters.length > 0 && (
-                      <span className="text-xs bg-amber-500/30 text-amber-400 px-1.5 py-0.5 rounded-full">
-                        {savedFilters.length}
-                      </span>
-                    )}
-                  </button>
-                  
-                  {/* Saved Filters Dropdown */}
-                  {showSavedFilters && (
-                    <div className="absolute right-0 top-12 z-50 w-72 bg-surface border border-white/10 rounded-xl shadow-2xl overflow-hidden">
-                      <div className="px-4 py-3 border-b border-white/10 flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <Clock className="h-4 w-4 text-amber-400" />
-                          <span className="text-white font-medium text-sm">Recent Filters</span>
-                        </div>
-                        <button
-                          onClick={() => setShowSavedFilters(false)}
-                          className="text-white/40 hover:text-white"
-                        >
-                          <X className="h-4 w-4" />
-                        </button>
-                      </div>
-                      
-                      {savedFilters.length > 0 ? (
-                        <>
-                          <div className="max-h-64 overflow-y-auto">
-                            {savedFilters.map((filter, idx) => (
-                              <button
-                                key={`${filter.startTs}-${filter.endTs}-${idx}`}
-                                onClick={() => applySavedFilter(filter)}
-                                className="w-full px-4 py-3 text-left hover:bg-white/5 transition-colors border-b border-white/5 last:border-b-0"
-                              >
-                                <div className="text-white text-sm font-medium">
-                                  {formatDateRange(filter.startTs, filter.endTs)}
-                                </div>
-                                <div className="text-white/40 text-xs mt-1">
-                                  Used {new Date(filter.savedAt).toLocaleDateString('en-US', { 
-                                    month: 'short', 
-                                    day: 'numeric',
-                                    hour: '2-digit',
-                                    minute: '2-digit'
-                                  })}
-                                </div>
-                              </button>
-                            ))}
-                          </div>
-                          <div className="px-4 py-2 border-t border-white/10 bg-surface-highlight">
-                            <button
-                              onClick={handleClearSavedFilters}
-                              className="text-red-400 hover:text-red-300 text-xs font-medium"
-                            >
-                              Clear History
-                            </button>
-                          </div>
-                        </>
-                      ) : (
-                        <div className="px-4 py-6 text-center">
-                          <History className="h-8 w-8 text-white/20 mx-auto mb-2" />
-                          <p className="text-white/40 text-sm">No recent filters</p>
-                          <p className="text-white/30 text-xs mt-1">Your date selections will appear here</p>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              </>
-            ) : (
-              <div className="flex gap-2 items-center bg-surface-highlight border border-white/10 rounded-lg p-2">
-                <input
-                  type="date"
-                  value={customStartDate}
-                  onChange={(e) => setCustomStartDate(e.target.value)}
-                  className="bg-background-dark text-white text-sm border border-white/10 rounded px-2 py-1 focus:outline-none focus:border-primary"
-                  placeholder="Start"
-                />
-                <span className="text-white/60">to</span>
-                <input
-                  type="date"
-                  value={customEndDate}
-                  onChange={(e) => setCustomEndDate(e.target.value)}
-                  className="bg-background-dark text-white text-sm border border-white/10 rounded px-2 py-1 focus:outline-none focus:border-primary"
-                  placeholder="End"
-                />
-                <button
-                  onClick={applyCustomDateRange}
-                  className="bg-primary text-white text-sm px-3 py-1 rounded hover:bg-primary/80 transition-colors font-medium"
-                >
-                  Apply
-                </button>
-                <button
-                  onClick={() => setShowCustomDate(false)}
-                  className="text-white/60 hover:text-white text-sm px-2"
-                >
-                  Cancel
-                </button>
-              </div>
-            )}
           </div>
         </div>
       </div>
 
-      {/* Time Range Warning */}
-      {dateRangeInfo.warning && (
-        <div className={`px-6 py-3 flex items-center gap-3 ${
-          dateRangeInfo.exceedsMax 
-            ? 'bg-red-500/20 border-b border-red-500/30' 
-            : 'bg-amber-500/20 border-b border-amber-500/30'
-        }`}>
-          <AlertTriangle className={`h-5 w-5 shrink-0 ${
-            dateRangeInfo.exceedsMax ? 'text-red-400' : 'text-amber-400'
-          }`} />
-          <span className={`text-sm ${
-            dateRangeInfo.exceedsMax ? 'text-red-300' : 'text-amber-300'
-          }`}>
-            {dateRangeInfo.warning}
-          </span>
-          <span className="text-xs text-white/50 ml-auto">
-            Current range: {dateRangeInfo.days} days (max: {MAX_QUERY_DAYS})
-          </span>
-        </div>
-      )}
 
       {/* Tab Content */}
       <main className="flex-1 overflow-auto p-6">

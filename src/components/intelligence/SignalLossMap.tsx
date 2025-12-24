@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useMemo } from 'react';
 import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import type { SignalLossLocation } from '../../types';
@@ -6,15 +6,117 @@ import type { SignalLossLocation } from '../../types';
 interface SignalLossMapProps {
   locations: SignalLossLocation[];
   height?: number;
+  showPolygonClusters?: boolean; // Enable polygon visualization for clusters
+  clusterThresholdNm?: number; // Distance threshold for clustering (in nautical miles)
 }
 
-export function SignalLossMap({ locations, height = 400 }: SignalLossMapProps) {
+// Haversine distance in nautical miles
+function haversineNm(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const R = 3440.065; // Earth radius in nm
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+    Math.sin(dLon/2) * Math.sin(dLon/2);
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+}
+
+// Simple convex hull using gift wrapping algorithm
+function computeConvexHull(points: [number, number][]): [number, number][] {
+  if (points.length < 3) return points;
+  
+  // Find leftmost point
+  let start = 0;
+  for (let i = 1; i < points.length; i++) {
+    if (points[i][0] < points[start][0]) start = i;
+  }
+  
+  const hull: [number, number][] = [];
+  let current = start;
+  
+  do {
+    hull.push(points[current]);
+    let next = 0;
+    for (let i = 1; i < points.length; i++) {
+      if (next === current || crossProduct(points[current], points[next], points[i]) < 0) {
+        next = i;
+      }
+    }
+    current = next;
+  } while (current !== start && hull.length < points.length);
+  
+  return hull;
+}
+
+function crossProduct(o: [number, number], a: [number, number], b: [number, number]): number {
+  return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+}
+
+// Cluster points that are within threshold distance (in nm)
+function clusterPoints(locations: SignalLossLocation[], thresholdNm: number = 2): {
+  clusters: { points: SignalLossLocation[]; centroid: [number, number]; totalCount: number }[];
+  singles: SignalLossLocation[];
+} {
+  const used = new Set<number>();
+  const clusters: { points: SignalLossLocation[]; centroid: [number, number]; totalCount: number }[] = [];
+  const singles: SignalLossLocation[] = [];
+  
+  for (let i = 0; i < locations.length; i++) {
+    if (used.has(i)) continue;
+    
+    const cluster: SignalLossLocation[] = [locations[i]];
+    used.add(i);
+    
+    for (let j = i + 1; j < locations.length; j++) {
+      if (used.has(j)) continue;
+      
+      // Check if any point in cluster is within threshold
+      for (const p of cluster) {
+        const dist = haversineNm(p.lat, p.lon, locations[j].lat, locations[j].lon);
+        if (dist <= thresholdNm) {
+          cluster.push(locations[j]);
+          used.add(j);
+          break;
+        }
+      }
+    }
+    
+    if (cluster.length >= 3) {
+      // Calculate centroid and total count
+      const sumLat = cluster.reduce((s, p) => s + p.lat, 0);
+      const sumLon = cluster.reduce((s, p) => s + p.lon, 0);
+      const totalCount = cluster.reduce((s, p) => s + p.count, 0);
+      clusters.push({
+        points: cluster,
+        centroid: [sumLon / cluster.length, sumLat / cluster.length],
+        totalCount
+      });
+    } else {
+      singles.push(...cluster);
+    }
+  }
+  
+  return { clusters, singles };
+}
+
+export function SignalLossMap({ 
+  locations, 
+  height = 400, 
+  showPolygonClusters = true,
+  clusterThresholdNm = 50 // Default 50nm for GPS jamming regional clusters
+}: SignalLossMapProps) {
   const mapContainer = useRef<HTMLDivElement>(null);
   const map = useRef<maplibregl.Map | null>(null);
   const markersRef = useRef<maplibregl.Marker[]>([]);
   const [mapLoaded, setMapLoaded] = useState(false);
   
   const apiKey = 'r7kaQpfNDVZdaVp23F1r'; // Same key as main app
+  
+  // Compute clusters from locations using the threshold prop
+  const { clusters, singles } = useMemo(() => {
+    if (!showPolygonClusters) return { clusters: [], singles: locations };
+    return clusterPoints(locations, clusterThresholdNm);
+  }, [locations, showPolygonClusters, clusterThresholdNm]);
 
   // Initialize map
   useEffect(() => {
@@ -46,42 +148,170 @@ export function SignalLossMap({ locations, height = 400 }: SignalLossMapProps) {
     };
   }, []);
 
-  // Update markers when locations change
+  // Update markers and polygons when locations change
   useEffect(() => {
     if (!map.current || !mapLoaded) return;
+    
+    const currentMap = map.current;
 
     // Remove existing markers
     markersRef.current.forEach(m => m.remove());
     markersRef.current = [];
+    
+    // Remove existing polygon layers
+    try {
+      if (currentMap.getLayer('cluster-polygons-fill')) currentMap.removeLayer('cluster-polygons-fill');
+      if (currentMap.getLayer('cluster-polygons-line')) currentMap.removeLayer('cluster-polygons-line');
+      if (currentMap.getSource('cluster-polygons')) currentMap.removeSource('cluster-polygons');
+    } catch (e) {
+      // Ignore cleanup errors
+    }
 
     if (locations.length === 0) return;
+    
+    // Collect all bounds points
+    const allBoundsPoints: [number, number][] = [];
 
-    // Filter locations to only include those within the map's maxBounds
-    // maxBounds is [[-30, -10], [100, 60]] - SW to NE corners
-    // This prevents markers from being placed at the edge of the container
-    const validLocations = locations.filter(loc => 
+    // Add polygon clusters if enabled
+    if (showPolygonClusters && clusters.length > 0) {
+      const polygonFeatures: GeoJSON.Feature[] = [];
+      
+      clusters.forEach((cluster, idx) => {
+        // Get hull points for polygon
+        const hullPoints: [number, number][] = cluster.points.map(p => [p.lon, p.lat]);
+        const hull = computeConvexHull(hullPoints);
+        
+        if (hull.length >= 3) {
+          // Close the polygon
+          const coordinates = [...hull, hull[0]];
+          
+          polygonFeatures.push({
+            type: 'Feature',
+            properties: {
+              id: idx,
+              totalCount: cluster.totalCount,
+              pointCount: cluster.points.length
+            },
+            geometry: {
+              type: 'Polygon',
+              coordinates: [coordinates]
+            }
+          });
+          
+          // Add centroid marker with count
+          const el = document.createElement('div');
+          el.style.cssText = `
+            min-width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, rgba(239, 68, 68, 0.9), rgba(185, 28, 28, 0.9));
+            border: 3px solid rgba(255, 255, 255, 0.8);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
+            font-weight: bold;
+            color: white;
+            text-shadow: 0 1px 2px rgba(0,0,0,0.5);
+            box-shadow: 0 4px 12px rgba(239, 68, 68, 0.5);
+            cursor: pointer;
+          `;
+          el.textContent = cluster.totalCount.toString();
+          
+          const popup = new maplibregl.Popup({
+            offset: 25,
+            closeButton: false
+          }).setHTML(`
+            <div style="padding: 10px; background: #1f2937; border-radius: 8px; color: white; min-width: 200px;">
+              <div style="font-weight: bold; color: #ef4444; margin-bottom: 8px; font-size: 14px;">
+                🔺 GPS Jamming Cluster
+              </div>
+              <div style="display: grid; gap: 6px; font-size: 12px;">
+                <div style="display: flex; justify-content: space-between;">
+                  <span style="color: #9ca3af;">Total Events:</span>
+                  <span style="color: #ef4444; font-weight: bold;">${cluster.totalCount}</span>
+                </div>
+                <div style="display: flex; justify-content: space-between;">
+                  <span style="color: #9ca3af;">Hotspots:</span>
+                  <span>${cluster.points.length} locations</span>
+                </div>
+                <div style="display: flex; justify-content: space-between;">
+                  <span style="color: #9ca3af;">Area Center:</span>
+                  <span>${cluster.centroid[1].toFixed(2)}°N, ${cluster.centroid[0].toFixed(2)}°E</span>
+                </div>
+              </div>
+              <div style="margin-top: 10px; padding-top: 8px; border-top: 1px solid #374151; font-size: 11px; color: #fca5a5;">
+                ⚠️ High concentration of signal anomalies
+              </div>
+            </div>
+          `);
+          
+          const marker = new maplibregl.Marker({ element: el, anchor: 'center' })
+            .setLngLat(cluster.centroid)
+            .setPopup(popup)
+            .addTo(currentMap);
+          
+          markersRef.current.push(marker);
+          allBoundsPoints.push(cluster.centroid);
+        }
+      });
+      
+      // Add polygon layer
+      if (polygonFeatures.length > 0) {
+        currentMap.addSource('cluster-polygons', {
+          type: 'geojson',
+          data: {
+            type: 'FeatureCollection',
+            features: polygonFeatures
+          }
+        });
+        
+        currentMap.addLayer({
+          id: 'cluster-polygons-fill',
+          type: 'fill',
+          source: 'cluster-polygons',
+          paint: {
+            'fill-color': '#ef4444',
+            'fill-opacity': 0.25
+          }
+        });
+        
+        currentMap.addLayer({
+          id: 'cluster-polygons-line',
+          type: 'line',
+          source: 'cluster-polygons',
+          paint: {
+            'line-color': '#ef4444',
+            'line-width': 2,
+            'line-opacity': 0.8,
+            'line-dasharray': [2, 2]
+          }
+        });
+      }
+    }
+
+    // Filter singles to only include those within the map's maxBounds
+    const validSingles = singles.filter(loc => 
       loc.lat >= -10 && loc.lat <= 60 && 
       loc.lon >= -30 && loc.lon <= 100
     );
     
-    // Sort by count (most events first) and limit to prevent overcrowding
-    const displayLocations = validLocations
+    // Sort by count (most events first) and limit
+    const displaySingles = validSingles
       .sort((a, b) => b.count - a.count)
       .slice(0, 30);
 
     // Calculate max count for intensity scaling
-    const maxCount = Math.max(...displayLocations.map(l => l.count), 1);
+    const maxCount = Math.max(...displaySingles.map(l => l.count), 1);
 
-    // Add heatmap-style circles for each signal loss location
-    displayLocations.forEach(loc => {
+    // Add markers for single points
+    displaySingles.forEach(loc => {
       const intensity = loc.count / maxCount;
-      const size = 20 + intensity * 40; // 20-60px based on intensity
+      const size = 20 + intensity * 40;
       
-      // Create wrapper element for the marker (MapLibre will control this element's transform)
       const wrapper = document.createElement('div');
       wrapper.className = 'signal-loss-marker-wrapper';
       
-      // Create the actual visual element inside (this can have animation without affecting position)
       const el = document.createElement('div');
       el.className = 'signal-loss-marker';
       el.style.cssText = `
@@ -106,12 +336,10 @@ export function SignalLossMap({ locations, height = 400 }: SignalLossMapProps) {
       
       wrapper.appendChild(el);
       
-      // Show count for significant clusters
       if (loc.count >= 3) {
         el.textContent = loc.count.toString();
       }
 
-      // Create popup with details
       const popup = new maplibregl.Popup({
         offset: 25,
         closeButton: false,
@@ -143,28 +371,28 @@ export function SignalLossMap({ locations, height = 400 }: SignalLossMapProps) {
 
       const marker = new maplibregl.Marker({ 
         element: wrapper,
-        anchor: 'center'  // Ensure marker is centered on the coordinate
+        anchor: 'center'
       })
         .setLngLat([loc.lon, loc.lat])
         .setPopup(popup)
-        .addTo(map.current!);
+        .addTo(currentMap);
 
       markersRef.current.push(marker);
+      allBoundsPoints.push([loc.lon, loc.lat]);
     });
 
-    // Fit bounds to show markers - focus on Middle East region
-    if (displayLocations.length > 0) {
+    // Fit bounds to show all markers and polygons
+    if (allBoundsPoints.length > 0) {
       const bounds = new maplibregl.LngLatBounds();
-      displayLocations.forEach(loc => bounds.extend([loc.lon, loc.lat]));
+      allBoundsPoints.forEach(pt => bounds.extend(pt));
       
-      // Add some padding around the bounds
-      map.current.fitBounds(bounds, {
+      currentMap.fitBounds(bounds, {
         padding: { top: 60, bottom: 60, left: 60, right: 60 },
         maxZoom: 6,
         minZoom: 3
       });
     }
-  }, [locations, mapLoaded]);
+  }, [locations, clusters, singles, mapLoaded, showPolygonClusters]);
 
   // Add airport markers for reference
   useEffect(() => {
@@ -216,6 +444,12 @@ export function SignalLossMap({ locations, height = 400 }: SignalLossMapProps) {
       
       {/* Legend */}
       <div className="absolute bottom-3 left-3 bg-black/70 backdrop-blur-sm rounded-lg p-3 text-xs">
+        {showPolygonClusters && clusters.length > 0 && (
+          <div className="flex items-center gap-2 mb-2">
+            <div className="w-4 h-4 bg-red-500/30 border-2 border-red-500 border-dashed" style={{ transform: 'rotate(45deg)' }} />
+            <span className="text-white">Jamming Cluster</span>
+          </div>
+        )}
         <div className="flex items-center gap-2 mb-2">
           <div className="w-4 h-4 rounded-full bg-red-500/60 border border-red-500" />
           <span className="text-white">Signal Loss Zone</span>

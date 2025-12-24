@@ -1,115 +1,40 @@
 import { useState, useEffect } from 'react';
-import { AlertTriangle, Plane, TrendingUp, AlertCircle, Radar, Shield, Target, Activity, Database } from 'lucide-react';
+import { AlertTriangle, Plane, TrendingUp, AlertCircle, Shield, Activity, RotateCcw, MapPin } from 'lucide-react';
 import { StatCard } from './StatCard';
 import { ChartCard } from './ChartCard';
-import { 
-  fetchOverviewBatch,
-  // Tagged API functions (optimized for feedback_tagged.db)
-  fetchTaggedStatsOverview,
-  fetchTaggedFlightsPerDay,
-  fetchTaggedMilitaryStats,
-  type TaggedMilitaryStats,
-  type MonthlyFlightStats
-} from '../../api';
-import type { OverviewStats, FlightPerDay, GPSJammingPoint, MilitaryPattern, AirspaceRisk } from '../../types';
-import { BarChart, Bar } from 'recharts';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { fetchOverviewBatch, type MonthlyFlightStats } from '../../api';
+import type { OverviewStats, FlightPerDay, AirspaceRisk } from '../../types';
+import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
 interface OverviewTabProps {
   startTs: number;
   endTs: number;
-  cacheKey?: number; // Force refresh when this changes
-  useTaggedDb?: boolean; // Use feedback_tagged.db for optimized queries
+  cacheKey?: number;
 }
 
-// Extended stats type that includes tagged-specific fields
-interface ExtendedStats extends OverviewStats {
-  military_flights?: number;
-  avg_severity?: number;
-}
-
-// Extended flights per day with anomaly count
-interface ExtendedFlightPerDay extends FlightPerDay {
-  anomaly_count?: number;
-}
-
-export function OverviewTab({ startTs, endTs, cacheKey = 0, useTaggedDb = true }: OverviewTabProps) {
-  const [stats, setStats] = useState<ExtendedStats | null>(null);
-  const [flightsPerDay, setFlightsPerDay] = useState<ExtendedFlightPerDay[]>([]);
-  const [gpsJamming, setGpsJamming] = useState<GPSJammingPoint[]>([]);
-  const [militaryPatterns, setMilitaryPatterns] = useState<MilitaryPattern[]>([]);
-  const [militaryStats, setMilitaryStats] = useState<TaggedMilitaryStats | null>(null);
+export function OverviewTab({ startTs, endTs, cacheKey = 0 }: OverviewTabProps) {
+  const [stats, setStats] = useState<OverviewStats | null>(null);
+  const [flightsPerDay, setFlightsPerDay] = useState<FlightPerDay[]>([]);
   const [airspaceRisk, setAirspaceRisk] = useState<AirspaceRisk | null>(null);
   const [monthlyFlights, setMonthlyFlights] = useState<MonthlyFlightStats[]>([]);
   const [loading, setLoading] = useState(true);
-  const [dataSource, setDataSource] = useState<'tagged' | 'research'>('research');
 
   useEffect(() => {
     loadData();
-  }, [startTs, endTs, cacheKey, useTaggedDb]);
+  }, [startTs, endTs, cacheKey]);
 
   const loadData = async () => {
     setLoading(true);
     try {
-      if (useTaggedDb) {
-        // Try to load from feedback_tagged.db first (optimized queries)
-        const [taggedOverview, taggedFlights, taggedMilitary] = await Promise.all([
-          fetchTaggedStatsOverview(startTs, endTs).catch(() => null),
-          fetchTaggedFlightsPerDay(startTs, endTs).catch(() => []),
-          fetchTaggedMilitaryStats(startTs, endTs).catch(() => null)
-        ]);
-
-        if (taggedOverview && taggedOverview.total_flights > 0) {
-          // Use tagged data - fetch batch for remaining data
-          // NOTE: Excluding gps_jamming - it's slow and shown in Intelligence tab
-          const batchData = await fetchOverviewBatch(startTs, endTs, 
-            ['airspace_risk', 'monthly_flights']
-          ).catch(() => ({ airspace_risk: null, monthly_flights: [] }));
-          
-          setStats(taggedOverview);
-          setFlightsPerDay(taggedFlights);
-          setMilitaryStats(taggedMilitary);
-          setGpsJamming([]); // Don't load here - too slow
-          setAirspaceRisk(batchData.airspace_risk || null);
-          setMonthlyFlights(batchData.monthly_flights || []);
-          setDataSource('tagged');
-          
-          // Convert military stats to patterns format for compatibility
-          if (taggedMilitary) {
-            const patterns: MilitaryPattern[] = taggedMilitary.flights.map(f => ({
-              flight_id: f.flight_id,
-              callsign: f.callsign,
-              country: f.country,
-              aircraft_type: f.type,
-              pattern_type: 'transit' as const,
-              type: 'transit',
-              duration_minutes: 0,
-              avg_altitude_ft: 0,
-              lat: 0,
-              lon: 0,
-              locations: [],
-              frequency: 0
-            }));
-            setMilitaryPatterns(patterns);
-          }
-          setLoading(false);
-          return;
-        }
-      }
-      
-      // Use batch API for research.db (single request instead of 6)
-      // NOTE: Excluding gps_jamming and military from overview - they're slow and shown in Intelligence tab
+      // Use batch API with pre-computed cache
       const batchData = await fetchOverviewBatch(startTs, endTs, [
         'stats', 'flights_per_day', 'airspace_risk', 'monthly_flights'
       ]);
       
       setStats(batchData.stats || null);
       setFlightsPerDay(batchData.flights_per_day || []);
-      setGpsJamming([]); // Don't load here - too slow, shown in Intelligence tab
-      setMilitaryPatterns([]); // Don't load here - shown in Intelligence tab
       setAirspaceRisk(batchData.airspace_risk || null);
       setMonthlyFlights(batchData.monthly_flights || []);
-      setDataSource('research');
     } catch (error) {
       console.error('Failed to load overview data:', error);
     } finally {
@@ -135,21 +60,6 @@ export function OverviewTab({ startTs, endTs, cacheKey = 0, useTaggedDb = true }
 
   return (
     <div className="space-y-6">
-      {/* Data Source Indicator */}
-      <div className="flex items-center gap-2 text-xs text-white/50">
-        <Database className="w-3 h-3" />
-        <span>
-          Data source: <span className={dataSource === 'tagged' ? 'text-green-400' : 'text-blue-400'}>
-            {dataSource === 'tagged' ? 'feedback_tagged.db (optimized)' : 'research.db'}
-          </span>
-        </span>
-        {stats.avg_severity !== undefined && (
-          <span className="ml-4">
-            Avg Severity: <span className="text-amber-400">{stats.avg_severity.toFixed(2)}</span>
-          </span>
-        )}
-      </div>
-
       {/* Key Metrics */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard
@@ -272,16 +182,36 @@ export function OverviewTab({ startTs, endTs, cacheKey = 0, useTaggedDb = true }
       )}
 
       {/* Additional Stats Row */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-4">
         <StatCard
           title="Emergency Codes"
           value={stats.emergency_codes.toLocaleString()}
           subtitle="7700/7600/7500"
+          icon={<AlertCircle className="w-5 h-5" />}
         />
         <StatCard
           title="Near-Miss Events"
           value={stats.near_miss.toLocaleString()}
           subtitle="Proximity violations"
+          icon={<AlertTriangle className="w-5 h-5" />}
+        />
+        <StatCard
+          title="Return-To-Field"
+          value={(stats.return_to_field || 0).toLocaleString()}
+          subtitle="Returned to origin"
+          icon={<RotateCcw className="w-5 h-5" />}
+        />
+        <StatCard
+          title="Unplanned Landing"
+          value={(stats.unplanned_landing || 0).toLocaleString()}
+          subtitle="Diverted flights"
+          icon={<MapPin className="w-5 h-5" />}
+        />
+        <StatCard
+          title="Military Flights"
+          value={(stats.military_flights || 0).toLocaleString()}
+          subtitle="Military/Government"
+          icon={<Plane className="w-5 h-5" />}
         />
         <StatCard
           title="Detection Rate"
@@ -290,52 +220,13 @@ export function OverviewTab({ startTs, endTs, cacheKey = 0, useTaggedDb = true }
         />
       </div>
 
-      {/* Level 3: Intelligence Summary */}
+      {/* Intelligence Summary */}
       <div className="mt-8">
         <h3 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
           <Shield className="w-5 h-5 text-purple-400" />
           Intelligence Summary
         </h3>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-          <div className="bg-gradient-to-br from-purple-900/40 to-purple-800/20 rounded-xl p-4 border border-purple-500/20">
-            <div className="flex items-center gap-3">
-              <div className="p-2 rounded-lg bg-purple-500/20">
-                <Radar className="w-5 h-5 text-purple-400" />
-              </div>
-              <div>
-                <div className="text-2xl font-bold text-white">{gpsJamming.length}</div>
-                <div className="text-xs text-purple-300">GPS Jamming Zones</div>
-              </div>
-            </div>
-            {gpsJamming.length > 0 && (
-              <div className="mt-3 text-xs text-purple-200/70">
-                {gpsJamming.reduce((sum, j) => sum + j.affected_flights, 0)} affected flights
-              </div>
-            )}
-          </div>
-
-          <div className="bg-gradient-to-br from-red-900/40 to-red-800/20 rounded-xl p-4 border border-red-500/20">
-            <div className="flex items-center gap-3">
-              <div className="p-2 rounded-lg bg-red-500/20">
-                <Target className="w-5 h-5 text-red-400" />
-              </div>
-              <div>
-                <div className="text-2xl font-bold text-white">
-                  {militaryStats?.total_military ?? stats.military_flights ?? militaryPatterns.length}
-                </div>
-                <div className="text-xs text-red-300">Military Aircraft</div>
-              </div>
-            </div>
-            {(militaryStats || militaryPatterns.length > 0) && (
-              <div className="mt-3 text-xs text-red-200/70">
-                {militaryStats 
-                  ? Object.keys(militaryStats.by_country).slice(0, 3).join(', ')
-                  : [...new Set(militaryPatterns.map(m => m.country))].slice(0, 3).join(', ')
-                }
-              </div>
-            )}
-          </div>
-
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="bg-gradient-to-br from-amber-900/40 to-amber-800/20 rounded-xl p-4 border border-amber-500/20">
             <div className="flex items-center gap-3">
               <div className="p-2 rounded-lg bg-amber-500/20">
@@ -381,61 +272,18 @@ export function OverviewTab({ startTs, endTs, cacheKey = 0, useTaggedDb = true }
       </div>
 
       {/* Quick Insights */}
-      {(gpsJamming.length > 0 || militaryPatterns.length > 0 || (airspaceRisk && airspaceRisk.risk_level !== 'low')) && (
+      {airspaceRisk && airspaceRisk.risk_level !== 'low' && (
         <div className="mt-6 bg-surface-highlight rounded-xl p-4 border border-white/10">
           <h4 className="text-sm font-semibold text-white/80 mb-3">Quick Insights</h4>
           <div className="space-y-2">
-            {gpsJamming.length > 0 && (
-              <div className="flex items-center gap-2 text-sm">
-                <div className="w-2 h-2 rounded-full bg-purple-400"></div>
-                <span className="text-white/70">
-                  <span className="text-purple-400 font-medium">{gpsJamming.length} GPS jamming zones</span> detected - 
-                  highest intensity at {gpsJamming[0]?.lat.toFixed(2)}°N, {gpsJamming[0]?.lon.toFixed(2)}°E
-                </span>
-              </div>
-            )}
-            {(militaryStats?.total_military || militaryPatterns.length > 0) && (
-              <div className="flex items-center gap-2 text-sm">
-                <div className="w-2 h-2 rounded-full bg-red-400"></div>
-                <span className="text-white/70">
-                  <span className="text-red-400 font-medium">
-                    {militaryStats?.total_military ?? militaryPatterns.length} military aircraft
-                  </span> tracked
-                  {(() => {
-                    if (militaryStats) {
-                      const countries = Object.keys(militaryStats.by_country).filter(Boolean);
-                      if (countries.length > 0) {
-                        return ` from ${countries.slice(0, 2).join(', ')}`;
-                      }
-                      const types = Object.keys(militaryStats.by_type).filter(Boolean);
-                      if (types.length > 0) {
-                        return ` - ${types.slice(0, 2).join(', ')}`;
-                      }
-                      return '';
-                    }
-                    const orbitCount = militaryPatterns.filter(m => m.pattern_type === 'orbit').length;
-                    if (orbitCount > 0) {
-                      return ` - ${orbitCount} in orbit patterns`;
-                    }
-                    const countries = [...new Set(militaryPatterns.map(m => m.country).filter(Boolean))];
-                    if (countries.length > 0) {
-                      return ` from ${countries.slice(0, 2).join(', ')}`;
-                    }
-                    return '';
-                  })()}
-                </span>
-              </div>
-            )}
-            {airspaceRisk && airspaceRisk.risk_level !== 'low' && (
-              <div className="flex items-center gap-2 text-sm">
-                <div className={`w-2 h-2 rounded-full ${airspaceRisk.risk_level === 'high' ? 'bg-red-400' : 'bg-amber-400'}`}></div>
-                <span className="text-white/70">
-                  Airspace risk is <span className={airspaceRisk.risk_level === 'high' ? 'text-red-400' : 'text-amber-400'}>
-                    {airspaceRisk.risk_level}
-                  </span> - {airspaceRisk.factors?.slice(0, 2).map(f => f.name).join(', ') || 'multiple factors'}
-                </span>
-              </div>
-            )}
+            <div className="flex items-center gap-2 text-sm">
+              <div className={`w-2 h-2 rounded-full ${airspaceRisk.risk_level === 'high' ? 'bg-red-400' : 'bg-amber-400'}`}></div>
+              <span className="text-white/70">
+                Airspace risk is <span className={airspaceRisk.risk_level === 'high' ? 'text-red-400' : 'text-amber-400'}>
+                  {airspaceRisk.risk_level}
+                </span> - {airspaceRisk.factors?.slice(0, 2).map(f => f.name).join(', ') || 'multiple factors'}
+              </span>
+            </div>
           </div>
         </div>
       )}

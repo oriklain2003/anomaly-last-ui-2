@@ -84,6 +84,10 @@ export interface OverviewStats {
   go_arounds: number;
   emergency_codes: number;
   near_miss: number;
+  holding_patterns?: number;
+  military_flights?: number;
+  return_to_field?: number;
+  unplanned_landing?: number;
 }
 
 export interface EmergencyCodeStat {

@@ -799,7 +799,11 @@ export function TrafficTab({ startTs, endTs, cacheKey = 0 }: TrafficTabProps) {
           <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
             {/* Map - takes 2 columns on xl screens */}
             <div className="xl:col-span-2">
-              <SignalLossMap locations={signalLoss} height={450} />
+              <SignalLossMap 
+                locations={signalLoss} 
+                height={450}
+                clusterThresholdNm={10} // 10nm for operational signal loss clustering
+              />
             </div>
             
             {/* Stats and Hotspots Panel */}

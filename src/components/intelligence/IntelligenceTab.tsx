@@ -988,7 +988,9 @@ export function IntelligenceTab({ startTs, endTs, cacheKey = 0 }: IntelligenceTa
                     intensity: j.intensity,
                     affected_flights: j.affected_flights
                   }))} 
-                  height={400} 
+                  height={400}
+                  showPolygonClusters={true}
+                  clusterThresholdNm={50} // 50nm threshold for regional GPS jamming clusters
                 />
               ) : (
                 <div className="h-[400px] flex items-center justify-center bg-surface-highlight rounded-lg border border-white/10">

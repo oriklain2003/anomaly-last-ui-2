@@ -652,6 +652,30 @@ export interface EmergencyAftermath {
     had_go_around: boolean;
 }
 
+export interface EmergencyClusters {
+    multi_incident_days: Array<{
+        date: string;
+        count: number;
+        events: Array<{
+            callsign: string;
+            code: string;
+            time: string;
+        }>;
+        cluster_detected: boolean;
+    }>;
+    geographic_clusters: Array<{
+        area_name: string;
+        lat: number;
+        lon: number;
+        count: number;
+        dates: string[];
+        unique_days: number;
+    }>;
+    total_cluster_days: number;
+    total_multi_incident_days: number;
+    insights: string[];
+}
+
 export const fetchEmergencyAftermath = async (startTs: number, endTs: number): Promise<EmergencyAftermath[]> => {
     const response = await fetch(`${API_BASE}/stats/safety/emergency-aftermath?start_ts=${startTs}&end_ts=${endTs}`);
     if (!response.ok) throw new Error('Failed to fetch emergency aftermath');
@@ -721,7 +745,10 @@ export interface TaggedOverviewStats {
     go_arounds: number;
     emergency_codes: number;
     near_miss: number;
+    holding_patterns: number;
     military_flights: number;
+    return_to_field: number;
+    unplanned_landing: number;
     avg_severity: number;
 }
 
@@ -893,6 +920,7 @@ export interface SafetyBatchResponse {
     emergency_aftermath?: EmergencyAftermath[];
     top_airline_emergencies?: TopAirlineEmergency[];
     near_miss_by_country?: NearMissByCountry;
+    emergency_clusters?: EmergencyClusters;
 }
 
 export interface IntelligenceBatchResponse {
@@ -2276,5 +2304,108 @@ export const importFlightToFeedback = async (
         throw new Error(errorData.detail || 'Failed to import flight');
     }
     
+    return response.json();
+};
+
+
+// ============================================================================
+// NEW DASHBOARD DEMANDS TYPES AND FUNCTIONS
+// ============================================================================
+
+// Signal Loss Anomaly Detection
+export interface SignalLossAnomaly {
+    lat: number;
+    lon: number;
+    current_losses: number;
+    baseline_losses: number;
+    affected_flights: number;
+    anomaly_score: number;
+}
+
+export interface SignalLossAnomalyResponse {
+    anomalous_zones: SignalLossAnomaly[];
+    total_anomalies: number;
+    insights: string[];
+}
+
+export const fetchSignalLossAnomalies = async (
+    startTs: number, 
+    endTs: number, 
+    lookbackDays: number = 30
+): Promise<SignalLossAnomalyResponse> => {
+    const response = await fetch(
+        `${API_BASE}/stats/signal-loss/anomalies?start_ts=${startTs}&end_ts=${endTs}&lookback_days=${lookbackDays}`
+    );
+    if (!response.ok) throw new Error('Failed to fetch signal loss anomalies');
+    return response.json();
+};
+
+// GPS Jamming Temporal Analysis
+export interface GPSJammingTemporal {
+    by_hour: { hour: number; count: number }[];
+    by_day_of_week: { day: number; day_name: string; count: number }[];
+    peak_hours: number[];
+    peak_days: string[];
+    total_events: number;
+}
+
+export const fetchGPSJammingTemporal = async (startTs: number, endTs: number): Promise<GPSJammingTemporal> => {
+    const response = await fetch(`${API_BASE}/stats/gps-jamming/temporal?start_ts=${startTs}&end_ts=${endTs}`);
+    if (!response.ok) throw new Error('Failed to fetch GPS jamming temporal data');
+    return response.json();
+};
+
+// Go-arounds Hourly Distribution
+export interface GoAroundHourly {
+    hour: number;
+    count: number;
+    airports: string[];
+}
+
+export const fetchGoAroundsHourly = async (startTs: number, endTs: number): Promise<GoAroundHourly[]> => {
+    const response = await fetch(`${API_BASE}/stats/go-arounds/hourly?start_ts=${startTs}&end_ts=${endTs}`);
+    if (!response.ok) throw new Error('Failed to fetch go-arounds hourly data');
+    return response.json();
+};
+
+// Diversions Seasonal Analysis
+export interface DiversionsSeasonal {
+    by_season: { season: string; count: number }[];
+    by_quarter: { quarter: string; count: number }[];
+    by_month: { month: number; month_name: string; count: number }[];
+    peak_season: string;
+    total_diversions: number;
+    insights: string[];
+}
+
+export const fetchDiversionsSeasonal = async (startTs: number, endTs: number): Promise<DiversionsSeasonal> => {
+    const response = await fetch(`${API_BASE}/stats/diversions/seasonal?start_ts=${startTs}&end_ts=${endTs}`);
+    if (!response.ok) throw new Error('Failed to fetch diversions seasonal data');
+    return response.json();
+};
+
+// Daily Incident Clusters
+export interface HighIncidentDay {
+    date: string;
+    total_incidents: number;
+    emergency_count: number;
+    near_miss_count: number;
+    go_around_count: number;
+    diversion_count: number;
+    geographic_spread_deg: number;
+    geographically_clustered: boolean;
+}
+
+export interface DailyIncidentClusters {
+    high_incident_days: HighIncidentDay[];
+    average_daily_incidents: number;
+    max_incidents_day: { date: string; count: number };
+    total_days_analyzed: number;
+    insights: string[];
+}
+
+export const fetchDailyIncidentClusters = async (startTs: number, endTs: number): Promise<DailyIncidentClusters> => {
+    const response = await fetch(`${API_BASE}/stats/incidents/daily-clusters?start_ts=${startTs}&end_ts=${endTs}`);
+    if (!response.ok) throw new Error('Failed to fetch daily incident clusters');
     return response.json();
 };

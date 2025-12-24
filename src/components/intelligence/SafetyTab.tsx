@@ -1,12 +1,12 @@
 import { useState, useEffect, useRef } from 'react';
-import { AlertTriangle, AlertOctagon, Activity, Calendar, Clock, MapPin, TrendingUp, Plane, Cloud, CloudRain } from 'lucide-react';
+import { AlertTriangle, AlertOctagon, Activity, Calendar, Clock, MapPin, TrendingUp, Plane, Cloud, CloudRain, DollarSign } from 'lucide-react';
 import { StatCard } from './StatCard';
 import { TableCard, Column } from './TableCard';
 import { ChartCard } from './ChartCard';
-import { fetchSafetyBatch, fetchWeatherImpact } from '../../api';
-import type { WeatherImpactAnalysis } from '../../api';
-import type { GoAroundHourly, SafetyMonthly, NearMissLocation, SafetyByPhase, EmergencyAftermath, TopAirlineEmergency, NearMissByCountry } from '../../api';
-import type { EmergencyCodeStat, NearMissEvent, GoAroundStat } from '../../types';
+import { fetchSafetyBatch, fetchWeatherImpact, fetchIntelligenceBatch } from '../../api';
+import type { WeatherImpactAnalysis, EmergencyClusters } from '../../api';
+import type { SafetyMonthly, NearMissLocation, SafetyByPhase, EmergencyAftermath, TopAirlineEmergency, NearMissByCountry } from '../../api';
+import type { EmergencyCodeStat, NearMissEvent, GoAroundStat, HoldingPatternAnalysis } from '../../types';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ComposedChart, Line } from 'recharts';
 import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
@@ -17,11 +17,203 @@ interface SafetyTabProps {
   cacheKey?: number;
 }
 
+// Events Cluster Map Component - uses actual location data
+interface EventsClusterMapProps {
+  nearMissLocations: Array<{
+    lat: number;
+    lon: number;
+    count: number;
+    severity_high: number;
+    severity_medium: number;
+  }>;
+  emergencyEvents: EmergencyAftermath[];
+}
+
+// Airport coordinates lookup for emergency events
+const AIRPORT_COORDS: Record<string, [number, number]> = {
+  'LLBG': [32.01, 34.87], 'LLER': [29.94, 34.94], 'LLHA': [32.81, 35.04],
+  'LLOV': [29.94, 34.94], 'OJAI': [31.72, 35.99], 'OLBA': [33.82, 35.49],
+  'OSDI': [33.42, 36.52], 'HECA': [30.12, 31.41], 'LCPH': [34.72, 32.49],
+  'LCLK': [34.88, 33.63], 'LTBA': [40.98, 28.82], 'OERK': [24.96, 46.70],
+  'ORBI': [33.26, 44.23], 'OEJN': [21.67, 39.17]
+};
+
+function EventsClusterMap({ nearMissLocations, emergencyEvents }: EventsClusterMapProps) {
+  const mapContainerRef = useRef<HTMLDivElement>(null);
+  const mapRef = useRef<maplibregl.Map | null>(null);
+  const markersRef = useRef<maplibregl.Marker[]>([]);
+
+  useEffect(() => {
+    if (!mapContainerRef.current) return;
+
+    // Clear existing markers
+    markersRef.current.forEach(m => m.remove());
+    markersRef.current = [];
+
+    if (!mapRef.current) {
+      mapRef.current = new maplibregl.Map({
+        container: mapContainerRef.current,
+        style: 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json',
+        center: [35.0, 31.5],
+        zoom: 5
+      });
+      mapRef.current.addControl(new maplibregl.NavigationControl(), 'top-right');
+    }
+
+    const currentMap = mapRef.current;
+
+    const addMarkers = () => {
+      // Add near-miss location markers (orange) - these have real coordinates
+      nearMissLocations.forEach(loc => {
+        const size = Math.min(50, 20 + loc.count * 3);
+        const hasHighSeverity = loc.severity_high > 0;
+        const color = hasHighSeverity ? '#ef4444' : '#f97316'; // Red if high severity, orange otherwise
+        
+        const el = document.createElement('div');
+        el.style.cssText = `
+          width: ${size}px;
+          height: ${size}px;
+          border-radius: 50%;
+          background: ${color}80;
+          border: 2px solid ${color};
+          cursor: pointer;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-size: ${size > 30 ? '12px' : '10px'};
+          font-weight: bold;
+          color: white;
+        `;
+        el.textContent = loc.count.toString();
+
+        const popup = new maplibregl.Popup({ offset: 25 }).setHTML(`
+          <div style="padding: 8px; max-width: 200px;">
+            <div style="font-weight: bold; margin-bottom: 4px;">Near-Miss Zone</div>
+            <div style="font-size: 12px; color: #666;">
+              <div>Location: ${loc.lat.toFixed(2)}°N, ${loc.lon.toFixed(2)}°E</div>
+              <div style="color: #ef4444;">High Severity: ${loc.severity_high}</div>
+              <div style="color: #f97316;">Medium Severity: ${loc.severity_medium}</div>
+              <div style="margin-top: 4px;">Total: ${loc.count} events</div>
+            </div>
+          </div>
+        `);
+
+        const marker = new maplibregl.Marker({ element: el })
+          .setLngLat([loc.lon, loc.lat])
+          .setPopup(popup)
+          .addTo(currentMap);
+
+        markersRef.current.push(marker);
+      });
+
+      // Add emergency event markers - use airport coordinates
+      const emergencyByAirport: Record<string, { count: number; events: EmergencyAftermath[] }> = {};
+      
+      emergencyEvents.forEach(event => {
+        // Use destination or origin airport
+        const airport = event.landing_airport || event.destination || event.origin;
+        if (airport && AIRPORT_COORDS[airport]) {
+          if (!emergencyByAirport[airport]) {
+            emergencyByAirport[airport] = { count: 0, events: [] };
+          }
+          emergencyByAirport[airport].count++;
+          emergencyByAirport[airport].events.push(event);
+        }
+      });
+
+      Object.entries(emergencyByAirport).forEach(([airport, data]) => {
+        const coords = AIRPORT_COORDS[airport];
+        if (!coords) return;
+
+        const size = Math.min(50, 25 + data.count * 4);
+        const el = document.createElement('div');
+        el.style.cssText = `
+          width: ${size}px;
+          height: ${size}px;
+          border-radius: 50%;
+          background: #dc262680;
+          border: 3px solid #dc2626;
+          cursor: pointer;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-size: ${size > 30 ? '12px' : '10px'};
+          font-weight: bold;
+          color: white;
+          box-shadow: 0 0 10px #dc262680;
+        `;
+        el.textContent = data.count.toString();
+
+        const eventsList = data.events.slice(0, 5).map(e => 
+          `<div style="margin: 2px 0;"><span style="color: #f97316;">${e.emergency_code}</span> - ${e.callsign}</div>`
+        ).join('');
+
+        const popup = new maplibregl.Popup({ offset: 25 }).setHTML(`
+          <div style="padding: 8px; max-width: 220px;">
+            <div style="font-weight: bold; margin-bottom: 4px; color: #dc2626;">Emergency Events - ${airport}</div>
+            <div style="font-size: 12px; color: #666;">
+              <div style="margin-bottom: 6px;"><strong>${data.count}</strong> emergencies</div>
+              ${eventsList}
+              ${data.events.length > 5 ? `<div style="color: #999;">+${data.events.length - 5} more</div>` : ''}
+            </div>
+          </div>
+        `);
+
+        const marker = new maplibregl.Marker({ element: el })
+          .setLngLat([coords[1], coords[0]])
+          .setPopup(popup)
+          .addTo(currentMap);
+
+        markersRef.current.push(marker);
+      });
+    };
+
+    if (currentMap.loaded()) {
+      addMarkers();
+    } else {
+      currentMap.on('load', addMarkers);
+    }
+
+    return () => {
+      markersRef.current.forEach(m => m.remove());
+    };
+  }, [nearMissLocations, emergencyEvents]);
+
+  const totalNearMiss = nearMissLocations.reduce((sum, loc) => sum + loc.count, 0);
+  const totalEmergency = emergencyEvents.length;
+
+  return (
+    <div className="bg-surface rounded-xl border border-white/10 overflow-hidden">
+      <div className="px-4 py-3 border-b border-white/10">
+        <h4 className="text-white font-medium">Events Map</h4>
+        <p className="text-white/50 text-xs mt-1">
+          {totalNearMiss} near-miss events • {totalEmergency} emergencies
+        </p>
+      </div>
+      <div ref={mapContainerRef} className="h-[350px] w-full" />
+      <div className="px-4 py-2 bg-surface-highlight flex items-center gap-4 text-xs">
+        <div className="flex items-center gap-1">
+          <div className="w-3 h-3 rounded-full bg-red-600 shadow-[0_0_6px_#dc2626]"></div>
+          <span className="text-white/60">Emergency</span>
+        </div>
+        <div className="flex items-center gap-1">
+          <div className="w-3 h-3 rounded-full bg-red-500"></div>
+          <span className="text-white/60">High Severity Near-Miss</span>
+        </div>
+        <div className="flex items-center gap-1">
+          <div className="w-3 h-3 rounded-full bg-orange-500"></div>
+          <span className="text-white/60">Near-Miss</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function SafetyTab({ startTs, endTs, cacheKey = 0 }: SafetyTabProps) {
   const [emergencyCodes, setEmergencyCodes] = useState<EmergencyCodeStat[]>([]);
   const [nearMiss, setNearMiss] = useState<NearMissEvent[]>([]);
   const [goArounds, setGoArounds] = useState<GoAroundStat[]>([]);
-  const [goAroundsHourly, setGoAroundsHourly] = useState<GoAroundHourly[]>([]);
+  const [holdingPatterns, setHoldingPatterns] = useState<HoldingPatternAnalysis | null>(null);
   const [safetyMonthly, setSafetyMonthly] = useState<SafetyMonthly[]>([]);
   const [nearMissLocations, setNearMissLocations] = useState<NearMissLocation[]>([]);
   const [safetyByPhase, setSafetyByPhase] = useState<SafetyByPhase | null>(null);
@@ -29,6 +221,7 @@ export function SafetyTab({ startTs, endTs, cacheKey = 0 }: SafetyTabProps) {
   const [topAirlineEmergencies, setTopAirlineEmergencies] = useState<TopAirlineEmergency[]>([]);
   const [nearMissByCountry, setNearMissByCountry] = useState<NearMissByCountry | null>(null);
   const [weatherImpact, setWeatherImpact] = useState<WeatherImpactAnalysis | null>(null);
+  const [emergencyClusters, setEmergencyClusters] = useState<EmergencyClusters | null>(null);
   const [loading, setLoading] = useState(true);
 
   // Map refs for near-miss heatmap
@@ -44,18 +237,24 @@ export function SafetyTab({ startTs, endTs, cacheKey = 0 }: SafetyTabProps) {
     setLoading(true);
     try {
       // Use batch API - single request instead of 10 parallel calls
-      const data = await fetchSafetyBatch(startTs, endTs);
+      const [safetyData, intelData] = await Promise.all([
+        fetchSafetyBatch(startTs, endTs),
+        fetchIntelligenceBatch(startTs, endTs, ['holding'])
+      ]);
       
-      setEmergencyCodes(data.emergency_codes || []);
-      setNearMiss(data.near_miss || []);
-      setGoArounds(data.go_arounds || []);
-      setGoAroundsHourly(data.go_arounds_hourly || []);
-      setSafetyMonthly(data.safety_monthly || []);
-      setNearMissLocations(data.near_miss_locations || []);
-      setSafetyByPhase(data.safety_by_phase || null);
-      setEmergencyAftermath(data.emergency_aftermath || []);
-      setTopAirlineEmergencies(data.top_airline_emergencies || []);
-      setNearMissByCountry(data.near_miss_by_country || null);
+      setEmergencyCodes(safetyData.emergency_codes || []);
+      setNearMiss(safetyData.near_miss || []);
+      setGoArounds(safetyData.go_arounds || []);
+      setSafetyMonthly(safetyData.safety_monthly || []);
+      setNearMissLocations(safetyData.near_miss_locations || []);
+      setSafetyByPhase(safetyData.safety_by_phase || null);
+      setEmergencyAftermath(safetyData.emergency_aftermath || []);
+      setTopAirlineEmergencies(safetyData.top_airline_emergencies || []);
+      setNearMissByCountry(safetyData.near_miss_by_country || null);
+      setEmergencyClusters(safetyData.emergency_clusters || null);
+      
+      // Set holding patterns from intelligence batch
+      setHoldingPatterns(intelData.holding_patterns || null);
       
       // Load weather impact separately
       try {
@@ -162,12 +361,13 @@ export function SafetyTab({ startTs, endTs, cacheKey = 0 }: SafetyTabProps) {
     ? safetyMonthly.reduce((max, m) => m.total_events > max.total_events ? m : max, safetyMonthly[0])
     : null;
 
-  // Find peak go-around hours
-  const peakGoAroundHours = goAroundsHourly
-    .filter(h => h.count > 0)
-    .sort((a, b) => b.count - a.count)
-    .slice(0, 3)
-    .map(h => h.hour);
+  // Prepare holding pattern data for chart
+  const holdingByAirportData = holdingPatterns 
+    ? Object.entries(holdingPatterns.events_by_airport)
+        .sort(([, a], [, b]) => b - a)
+        .slice(0, 10)
+        .map(([airport, count]) => ({ airport, count }))
+    : [];
 
   const nearMissColumns: Column[] = [
     { key: 'timestamp', title: 'Time', render: (val) => new Date(val * 1000).toLocaleString() },
@@ -271,7 +471,7 @@ export function SafetyTab({ startTs, endTs, cacheKey = 0 }: SafetyTabProps) {
           <div className="border-b border-white/10 pb-4 pt-4">
             <h2 className="text-white text-xl font-bold mb-2 flex items-center gap-2">
               <Activity className="w-5 h-5 text-purple-500" />
-              Safety Events by Flight Phase
+              Events by Flight Phase
             </h2>
             <p className="text-white/60 text-sm">
               How many safety events occur at cruise altitude vs approach?
@@ -417,10 +617,10 @@ export function SafetyTab({ startTs, endTs, cacheKey = 0 }: SafetyTabProps) {
       )}
 
       {/* Emergency Codes Breakdown */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <ChartCard title="Emergency Codes by Type">
           {emergencyCodes.length > 0 ? (
-            <ResponsiveContainer width="100%" height={250}>
+            <ResponsiveContainer width="100%" height={180}>
               <BarChart data={emergencyCodes}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#ffffff20" />
                 <XAxis dataKey="code" stroke="#ffffff60" tick={{ fill: '#ffffff60' }} />
@@ -436,17 +636,17 @@ export function SafetyTab({ startTs, endTs, cacheKey = 0 }: SafetyTabProps) {
               </BarChart>
             </ResponsiveContainer>
           ) : (
-            <div className="h-64 flex items-center justify-center text-white/40">
+            <div className="h-44 flex items-center justify-center text-white/40">
               No emergency codes in this period
             </div>
           )}
         </ChartCard>
 
         {/* Top Airlines by Emergency Declarations */}
-        <ChartCard title="Top Airlines by Emergency Declarations">
+        <ChartCard title="Top Airlines by Emergencies">
           {topAirlineEmergencies.length > 0 ? (
-            <div className="space-y-3">
-              {topAirlineEmergencies.slice(0, 8).map((airline, idx) => (
+            <div className="space-y-2 max-h-[180px] overflow-y-auto">
+              {topAirlineEmergencies.slice(0, 5).map((airline, idx) => (
                 <div key={airline.airline} className="flex items-center gap-3">
                   <div className="w-6 text-white/40 text-sm font-mono">{idx + 1}.</div>
                   <div className="flex-1">
@@ -481,7 +681,7 @@ export function SafetyTab({ startTs, endTs, cacheKey = 0 }: SafetyTabProps) {
               )}
             </div>
           ) : (
-            <div className="h-64 flex items-center justify-center text-white/40">
+            <div className="h-44 flex items-center justify-center text-white/40">
               No emergency data available
             </div>
           )}
@@ -589,94 +789,254 @@ export function SafetyTab({ startTs, endTs, cacheKey = 0 }: SafetyTabProps) {
         </>
       )}
 
-      {/* Go-Around Section */}
-      <div className="border-b border-white/10 pb-4 pt-4">
-        <h2 className="text-white text-xl font-bold mb-2 flex items-center gap-2">
-          <Activity className="w-5 h-5 text-amber-500" />
-          Go-Around Analysis
-        </h2>
-        <p className="text-white/60 text-sm">
-          At which hours do go-arounds peak?
-        </p>
-      </div>
+      {/* Emergency Clusters Section */}
+      {emergencyClusters && emergencyClusters.total_multi_incident_days > 0 && (
+        <>
+          <div className="border-b border-white/10 pb-4 pt-4">
+            <h2 className="text-white text-xl font-bold mb-2 flex items-center gap-2">
+              <AlertTriangle className="w-5 h-5 text-red-500" />
+              Emergency Incident Clusters
+            </h2>
+            <p className="text-white/60 text-sm">
+              Multiple emergency incidents on the same day and geographic clustering
+            </p>
+          </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        {/* Go-Around by Airport */}
-        <ChartCard title="Go-Arounds by Airport">
-          {goArounds.length > 0 ? (
-            <ResponsiveContainer width="100%" height={250}>
-              <BarChart data={goArounds.slice(0, 10)} layout="vertical">
-                <CartesianGrid strokeDasharray="3 3" stroke="#ffffff20" />
-                <XAxis type="number" stroke="#ffffff60" tick={{ fill: '#ffffff60' }} />
-                <YAxis 
-                  type="category" 
-                  dataKey="airport" 
-                  stroke="#ffffff60" 
-                  tick={{ fill: '#ffffff60' }} 
-                  width={60}
-                />
-                <Tooltip
-                  contentStyle={{
-                    backgroundColor: '#1a1a1a',
-                    border: '1px solid #ffffff20',
-                    borderRadius: '8px'
-                  }}
-                />
-                <Bar dataKey="count" fill="#f59e0b" radius={[0, 4, 4, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          ) : (
-            <div className="h-64 flex items-center justify-center text-white/40">
-              No go-around events in this period
+          {/* Insights */}
+          {emergencyClusters.insights.length > 0 && (
+            <div className="bg-gradient-to-r from-red-500/10 to-orange-500/10 border border-red-500/30 rounded-xl p-4 mb-4">
+              <h3 className="text-red-400 font-medium mb-3 flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4" />
+                Key Findings
+              </h3>
+              <ul className="space-y-2">
+                {emergencyClusters.insights.map((insight, idx) => (
+                  <li key={idx} className="text-white/80 text-sm flex items-start gap-2">
+                    <span className="text-red-400">•</span>
+                    {insight}
+                  </li>
+                ))}
+              </ul>
             </div>
           )}
-        </ChartCard>
 
-        {/* Go-Around by Hour */}
-        <ChartCard title="Go-Arounds by Hour of Day">
-          {goAroundsHourly.some(h => h.count > 0) ? (
-            <ResponsiveContainer width="100%" height={250}>
-              <BarChart data={goAroundsHourly}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#ffffff20" />
-                <XAxis 
-                  dataKey="hour" 
-                  stroke="#ffffff60" 
-                  tick={{ fill: '#ffffff60', fontSize: 10 }}
-                  tickFormatter={(h) => `${h}:00`}
-                />
-                <YAxis stroke="#ffffff60" tick={{ fill: '#ffffff60' }} />
-                <Tooltip
-                  contentStyle={{
-                    backgroundColor: '#1a1a1a',
-                    border: '1px solid #ffffff20',
-                    borderRadius: '8px'
-                  }}
-                  labelFormatter={(h) => `Hour: ${h}:00`}
-                />
-                <Bar dataKey="count" fill="#8b5cf6" radius={[4, 4, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          ) : (
-            <div className="h-64 flex items-center justify-center text-white/40">
-              No hourly data available
+          {/* Summary Stats */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+            <div className="bg-red-500/20 border border-red-500/30 rounded-lg p-4 text-center">
+              <div className="text-3xl font-bold text-red-400">{emergencyClusters.total_multi_incident_days}</div>
+              <div className="text-white/60 text-sm">Days with Multiple Incidents</div>
             </div>
-          )}
-        </ChartCard>
-      </div>
-
-      {/* Peak Hours Summary */}
-      {peakGoAroundHours.length > 0 && (
-        <div className="bg-gradient-to-r from-amber-500/10 to-purple-500/10 border border-amber-500/30 rounded-xl p-4">
-          <div className="flex items-center gap-3">
-            <Clock className="w-5 h-5 text-amber-400" />
-            <div>
-              <span className="text-white font-medium">Peak Go-Around Hours: </span>
-              <span className="text-amber-400 font-bold">
-                {peakGoAroundHours.map(h => `${h}:00`).join(', ')}
-              </span>
+            <div className="bg-orange-500/20 border border-orange-500/30 rounded-lg p-4 text-center">
+              <div className="text-3xl font-bold text-orange-400">{emergencyClusters.total_cluster_days}</div>
+              <div className="text-white/60 text-sm">Days with Same-Area Clusters</div>
+            </div>
+            <div className="bg-yellow-500/20 border border-yellow-500/30 rounded-lg p-4 text-center">
+              <div className="text-3xl font-bold text-yellow-400">{emergencyClusters.geographic_clusters.length}</div>
+              <div className="text-white/60 text-sm">Geographic Hotspots</div>
             </div>
           </div>
-        </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            {/* Multi-Incident Days */}
+            <div className="bg-surface rounded-xl border border-white/10 overflow-hidden">
+              <div className="px-4 py-3 border-b border-white/10">
+                <h4 className="text-white font-medium">Days with Multiple Emergencies</h4>
+                <p className="text-white/50 text-xs mt-1">Were there multiple incidents in one day?</p>
+              </div>
+              <div className="max-h-[350px] overflow-y-auto">
+                {emergencyClusters.multi_incident_days.slice(0, 10).map((day, idx) => (
+                  <div key={day.date} className={`p-4 border-b border-white/5 hover:bg-white/5 ${day.cluster_detected ? 'bg-red-500/5' : ''}`}>
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-center gap-2">
+                        <span className="text-white font-medium">{day.date}</span>
+                        {day.cluster_detected && (
+                          <span className="px-2 py-0.5 bg-red-500/20 text-red-400 text-xs rounded">
+                            Same Area
+                          </span>
+                        )}
+                      </div>
+                      <span className="text-red-400 font-bold text-lg">{day.count} incidents</span>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {day.events.map((event, eventIdx) => (
+                        <div key={eventIdx} className="px-2 py-1 bg-surface-highlight rounded text-xs">
+                          <span className="text-white/70">{event.callsign}</span>
+                          <span className={`ml-2 font-bold ${
+                            event.code === '7500' ? 'text-red-500' :
+                            event.code === '7700' ? 'text-orange-400' :
+                            'text-yellow-400'
+                          }`}>
+                            {event.code}
+                          </span>
+                          <span className="text-white/50 ml-1">@ {event.time}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Geographic Clusters */}
+            <div className="bg-surface rounded-xl border border-white/10 overflow-hidden">
+              <div className="px-4 py-3 border-b border-white/10">
+                <h4 className="text-white font-medium">Geographic Hotspots</h4>
+                <p className="text-white/50 text-xs mt-1">Were they in the same area?</p>
+              </div>
+              <div className="max-h-[350px] overflow-y-auto">
+                {emergencyClusters.geographic_clusters.length > 0 ? (
+                  emergencyClusters.geographic_clusters.map((cluster, idx) => (
+                    <div key={idx} className="p-4 border-b border-white/5 hover:bg-white/5">
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="flex items-center gap-2">
+                          <MapPin className="w-4 h-4 text-red-400" />
+                          <span className="text-white font-medium">{cluster.area_name}</span>
+                        </div>
+                        <span className="text-red-400 font-bold">{cluster.count} events</span>
+                      </div>
+                      <div className="text-white/50 text-xs mb-2">
+                        {cluster.unique_days} different days
+                      </div>
+                      <div className="flex flex-wrap gap-1">
+                        {cluster.dates.slice(0, 3).map(date => (
+                          <span key={date} className="px-2 py-0.5 bg-surface-highlight rounded text-xs text-white/60">
+                            {date}
+                          </span>
+                        ))}
+                        {cluster.dates.length > 3 && (
+                          <span className="px-2 py-0.5 bg-surface-highlight rounded text-xs text-white/40">
+                            +{cluster.dates.length - 3} more
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <div className="p-8 text-center text-white/40">
+                    <MapPin className="w-8 h-8 mx-auto mb-2 opacity-50" />
+                    <p>No geographic clusters detected</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* Holdings Analysis Section */}
+      {holdingPatterns && (
+        <>
+          <div className="border-b border-white/10 pb-4 pt-4">
+            <h2 className="text-white text-xl font-bold mb-2 flex items-center gap-2">
+              <Clock className="w-5 h-5 text-cyan-500" />
+              Holdings Analysis
+            </h2>
+            <p className="text-white/60 text-sm">
+              Total holding time, fuel cost estimates, and peak hours
+            </p>
+          </div>
+
+          {/* Holdings Stats */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <StatCard
+              title="Total Holding Time"
+              value={`${holdingPatterns.total_time_hours.toFixed(1)}h`}
+              subtitle="Wasted fuel time"
+              icon={<Clock className="w-6 h-6" />}
+            />
+            <StatCard
+              title="Estimated Fuel Cost"
+              value={`$${holdingPatterns.estimated_fuel_cost_usd.toLocaleString()}`}
+              subtitle="Approximate cost"
+              icon={<DollarSign className="w-6 h-6" />}
+            />
+            <StatCard
+              title="Peak Holding Hours"
+              value={holdingPatterns.peak_hours.slice(0, 3).map(h => `${h}:00`).join(', ')}
+              subtitle="Busiest times"
+              icon={<TrendingUp className="w-6 h-6" />}
+            />
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            {/* Holding Events by Airport */}
+            <ChartCard title="Holding Events by Airport">
+              {holdingByAirportData.length > 0 ? (
+                <ResponsiveContainer width="100%" height={250}>
+                  <BarChart data={holdingByAirportData} layout="vertical">
+                    <CartesianGrid strokeDasharray="3 3" stroke="#ffffff20" />
+                    <XAxis type="number" stroke="#ffffff60" tick={{ fill: '#ffffff60' }} />
+                    <YAxis 
+                      type="category" 
+                      dataKey="airport" 
+                      stroke="#ffffff60" 
+                      tick={{ fill: '#ffffff60' }} 
+                      width={60}
+                    />
+                    <Tooltip
+                      contentStyle={{
+                        backgroundColor: '#1a1a1a',
+                        border: '1px solid #ffffff20',
+                        borderRadius: '8px'
+                      }}
+                    />
+                    <Bar dataKey="count" fill="#06b6d4" radius={[0, 4, 4, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              ) : (
+                <div className="h-64 flex items-center justify-center text-white/40">
+                  No holding pattern data available
+                </div>
+              )}
+            </ChartCard>
+
+            {/* Holdings Distribution Summary */}
+            <div className="bg-surface rounded-xl border border-white/10 p-5">
+              <h4 className="text-white font-medium mb-4">Holdings Distribution</h4>
+              <div className="space-y-3">
+                {holdingByAirportData.slice(0, 6).map(({ airport, count }) => {
+                  const maxCount = holdingByAirportData[0]?.count || 1;
+                  const percentage = (count / maxCount) * 100;
+                  return (
+                    <div key={airport} className="flex items-center gap-3">
+                      <div className="w-12 text-white font-bold text-sm">{airport}</div>
+                      <div className="flex-1">
+                        <div className="flex justify-between items-center mb-1">
+                          <span className="text-white/60 text-sm">{count} events</span>
+                        </div>
+                        <div className="w-full bg-black/30 rounded-full h-2">
+                          <div 
+                            className="bg-cyan-500 h-2 rounded-full transition-all"
+                            style={{ width: `${percentage}%` }}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="mt-4 pt-4 border-t border-white/10 text-center">
+                <div className="text-white font-bold text-2xl">{Object.keys(holdingPatterns.events_by_airport).length}</div>
+                <div className="text-white/50 text-sm">Airports with Holdings</div>
+              </div>
+            </div>
+          </div>
+
+          {/* Peak Hours Summary */}
+          {holdingPatterns.peak_hours.length > 0 && (
+            <div className="bg-gradient-to-r from-cyan-500/10 to-blue-500/10 border border-cyan-500/30 rounded-xl p-4">
+              <div className="flex items-center gap-3">
+                <Clock className="w-5 h-5 text-cyan-400" />
+                <div>
+                  <span className="text-white font-medium">Peak Holding Hours: </span>
+                  <span className="text-cyan-400 font-bold">
+                    {holdingPatterns.peak_hours.slice(0, 5).map(h => `${h}:00`).join(', ')}
+                  </span>
+                </div>
+              </div>
+            </div>
+          )}
+        </>
       )}
 
       {/* Near-Miss by Country */}
@@ -709,7 +1069,6 @@ export function SafetyTab({ startTs, endTs, cacheKey = 0 }: SafetyTabProps) {
                         <div className="flex-1">
                           <div className="flex justify-between items-center mb-1">
                             <span className="text-white/60 text-sm">{count} events</span>
-                            <span className="text-orange-400 font-bold">{((count / nearMissByCountry.total_near_miss) * 100).toFixed(1)}%</span>
                           </div>
                           <div className="w-full bg-black/30 rounded-full h-2">
                             <div 
@@ -728,35 +1087,11 @@ export function SafetyTab({ startTs, endTs, cacheKey = 0 }: SafetyTabProps) {
               </div>
             </div>
 
-            {/* Recent Events */}
-            <div className="bg-surface rounded-xl border border-white/10 p-5">
-              <h4 className="text-white font-medium mb-4">Recent Events</h4>
-              <div className="space-y-2 max-h-[350px] overflow-y-auto">
-                {nearMissByCountry.events.slice(0, 15).map((event, idx) => (
-                  <div key={`${event.flight_id}-${idx}`} className="bg-surface-highlight rounded-lg p-3">
-                    <div className="flex justify-between items-center mb-1">
-                      <span className="text-white font-medium">{event.callsign}</span>
-                      <span className={`px-2 py-0.5 rounded text-xs font-bold ${
-                        event.severity >= 0.7 ? 'bg-red-500/20 text-red-400' :
-                        event.severity >= 0.4 ? 'bg-orange-500/20 text-orange-400' :
-                        'bg-yellow-500/20 text-yellow-400'
-                      }`}>
-                        {(event.severity * 100).toFixed(0)}%
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-2 text-xs text-white/50">
-                      <span>{new Date(event.timestamp * 1000).toLocaleString()}</span>
-                      {event.countries.length > 0 && (
-                        <>
-                          <span>•</span>
-                          <span className="text-orange-400">{event.countries.join(', ')}</span>
-                        </>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
+            {/* Events Map */}
+            <EventsClusterMap 
+              nearMissLocations={nearMissLocations}
+              emergencyEvents={emergencyAftermath}
+            />
           </div>
         </>
       )}
