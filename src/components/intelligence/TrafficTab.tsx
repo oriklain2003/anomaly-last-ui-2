@@ -1643,6 +1643,177 @@ export function TrafficTab({ startTs, endTs, cacheKey = 0 }: TrafficTabProps) {
           </div>
         )}
       </div>
+
+      {/* Signal Loss Anomaly Detection */}
+      {signalLossAnomalies && signalLossAnomalies.anomalous_zones.length > 0 && (
+        <>
+          <div className="border-b border-white/10 pb-4 pt-8">
+            <h2 className="text-white text-xl font-bold mb-2 flex items-center gap-2">
+              <AlertTriangle className="w-5 h-5 text-yellow-500" />
+              Unusual Signal Loss Detected
+            </h2>
+            <p className="text-white/60 text-sm">
+              Areas with abnormal signal loss compared to historical baseline
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <StatCard
+              title="Anomalous Zones"
+              value={signalLossAnomalies.total_anomalies.toString()}
+              subtitle="Areas with unusual loss"
+              icon={<Signal className="w-6 h-6" />}
+            />
+            <StatCard
+              title="Highest Anomaly"
+              value={`${(signalLossAnomalies.anomalous_zones[0]?.anomaly_score * 100 || 0).toFixed(0)}%`}
+              subtitle="Above baseline"
+            />
+            <StatCard
+              title="Affected Flights"
+              value={signalLossAnomalies.anomalous_zones.reduce((sum, z) => sum + z.affected_flights, 0).toString()}
+              subtitle="In anomalous zones"
+            />
+          </div>
+
+          <div className="bg-surface rounded-xl border border-white/10 p-5">
+            <h3 className="text-white font-bold mb-4 flex items-center gap-2">
+              <MapPin className="w-4 h-4 text-yellow-400" />
+              Anomalous Signal Loss Zones
+            </h3>
+            <div className="space-y-3 max-h-[300px] overflow-y-auto">
+              {signalLossAnomalies.anomalous_zones.slice(0, 10).map((zone, idx) => (
+                <div key={idx} className={`rounded-lg p-4 ${
+                  zone.anomaly_score > 1 
+                    ? 'bg-red-500/20 border border-red-500/30' 
+                    : 'bg-yellow-500/20 border border-yellow-500/30'
+                }`}>
+                  <div className="flex justify-between items-center mb-2">
+                    <span className="text-white font-medium">
+                      {zone.lat.toFixed(2)}°N, {zone.lon.toFixed(2)}°E
+                    </span>
+                    <span className={`px-2 py-1 rounded text-xs font-bold ${
+                      zone.anomaly_score > 1 ? 'bg-red-500 text-white' : 'bg-yellow-500 text-black'
+                    }`}>
+                      +{(zone.anomaly_score * 100).toFixed(0)}% from baseline
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2 text-sm">
+                    <div>
+                      <span className="text-white/50">Current</span>
+                      <div className="text-white font-medium">{zone.current_losses} losses</div>
+                    </div>
+                    <div>
+                      <span className="text-white/50">Baseline</span>
+                      <div className="text-white/70">{zone.baseline_losses} losses</div>
+                    </div>
+                    <div>
+                      <span className="text-white/50">Flights</span>
+                      <div className="text-yellow-400 font-medium">{zone.affected_flights}</div>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Insights */}
+          {signalLossAnomalies.insights.length > 0 && (
+            <div className="bg-gradient-to-r from-yellow-500/10 to-orange-500/10 border border-yellow-500/30 rounded-xl p-4">
+              <h4 className="text-white font-bold mb-2">Signal Loss Insights</h4>
+              <ul className="text-white/70 text-sm space-y-1">
+                {signalLossAnomalies.insights.map((insight, idx) => (
+                  <li key={idx} className="flex items-center gap-2">
+                    <span className="w-1.5 h-1.5 bg-yellow-400 rounded-full"></span>
+                    {insight}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </>
+      )}
+
+      {/* Diversions Seasonal Analysis */}
+      {diversionsSeasonal && diversionsSeasonal.total_diversions > 0 && (
+        <>
+          <div className="border-b border-white/10 pb-4 pt-8">
+            <h2 className="text-white text-xl font-bold mb-2 flex items-center gap-2">
+              <Calendar className="w-5 h-5 text-blue-500" />
+              Diversions by Season
+            </h2>
+            <p className="text-white/60 text-sm">
+              Seasonal breakdown of flight diversions
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            {diversionsSeasonal.by_season.map((season) => (
+              <div 
+                key={season.season}
+                className={`bg-surface rounded-xl border p-4 ${
+                  season.season === diversionsSeasonal.peak_season 
+                    ? 'border-orange-500/50' 
+                    : 'border-white/10'
+                }`}
+              >
+                <div className="flex justify-between items-center mb-2">
+                  <span className="text-white font-medium">{season.season}</span>
+                  {season.season === diversionsSeasonal.peak_season && (
+                    <span className="px-2 py-0.5 bg-orange-500/20 text-orange-400 text-xs rounded">Peak</span>
+                  )}
+                </div>
+                <div className="text-3xl font-bold text-white mb-1">{season.count}</div>
+                <div className="text-white/50 text-sm">diversions</div>
+              </div>
+            ))}
+          </div>
+
+          {/* Monthly Breakdown Chart */}
+          <ChartCard title="Diversions by Month">
+            <ResponsiveContainer width="100%" height={300}>
+              <BarChart data={diversionsSeasonal.by_month}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#ffffff20" />
+                <XAxis 
+                  dataKey="month_name" 
+                  stroke="#ffffff60"
+                  tick={{ fill: '#ffffff60', fontSize: 11 }}
+                />
+                <YAxis stroke="#ffffff60" tick={{ fill: '#ffffff60' }} />
+                <Tooltip
+                  contentStyle={{
+                    backgroundColor: '#1a1a1a',
+                    border: '1px solid #ffffff20',
+                    borderRadius: '8px'
+                  }}
+                  formatter={(value: number) => [value, 'Diversions']}
+                />
+                <Bar 
+                  dataKey="count" 
+                  fill="#f97316" 
+                  name="Diversions" 
+                  radius={[4, 4, 0, 0]}
+                />
+              </BarChart>
+            </ResponsiveContainer>
+          </ChartCard>
+
+          {/* Insights */}
+          {diversionsSeasonal.insights.length > 0 && (
+            <div className="bg-gradient-to-r from-blue-500/10 to-indigo-500/10 border border-blue-500/30 rounded-xl p-4">
+              <h4 className="text-white font-bold mb-2">Seasonal Insights</h4>
+              <ul className="text-white/70 text-sm space-y-1">
+                {diversionsSeasonal.insights.map((insight, idx) => (
+                  <li key={idx} className="flex items-center gap-2">
+                    <span className="w-1.5 h-1.5 bg-blue-400 rounded-full"></span>
+                    {insight}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </>
+      )}
     </div>
   );
 }

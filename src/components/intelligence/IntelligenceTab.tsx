@@ -10,11 +10,13 @@ import {
   fetchIntelligenceBatch,
   fetchAnomalyDNAEnhanced,
   fetchRouteEfficiency,
-  fetchAvailableRoutes
+  fetchAvailableRoutes,
+  fetchGPSJammingTemporal
 } from '../../api';
 import type { 
   RouteEfficiencyComparison, 
-  RoutesSummary
+  RoutesSummary,
+  GPSJammingTemporal
 } from '../../api';
 import type { AirlineEfficiency, HoldingPatternAnalysis, GPSJammingPoint, MilitaryPattern, PatternCluster, AnomalyDNA } from '../../types';
 import type { AirlineActivityTrends, MilitaryRoutes } from '../../api';
@@ -50,6 +52,9 @@ export function IntelligenceTab({ startTs, endTs, cacheKey = 0 }: IntelligenceTa
   
   // Military filter state
   const [militaryTypeFilter, setMilitaryTypeFilter] = useState<string>('all');
+  
+  // GPS Jamming Temporal state
+  const [gpsJammingTemporal, setGpsJammingTemporal] = useState<GPSJammingTemporal | null>(null);
   
   // Military map ref
   const militaryMapContainer = useRef<HTMLDivElement>(null);
@@ -99,7 +104,10 @@ export function IntelligenceTab({ startTs, endTs, cacheKey = 0 }: IntelligenceTa
     setLoading(true);
     try {
       // Use batch API - single request instead of 7 parallel calls
-      const data = await fetchIntelligenceBatch(startTs, endTs);
+      const [data, temporalData] = await Promise.all([
+        fetchIntelligenceBatch(startTs, endTs),
+        fetchGPSJammingTemporal(startTs, endTs).catch(() => null)
+      ]);
       
       setAirlineEfficiency(data.airline_efficiency || []);
       setHoldingPatterns(data.holding_patterns || null);
@@ -108,6 +116,7 @@ export function IntelligenceTab({ startTs, endTs, cacheKey = 0 }: IntelligenceTa
       setPatternClusters(data.pattern_clusters || []);
       setMilitaryRoutes(data.military_routes || null);
       setAirlineActivity(data.airline_activity || null);
+      setGpsJammingTemporal(temporalData);
     } catch (error) {
       console.error('Failed to load intelligence data:', error);
     } finally {
@@ -1132,6 +1141,109 @@ export function IntelligenceTab({ startTs, endTs, cacheKey = 0 }: IntelligenceTa
         columns={jammingColumns}
         data={gpsJamming.slice(0, 15)}
       />
+
+      {/* GPS Jamming Temporal Analysis */}
+      {gpsJammingTemporal && gpsJammingTemporal.total_events > 0 && (
+        <div className="bg-surface rounded-xl border border-white/10 p-6">
+          <h3 className="text-white font-bold mb-4 flex items-center gap-2">
+            <Clock className="w-5 h-5 text-amber-500" />
+            GPS Jamming Temporal Patterns
+          </h3>
+          <p className="text-white/60 text-sm mb-6">
+            When does GPS jamming occur most frequently?
+          </p>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Hourly Distribution */}
+            <div>
+              <h4 className="text-white/80 text-sm font-medium mb-3">By Hour of Day</h4>
+              <ChartCard title="">
+                <ResponsiveContainer width="100%" height={200}>
+                  <BarChart data={gpsJammingTemporal.by_hour}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#ffffff20" />
+                    <XAxis 
+                      dataKey="hour" 
+                      stroke="#ffffff60"
+                      tick={{ fill: '#ffffff60', fontSize: 9 }}
+                      tickFormatter={(h) => `${h}`}
+                    />
+                    <YAxis stroke="#ffffff60" tick={{ fill: '#ffffff60', fontSize: 10 }} />
+                    <Tooltip
+                      contentStyle={{
+                        backgroundColor: '#1a1a1a',
+                        border: '1px solid #ffffff20',
+                        borderRadius: '8px'
+                      }}
+                      formatter={(value: number) => [value, 'Events']}
+                      labelFormatter={(h) => `${h}:00 - ${h}:59`}
+                    />
+                    <Bar dataKey="count" fill="#f59e0b" radius={[2, 2, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </ChartCard>
+              {gpsJammingTemporal.peak_hours.length > 0 && (
+                <div className="mt-2 text-sm text-white/60">
+                  Peak hours: {gpsJammingTemporal.peak_hours.map(h => `${h}:00`).join(', ')}
+                </div>
+              )}
+            </div>
+
+            {/* Day of Week Distribution */}
+            <div>
+              <h4 className="text-white/80 text-sm font-medium mb-3">By Day of Week</h4>
+              <ChartCard title="">
+                <ResponsiveContainer width="100%" height={200}>
+                  <BarChart data={gpsJammingTemporal.by_day_of_week}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#ffffff20" />
+                    <XAxis 
+                      dataKey="day_name" 
+                      stroke="#ffffff60"
+                      tick={{ fill: '#ffffff60', fontSize: 10 }}
+                      tickFormatter={(name) => name.slice(0, 3)}
+                    />
+                    <YAxis stroke="#ffffff60" tick={{ fill: '#ffffff60', fontSize: 10 }} />
+                    <Tooltip
+                      contentStyle={{
+                        backgroundColor: '#1a1a1a',
+                        border: '1px solid #ffffff20',
+                        borderRadius: '8px'
+                      }}
+                      formatter={(value: number) => [value, 'Events']}
+                    />
+                    <Bar dataKey="count" fill="#ef4444" radius={[2, 2, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </ChartCard>
+              {gpsJammingTemporal.peak_days.length > 0 && (
+                <div className="mt-2 text-sm text-white/60">
+                  Peak days: {gpsJammingTemporal.peak_days.join(', ')}
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="mt-4 p-4 bg-surface-highlight rounded-lg">
+            <div className="grid grid-cols-3 gap-4 text-center">
+              <div>
+                <div className="text-2xl font-bold text-amber-400">{gpsJammingTemporal.total_events}</div>
+                <div className="text-white/50 text-xs">Total Events</div>
+              </div>
+              <div>
+                <div className="text-2xl font-bold text-white">
+                  {gpsJammingTemporal.peak_hours[0] !== undefined ? `${gpsJammingTemporal.peak_hours[0]}:00` : '-'}
+                </div>
+                <div className="text-white/50 text-xs">Peak Hour</div>
+              </div>
+              <div>
+                <div className="text-2xl font-bold text-white">
+                  {gpsJammingTemporal.peak_days[0] || '-'}
+                </div>
+                <div className="text-white/50 text-xs">Peak Day</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Military Aircraft Patterns with Type Filter */}
       <div className="bg-surface rounded-xl border border-white/10 overflow-hidden">
