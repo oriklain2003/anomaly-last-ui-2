@@ -3,8 +3,8 @@ import { AlertTriangle, AlertOctagon, Activity, Calendar, Clock, MapPin, Trendin
 import { StatCard } from './StatCard';
 import { TableCard, Column } from './TableCard';
 import { ChartCard } from './ChartCard';
-import { fetchSafetyBatch, fetchWeatherImpact, fetchIntelligenceBatch } from '../../api';
-import type { WeatherImpactAnalysis, EmergencyClusters } from '../../api';
+import { fetchSafetyBatch, fetchWeatherImpact, fetchIntelligenceBatch, fetchGoAroundsHourly, fetchDailyIncidentClusters } from '../../api';
+import type { WeatherImpactAnalysis, EmergencyClusters, GoAroundHourly, DailyIncidentClusters } from '../../api';
 import type { SafetyMonthly, NearMissLocation, SafetyByPhase, EmergencyAftermath, TopAirlineEmergency, NearMissByCountry } from '../../api';
 import type { EmergencyCodeStat, NearMissEvent, GoAroundStat, HoldingPatternAnalysis } from '../../types';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ComposedChart, Line } from 'recharts';
@@ -222,6 +222,8 @@ export function SafetyTab({ startTs, endTs, cacheKey = 0 }: SafetyTabProps) {
   const [nearMissByCountry, setNearMissByCountry] = useState<NearMissByCountry | null>(null);
   const [weatherImpact, setWeatherImpact] = useState<WeatherImpactAnalysis | null>(null);
   const [emergencyClusters, setEmergencyClusters] = useState<EmergencyClusters | null>(null);
+  const [goAroundsHourly, setGoAroundsHourly] = useState<GoAroundHourly[]>([]);
+  const [dailyIncidentClusters, setDailyIncidentClusters] = useState<DailyIncidentClusters | null>(null);
   const [loading, setLoading] = useState(true);
 
   // Map refs for near-miss heatmap
@@ -256,12 +258,18 @@ export function SafetyTab({ startTs, endTs, cacheKey = 0 }: SafetyTabProps) {
       // Set holding patterns from intelligence batch
       setHoldingPatterns(intelData.holding_patterns || null);
       
-      // Load weather impact separately
+      // Load additional data in parallel
       try {
-        const weather = await fetchWeatherImpact(startTs, endTs);
+        const [weather, hourlyGoArounds, incidentClusters] = await Promise.all([
+          fetchWeatherImpact(startTs, endTs).catch(() => null),
+          fetchGoAroundsHourly(startTs, endTs).catch(() => []),
+          fetchDailyIncidentClusters(startTs, endTs).catch(() => null)
+        ]);
         setWeatherImpact(weather);
+        setGoAroundsHourly(hourlyGoArounds || []);
+        setDailyIncidentClusters(incidentClusters);
       } catch (e) {
-        console.error('Failed to load weather impact:', e);
+        console.error('Failed to load additional safety data:', e);
       }
     } catch (error) {
       console.error('Failed to load safety data:', error);
@@ -844,7 +852,7 @@ export function SafetyTab({ startTs, endTs, cacheKey = 0 }: SafetyTabProps) {
                 <p className="text-white/50 text-xs mt-1">Were there multiple incidents in one day?</p>
               </div>
               <div className="max-h-[350px] overflow-y-auto">
-                {emergencyClusters.multi_incident_days.slice(0, 10).map((day, idx) => (
+                {emergencyClusters.multi_incident_days.slice(0, 10).map((day) => (
                   <div key={day.date} className={`p-4 border-b border-white/5 hover:bg-white/5 ${day.cluster_detected ? 'bg-red-500/5' : ''}`}>
                     <div className="flex items-center justify-between mb-2">
                       <div className="flex items-center gap-2">
@@ -1330,6 +1338,162 @@ export function SafetyTab({ startTs, endTs, cacheKey = 0 }: SafetyTabProps) {
                 </ComposedChart>
               </ResponsiveContainer>
             </ChartCard>
+          )}
+        </>
+      )}
+
+      {/* Go-Arounds Hourly Distribution */}
+      {goAroundsHourly.length > 0 && goAroundsHourly.some(h => h.count > 0) && (
+        <>
+          <div className="border-b border-white/10 pb-4 pt-8">
+            <h2 className="text-white text-xl font-bold mb-2 flex items-center gap-2">
+              <Clock className="w-5 h-5 text-purple-500" />
+              Go-Arounds by Time of Day
+            </h2>
+            <p className="text-white/60 text-sm">
+              Hourly distribution of aborted landings
+            </p>
+          </div>
+
+          <ChartCard title="Go-Arounds Hourly Distribution">
+            <ResponsiveContainer width="100%" height={300}>
+              <BarChart data={goAroundsHourly}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#ffffff20" />
+                <XAxis 
+                  dataKey="hour" 
+                  stroke="#ffffff60"
+                  tick={{ fill: '#ffffff60', fontSize: 10 }}
+                  tickFormatter={(h) => `${h}:00`}
+                />
+                <YAxis stroke="#ffffff60" tick={{ fill: '#ffffff60' }} />
+                <Tooltip
+                  contentStyle={{
+                    backgroundColor: '#1a1a1a',
+                    border: '1px solid #ffffff20',
+                    borderRadius: '8px'
+                  }}
+                  formatter={(value: number) => [value, 'Go-Arounds']}
+                  labelFormatter={(hour) => `${hour}:00 - ${hour}:59`}
+                />
+                <Bar 
+                  dataKey="count" 
+                  fill="#8b5cf6" 
+                  name="Go-Arounds" 
+                  radius={[4, 4, 0, 0]}
+                />
+              </BarChart>
+            </ResponsiveContainer>
+          </ChartCard>
+        </>
+      )}
+
+      {/* Daily Incident Clusters */}
+      {dailyIncidentClusters && dailyIncidentClusters.high_incident_days.length > 0 && (
+        <>
+          <div className="border-b border-white/10 pb-4 pt-8">
+            <h2 className="text-white text-xl font-bold mb-2 flex items-center gap-2">
+              <Calendar className="w-5 h-5 text-red-500" />
+              High Incident Days Analysis
+            </h2>
+            <p className="text-white/60 text-sm">
+              Days with multiple incidents and geographic clustering
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <StatCard
+              title="High Incident Days"
+              value={dailyIncidentClusters.high_incident_days.length.toString()}
+              subtitle="Days with 3+ events"
+              icon={<AlertTriangle className="w-6 h-6" />}
+            />
+            <StatCard
+              title="Avg Daily Incidents"
+              value={dailyIncidentClusters.average_daily_incidents.toFixed(1)}
+              subtitle="Average per day"
+            />
+            <StatCard
+              title="Peak Day"
+              value={dailyIncidentClusters.max_incidents_day.count.toString()}
+              subtitle={dailyIncidentClusters.max_incidents_day.date}
+            />
+          </div>
+
+          <div className="bg-surface rounded-xl border border-white/10 p-5">
+            <h3 className="text-white font-bold mb-4 flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4 text-red-400" />
+              Days with Multiple Incidents
+            </h3>
+            <div className="space-y-3 max-h-[400px] overflow-y-auto">
+              {dailyIncidentClusters.high_incident_days.slice(0, 10).map((day, idx) => (
+                <div key={idx} className={`rounded-lg p-4 ${
+                  day.geographically_clustered 
+                    ? 'bg-red-500/20 border border-red-500/30' 
+                    : 'bg-surface-highlight'
+                }`}>
+                  <div className="flex justify-between items-center mb-3">
+                    <div className="flex items-center gap-2">
+                      <span className="text-white font-bold">{day.date}</span>
+                      {day.geographically_clustered && (
+                        <span className="px-2 py-1 bg-red-500/30 text-red-300 text-xs rounded-full">
+                          Geographically Clustered
+                        </span>
+                      )}
+                    </div>
+                    <span className="text-white font-bold text-lg">
+                      {day.total_incidents} incidents
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-4 gap-2 text-sm">
+                    {day.emergency_count > 0 && (
+                      <div className="bg-black/20 rounded p-2 text-center">
+                        <div className="text-red-400 font-bold">{day.emergency_count}</div>
+                        <div className="text-white/50 text-xs">Emergency</div>
+                      </div>
+                    )}
+                    {day.near_miss_count > 0 && (
+                      <div className="bg-black/20 rounded p-2 text-center">
+                        <div className="text-orange-400 font-bold">{day.near_miss_count}</div>
+                        <div className="text-white/50 text-xs">Near-Miss</div>
+                      </div>
+                    )}
+                    {day.go_around_count > 0 && (
+                      <div className="bg-black/20 rounded p-2 text-center">
+                        <div className="text-purple-400 font-bold">{day.go_around_count}</div>
+                        <div className="text-white/50 text-xs">Go-Around</div>
+                      </div>
+                    )}
+                    {day.diversion_count > 0 && (
+                      <div className="bg-black/20 rounded p-2 text-center">
+                        <div className="text-blue-400 font-bold">{day.diversion_count}</div>
+                        <div className="text-white/50 text-xs">Diversion</div>
+                      </div>
+                    )}
+                  </div>
+                  {day.geographic_spread_deg > 0 && (
+                    <div className="mt-2 text-white/50 text-xs">
+                      Geographic spread: {day.geographic_spread_deg.toFixed(1)}° 
+                      ({day.geographically_clustered ? 'localized' : 'dispersed'})
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Insights */}
+          {dailyIncidentClusters.insights.length > 0 && (
+            <div className="bg-gradient-to-r from-indigo-500/10 to-purple-500/10 border border-indigo-500/30 rounded-xl p-4">
+              <h4 className="text-white font-bold mb-2">Insights</h4>
+              <ul className="text-white/70 text-sm space-y-1">
+                {dailyIncidentClusters.insights.map((insight, idx) => (
+                  <li key={idx} className="flex items-center gap-2">
+                    <span className="w-1.5 h-1.5 bg-indigo-400 rounded-full"></span>
+                    {insight}
+                  </li>
+                ))}
+              </ul>
+            </div>
           )}
         </>
       )}

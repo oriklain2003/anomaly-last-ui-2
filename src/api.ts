@@ -2355,18 +2355,6 @@ export const fetchGPSJammingTemporal = async (startTs: number, endTs: number): P
     return response.json();
 };
 
-// Go-arounds Hourly Distribution
-export interface GoAroundHourly {
-    hour: number;
-    count: number;
-    airports: string[];
-}
-
-export const fetchGoAroundsHourly = async (startTs: number, endTs: number): Promise<GoAroundHourly[]> => {
-    const response = await fetch(`${API_BASE}/stats/go-arounds/hourly?start_ts=${startTs}&end_ts=${endTs}`);
-    if (!response.ok) throw new Error('Failed to fetch go-arounds hourly data');
-    return response.json();
-};
 
 // Diversions Seasonal Analysis
 export interface DiversionsSeasonal {

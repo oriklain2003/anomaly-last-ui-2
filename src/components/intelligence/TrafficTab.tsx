@@ -11,12 +11,16 @@ import {
   fetchAirportHourlyTraffic,
   fetchSeasonalYearComparison,
   fetchTrafficSafetyCorrelation,
-  fetchSpecialEventsImpact
+  fetchSpecialEventsImpact,
+  fetchSignalLossAnomalies,
+  fetchDiversionsSeasonal
 } from '../../api';
 import type { 
   SeasonalYearComparison, 
   TrafficSafetyCorrelation, 
-  SpecialEventsImpact 
+  SpecialEventsImpact,
+  SignalLossAnomalyResponse,
+  DiversionsSeasonal
 } from '../../api';
 import type { FlightPerDay, SignalLossLocation, SignalLossMonthly, SignalLossHourly, BusiestAirport } from '../../types';
 import type { PeakHoursAnalysis, DiversionStats, AlternateAirport, RunwayUsage, DiversionMonthly, RTBEvent, FlightsMissingInfo, DeviationByType, BottleneckZone, AirportHourlyTraffic } from '../../api';
@@ -52,6 +56,10 @@ export function TrafficTab({ startTs, endTs, cacheKey = 0 }: TrafficTabProps) {
   const [trafficSafetyCorr, setTrafficSafetyCorr] = useState<TrafficSafetyCorrelation | null>(null);
   const [specialEvents, setSpecialEvents] = useState<SpecialEventsImpact | null>(null);
   const [seasonalLoading, setSeasonalLoading] = useState(false);
+  
+  // New dashboard demands state
+  const [signalLossAnomalies, setSignalLossAnomalies] = useState<SignalLossAnomalyResponse | null>(null);
+  const [diversionsSeasonal, setDiversionsSeasonal] = useState<DiversionsSeasonal | null>(null);
 
   useEffect(() => {
     loadData();
@@ -113,14 +121,18 @@ export function TrafficTab({ startTs, endTs, cacheKey = 0 }: TrafficTabProps) {
   const loadSeasonalData = async () => {
     setSeasonalLoading(true);
     try {
-      const [yearData, corrData, eventsData] = await Promise.all([
+      const [yearData, corrData, eventsData, signalAnomalies, seasonalDiversions] = await Promise.all([
         fetchSeasonalYearComparison(startTs, endTs),
         fetchTrafficSafetyCorrelation(startTs, endTs),
-        fetchSpecialEventsImpact(startTs, endTs)
+        fetchSpecialEventsImpact(startTs, endTs),
+        fetchSignalLossAnomalies(startTs, endTs).catch(() => null),
+        fetchDiversionsSeasonal(startTs, endTs).catch(() => null)
       ]);
       setYearComparison(yearData);
       setTrafficSafetyCorr(corrData);
       setSpecialEvents(eventsData);
+      setSignalLossAnomalies(signalAnomalies);
+      setDiversionsSeasonal(seasonalDiversions);
     } catch (error) {
       console.error('Failed to load seasonal data:', error);
     } finally {
