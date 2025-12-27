@@ -979,7 +979,7 @@ export interface MilitaryCountryData {
 
 export interface MilitaryAlert {
     type: string;
-    severity: 'high' | 'medium' | 'low';
+    severity: 'critical' | 'high' | 'medium' | 'low';
     message: string;
     details?: any;
 }
@@ -1549,6 +1549,15 @@ export interface SeasonalYearComparison {
     years: YearComparison[];
     month_comparison: MonthComparison[];
     insights: string[];
+    avg_daily_flights?: number;
+    peak_day?: {
+        date: string;
+        flight_count: number;
+    };
+    lowest_day?: {
+        date: string;
+        flight_count: number;
+    };
 }
 
 export interface HourlyCorrelation {
@@ -1580,10 +1589,18 @@ export interface WeeklyPattern {
     avg_anomalies: number;
 }
 
+export interface SpecialEvent {
+    event_name: string;
+    date: string;
+    flight_count: number;
+    change_percent: number;
+}
+
 export interface SpecialEventsImpact {
     detected_events: DetectedEvent[];
     weekly_pattern: WeeklyPattern[];
     insights: string[];
+    events?: SpecialEvent[];
 }
 
 export const fetchSeasonalYearComparison = async (startTs: number, endTs: number): Promise<SeasonalYearComparison> => {

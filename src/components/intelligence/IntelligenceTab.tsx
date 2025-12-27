@@ -29,7 +29,9 @@ import type {
   BilateralProximityResponse,
   MilitaryByDestinationResponse,
   ThreatAssessmentResponse,
-  JammingTriangulationResponse
+  JammingTriangulationResponse,
+  HourlyCorrelation,
+  SpecialEvent
 } from '../../api';
 import type { SignalLossLocation } from '../../types';
 import type { AirlineEfficiency, HoldingPatternAnalysis, GPSJammingPoint, MilitaryPattern, PatternCluster, AnomalyDNA } from '../../types';
@@ -1207,10 +1209,10 @@ export function IntelligenceTab({ startTs, endTs, cacheKey = 0 }: IntelligenceTa
             <StatCard
               title="Safest Hour"
               value={(() => {
-                const withTraffic = trafficSafetyCorr.hourly_correlation.filter((h: { traffic_count?: number }) => (h.traffic_count || 0) > 0);
+                const withTraffic = trafficSafetyCorr.hourly_correlation.filter((h: HourlyCorrelation) => h.traffic_count > 0);
                 if (withTraffic.length === 0) return 'N/A';
-                const safest = withTraffic.reduce((min: { safety_per_1000?: number; hour?: number }, h: { safety_per_1000?: number; hour?: number }) => 
-                  (h.safety_per_1000 || 0) < (min.safety_per_1000 || 0) ? h : min);
+                const safest = withTraffic.reduce((min: HourlyCorrelation, h: HourlyCorrelation) => 
+                  h.safety_per_1000 < min.safety_per_1000 ? h : min);
                 return `${safest.hour}:00`;
               })()}
               subtitle="Lowest risk"
@@ -1274,7 +1276,7 @@ export function IntelligenceTab({ startTs, endTs, cacheKey = 0 }: IntelligenceTa
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {specialEvents.events.slice(0, 6).map((event, idx) => (
+            {specialEvents.events!.slice(0, 6).map((event: SpecialEvent, idx: number) => (
               <div key={idx} className="bg-surface rounded-xl border border-white/10 p-5">
                 <div className="flex items-center justify-between mb-3">
                   <span className="text-white font-bold">{event.event_name}</span>

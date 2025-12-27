@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { AlertTriangle, AlertOctagon, Activity, Calendar, Clock, MapPin, TrendingUp, Plane, ArrowRightLeft, RotateCcw, Shield, Award, Star } from 'lucide-react';
+import { AlertTriangle, AlertOctagon, Activity, Calendar, Clock, MapPin, TrendingUp, Plane, ArrowRightLeft, RotateCcw, Shield, Award } from 'lucide-react';
 import { StatCard } from './StatCard';
 import { TableCard, Column } from './TableCard';
 import { ChartCard } from './ChartCard';
