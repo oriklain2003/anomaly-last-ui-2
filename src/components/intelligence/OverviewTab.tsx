@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { AlertTriangle, Plane, TrendingUp, AlertCircle, Shield, Activity, RotateCcw, MapPin } from 'lucide-react';
 import { StatCard } from './StatCard';
 import { ChartCard } from './ChartCard';
+import { QuestionTooltip } from './QuestionTooltip';
 import { fetchOverviewBatch, type MonthlyFlightStats } from '../../api';
 import type { OverviewStats, FlightPerDay, AirspaceRisk } from '../../types';
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
@@ -60,6 +61,20 @@ export function OverviewTab({ startTs, endTs, cacheKey = 0 }: OverviewTabProps) 
 
   return (
     <div className="space-y-6">
+      {/* Dashboard Summary Header */}
+      <div className="bg-gradient-to-r from-blue-500/10 to-cyan-500/10 border border-blue-500/30 rounded-xl p-6">
+        <div className="flex items-center gap-3 mb-3">
+          <div className="p-2 bg-blue-500/20 rounded-lg">
+            <Activity className="w-6 h-6 text-blue-400" />
+          </div>
+          <h2 className="text-white text-2xl font-bold">Dashboard Overview</h2>
+          <span className="px-3 py-1 bg-blue-500/20 text-blue-400 text-xs font-bold rounded-full">SUMMARY</span>
+        </div>
+        <p className="text-white/60 text-sm ml-12">
+          High-level summary of all aviation intelligence data for the selected period
+        </p>
+      </div>
+
       {/* Key Metrics */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard
@@ -67,29 +82,36 @@ export function OverviewTab({ startTs, endTs, cacheKey = 0 }: OverviewTabProps) 
           value={stats.total_flights.toLocaleString()}
           subtitle="Tracked flights"
           icon={<Plane className="w-6 h-6" />}
+          question={{ he: "כמה מטוסים עוברים מעל ישראל ביום?/בשבוע?/בחודש?", en: "How many planes pass over Israel per day/week/month?", level: "L1" }}
         />
         <StatCard
           title="Anomaly Flights"
           value={stats.total_anomalies.toLocaleString()}
           subtitle="Flights with anomalies"
           icon={<AlertTriangle className="w-6 h-6" />}
+          question={{ he: "כמה מטוסים לא טסו על פי נתיב מוגדר?", en: "How many planes did not fly according to a defined route?", level: "L1" }}
         />
         <StatCard
           title="Safety Events"
           value={stats.safety_events.toLocaleString()}
           subtitle="Critical incidents"
           icon={<AlertCircle className="w-6 h-6" />}
+          question={{ he: "כמה אירועי בטיחות (התקרבויות מתחת ל2000 רגל ו5 מייל) היו מעל ישראל/מעל ירדן?", en: "How many safety events were over Israel/Jordan?", level: "L1" }}
         />
         <StatCard
           title="Go-Arounds"
           value={stats.go_arounds.toLocaleString()}
           subtitle="Aborted landings"
           icon={<TrendingUp className="w-6 h-6" />}
+          question={{ he: "כמה מטוסים ביטלו נחיתה ברגע האחרון?", en: "How many planes aborted landing at the last minute?", level: "L1" }}
         />
       </div>
 
       {/* Flights Per Day Chart */}
-      <ChartCard title="Flights Per Day (Last 30 Days)">
+      <ChartCard 
+        title="Flights Per Day (Last 30 Days)"
+        question={{ he: "כמה מטוסים עוברים מעל ישראל ביום?", en: "How many planes pass over Israel per day?", level: "L1" }}
+      >
         {flightsPerDay.length > 0 ? (
           <ResponsiveContainer width="100%" height={300}>
             <LineChart data={flightsPerDay}>
@@ -136,7 +158,10 @@ export function OverviewTab({ startTs, endTs, cacheKey = 0 }: OverviewTabProps) 
 
       {/* Monthly Flight Aggregation */}
       {monthlyFlights.length > 0 && (
-        <ChartCard title="Monthly Flight Aggregation">
+        <ChartCard 
+          title="Monthly Flight Aggregation"
+          question={{ he: "באיזה חודש טסו הכי הרבה מטוסים בשמיים?", en: "Which month had the most planes flying in the sky?", level: "L1" }}
+        >
           <div className="mb-4">
             {(() => {
               const peakMonth = monthlyFlights.reduce((max, m) => m.total_flights > max.total_flights ? m : max, monthlyFlights[0]);
@@ -188,30 +213,35 @@ export function OverviewTab({ startTs, endTs, cacheKey = 0 }: OverviewTabProps) 
           value={stats.emergency_codes.toLocaleString()}
           subtitle="7700/7600/7500"
           icon={<AlertCircle className="w-5 h-5" />}
+          question={{ he: "כמה מטוסים החליפו לקוד מצוקה ומה קרה להם?", en: "How many planes switched to distress code?", level: "L1" }}
         />
         <StatCard
           title="Near-Miss Events"
           value={stats.near_miss.toLocaleString()}
           subtitle="Proximity violations"
           icon={<AlertTriangle className="w-5 h-5" />}
+          question={{ he: "מדד 'כמעט ונפגע' – התקרבויות בין מטוסים לפי דרגות חומרה", en: "Near-miss index - approaches between planes by severity", level: "L2" }}
         />
         <StatCard
           title="Return-To-Field"
           value={(stats.return_to_field || 0).toLocaleString()}
           subtitle="Returned to origin"
           icon={<RotateCcw className="w-5 h-5" />}
+          question={{ he: "כמה מטוסים המריאו, שהו פחות מ30 דקות באוויר וחזרו לנחיתה באותו בסיס?", en: "How many planes returned to same base within 30 min?", level: "L1" }}
         />
         <StatCard
           title="Unplanned Landing"
           value={(stats.unplanned_landing || 0).toLocaleString()}
           subtitle="Diverted flights"
           icon={<MapPin className="w-5 h-5" />}
+          question={{ he: "כמה מטוסים המריאו וחזרו לנחיתה ישר לאחר המראה (בניגוד למתוכנן)", en: "How many planes returned immediately after takeoff?", level: "L1" }}
         />
         <StatCard
           title="Military Flights"
           value={(stats.military_flights || 0).toLocaleString()}
           subtitle="Military/Government"
           icon={<Plane className="w-5 h-5" />}
+          question={{ he: "כמה מטוסים צבאיים טסים בשמי המזרח התיכון?", en: "How many military planes fly in Middle East skies?", level: "L1" }}
         />
         <StatCard
           title="Detection Rate"
@@ -236,7 +266,14 @@ export function OverviewTab({ startTs, endTs, cacheKey = 0 }: OverviewTabProps) 
                 <div className="text-2xl font-bold text-white">
                   {airspaceRisk ? airspaceRisk.risk_score : '--'}
                 </div>
-                <div className="text-xs text-amber-300">Airspace Risk Score</div>
+                <div className="text-xs text-amber-300 flex items-center gap-1">
+                  Airspace Risk Score
+                  <QuestionTooltip 
+                    question="מה הסיכוי לתאונה במשמרת הזו?" 
+                    questionEn="What is the chance of an accident in this shift?" 
+                    level="L4" 
+                  />
+                </div>
               </div>
             </div>
             {airspaceRisk && (

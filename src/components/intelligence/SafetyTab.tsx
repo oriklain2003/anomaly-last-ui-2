@@ -1,12 +1,14 @@
 import { useState, useEffect, useRef } from 'react';
-import { AlertTriangle, AlertOctagon, Activity, Calendar, Clock, MapPin, TrendingUp, Plane, Cloud, CloudRain, DollarSign } from 'lucide-react';
+import { AlertTriangle, AlertOctagon, Activity, Calendar, Clock, MapPin, TrendingUp, Plane, ArrowRightLeft, RotateCcw, Shield, Award, Star } from 'lucide-react';
 import { StatCard } from './StatCard';
 import { TableCard, Column } from './TableCard';
 import { ChartCard } from './ChartCard';
-import { fetchSafetyBatch, fetchWeatherImpact, fetchIntelligenceBatch, fetchGoAroundsHourly, fetchDailyIncidentClusters } from '../../api';
-import type { WeatherImpactAnalysis, EmergencyClusters, GoAroundHourly, DailyIncidentClusters } from '../../api';
+import { QuestionTooltip } from './QuestionTooltip';
+import { fetchSafetyBatch, fetchTrafficBatch } from '../../api';
+// Note: fetchWeatherImpact, fetchGoAroundsHourly, fetchDailyIncidentClusters now included in safety batch
+import type { EmergencyClusters, GoAroundHourly, DailyIncidentClusters, DiversionStats, RTBEvent, AirlineSafetyScorecard } from '../../api';
 import type { SafetyMonthly, NearMissLocation, SafetyByPhase, EmergencyAftermath, TopAirlineEmergency, NearMissByCountry } from '../../api';
-import type { EmergencyCodeStat, NearMissEvent, GoAroundStat, HoldingPatternAnalysis } from '../../types';
+import type { EmergencyCodeStat, NearMissEvent, GoAroundStat } from '../../types';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ComposedChart, Line } from 'recharts';
 import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
@@ -18,6 +20,15 @@ interface SafetyTabProps {
 }
 
 // Events Cluster Map Component - uses actual location data
+// EmergencyAftermath can be either the old array format or new summary format
+interface EmergencyAftermathSummary {
+  total_emergencies: number;
+  outcomes: Record<string, number>;
+  by_code: Record<string, number>;
+  by_airline: Array<{ airline: string; count: number }>;
+  recent_events: EmergencyAftermath[];
+}
+
 interface EventsClusterMapProps {
   nearMissLocations: Array<{
     lat: number;
@@ -26,7 +37,8 @@ interface EventsClusterMapProps {
     severity_high: number;
     severity_medium: number;
   }>;
-  emergencyEvents: EmergencyAftermath[];
+  emergencyEvents: EmergencyAftermath[] | EmergencyAftermathSummary;
+  nearMissByCountry?: NearMissByCountry | null; // Fallback for country-based visualization
 }
 
 // Airport coordinates lookup for emergency events
@@ -38,7 +50,33 @@ const AIRPORT_COORDS: Record<string, [number, number]> = {
   'ORBI': [33.26, 44.23], 'OEJN': [21.67, 39.17]
 };
 
-function EventsClusterMap({ nearMissLocations, emergencyEvents }: EventsClusterMapProps) {
+// Country centroids for fallback visualization - supports both ISO codes and full names
+const COUNTRY_CENTROIDS: Record<string, [number, number]> = {
+  // ISO codes
+  'IL': [31.5, 34.8],   // Israel
+  'JO': [31.0, 36.0],   // Jordan
+  'EG': [27.0, 30.0],   // Egypt
+  'CY': [35.0, 33.0],   // Cyprus
+  'LB': [33.9, 35.5],   // Lebanon
+  'SY': [35.0, 38.0],   // Syria
+  'SA': [24.0, 45.0],   // Saudi Arabia
+  'IQ': [33.0, 44.0],   // Iraq
+  'TR': [39.0, 35.0],   // Turkey
+  'GR': [39.0, 22.0],   // Greece
+  // Full names (for fallback when API returns country names)
+  'Israel': [31.5, 34.8],
+  'Jordan': [31.0, 36.0],
+  'Egypt': [27.0, 30.0],
+  'Cyprus': [35.0, 33.0],
+  'Lebanon': [33.9, 35.5],
+  'Syria': [35.0, 38.0],
+  'Saudi Arabia': [24.0, 45.0],
+  'Iraq': [33.0, 44.0],
+  'Turkey': [39.0, 35.0],
+  'Greece': [39.0, 22.0],
+};
+
+function EventsClusterMap({ nearMissLocations, emergencyEvents, nearMissByCountry }: EventsClusterMapProps) {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const markersRef = useRef<maplibregl.Marker[]>([]);
@@ -63,8 +101,25 @@ function EventsClusterMap({ nearMissLocations, emergencyEvents }: EventsClusterM
     const currentMap = mapRef.current;
 
     const addMarkers = () => {
+      // Use nearMissLocations if available, otherwise fallback to country centroids
+      const locationsToShow = nearMissLocations.length > 0 
+        ? nearMissLocations 
+        : (nearMissByCountry?.by_country 
+            ? Object.entries(nearMissByCountry.by_country).map(([country, count]) => {
+                const centroid = COUNTRY_CENTROIDS[country];
+                if (!centroid) return null;
+                return {
+                  lat: centroid[0] + (Math.random() - 0.5) * 0.5, // Add jitter
+                  lon: centroid[1] + (Math.random() - 0.5) * 0.5,
+                  count: count as number,
+                  severity_high: Math.floor((count as number) * 0.3),
+                  severity_medium: Math.ceil((count as number) * 0.7)
+                };
+              }).filter(Boolean) as typeof nearMissLocations
+            : []);
+
       // Add near-miss location markers (orange) - these have real coordinates
-      nearMissLocations.forEach(loc => {
+      locationsToShow.forEach(loc => {
         const size = Math.min(50, 20 + loc.count * 3);
         const hasHighSeverity = loc.severity_high > 0;
         const color = hasHighSeverity ? '#ef4444' : '#f97316'; // Red if high severity, orange otherwise
@@ -109,7 +164,12 @@ function EventsClusterMap({ nearMissLocations, emergencyEvents }: EventsClusterM
       // Add emergency event markers - use airport coordinates
       const emergencyByAirport: Record<string, { count: number; events: EmergencyAftermath[] }> = {};
       
-      emergencyEvents.forEach(event => {
+      // Handle both array format and summary format
+      const emergencyEventsList: EmergencyAftermath[] = Array.isArray(emergencyEvents) 
+        ? emergencyEvents 
+        : (emergencyEvents as EmergencyAftermathSummary)?.recent_events || [];
+      
+      emergencyEventsList.forEach(event => {
         // Use destination or origin airport
         const airport = event.landing_airport || event.destination || event.origin;
         if (airport && AIRPORT_COORDS[airport]) {
@@ -177,10 +237,17 @@ function EventsClusterMap({ nearMissLocations, emergencyEvents }: EventsClusterM
     return () => {
       markersRef.current.forEach(m => m.remove());
     };
-  }, [nearMissLocations, emergencyEvents]);
+  }, [nearMissLocations, emergencyEvents, nearMissByCountry]);
 
-  const totalNearMiss = nearMissLocations.reduce((sum, loc) => sum + loc.count, 0);
-  const totalEmergency = emergencyEvents.length;
+  // Use nearMissByCountry total if nearMissLocations is empty
+  const totalNearMiss = nearMissLocations.length > 0 
+    ? nearMissLocations.reduce((sum, loc) => sum + loc.count, 0)
+    : (nearMissByCountry?.total_near_miss || 0);
+  
+  // Handle both array format and summary format for emergency count
+  const totalEmergency = Array.isArray(emergencyEvents) 
+    ? emergencyEvents.length 
+    : (emergencyEvents as EmergencyAftermathSummary)?.total_emergencies || 0;
 
   return (
     <div className="bg-surface rounded-xl border border-white/10 overflow-hidden">
@@ -213,17 +280,20 @@ export function SafetyTab({ startTs, endTs, cacheKey = 0 }: SafetyTabProps) {
   const [emergencyCodes, setEmergencyCodes] = useState<EmergencyCodeStat[]>([]);
   const [nearMiss, setNearMiss] = useState<NearMissEvent[]>([]);
   const [goArounds, setGoArounds] = useState<GoAroundStat[]>([]);
-  const [holdingPatterns, setHoldingPatterns] = useState<HoldingPatternAnalysis | null>(null);
   const [safetyMonthly, setSafetyMonthly] = useState<SafetyMonthly[]>([]);
   const [nearMissLocations, setNearMissLocations] = useState<NearMissLocation[]>([]);
   const [safetyByPhase, setSafetyByPhase] = useState<SafetyByPhase | null>(null);
-  const [emergencyAftermath, setEmergencyAftermath] = useState<EmergencyAftermath[]>([]);
+  const [emergencyAftermath, setEmergencyAftermath] = useState<EmergencyAftermath[] | EmergencyAftermathSummary>([]);
   const [topAirlineEmergencies, setTopAirlineEmergencies] = useState<TopAirlineEmergency[]>([]);
   const [nearMissByCountry, setNearMissByCountry] = useState<NearMissByCountry | null>(null);
-  const [weatherImpact, setWeatherImpact] = useState<WeatherImpactAnalysis | null>(null);
   const [emergencyClusters, setEmergencyClusters] = useState<EmergencyClusters | null>(null);
   const [goAroundsHourly, setGoAroundsHourly] = useState<GoAroundHourly[]>([]);
   const [dailyIncidentClusters, setDailyIncidentClusters] = useState<DailyIncidentClusters | null>(null);
+  // Diversion data (moved from Traffic - Level 1 Category A)
+  const [diversionStats, setDiversionStats] = useState<DiversionStats | null>(null);
+  const [rtbEvents, setRtbEvents] = useState<RTBEvent[]>([]);
+  // Airline Safety Scorecard
+  const [airlineSafetyScorecard, setAirlineSafetyScorecard] = useState<AirlineSafetyScorecard | null>(null);
   const [loading, setLoading] = useState(true);
 
   // Map refs for near-miss heatmap
@@ -238,12 +308,14 @@ export function SafetyTab({ startTs, endTs, cacheKey = 0 }: SafetyTabProps) {
   const loadData = async () => {
     setLoading(true);
     try {
-      // Use batch API - single request instead of 10 parallel calls
-      const [safetyData, intelData] = await Promise.all([
+      // Use batch API - single request for ALL safety data (now includes hourly, clusters)
+      // Also fetch traffic batch for diversions and RTB (Level 1 Category A)
+      const [safetyData, trafficData] = await Promise.all([
         fetchSafetyBatch(startTs, endTs),
-        fetchIntelligenceBatch(startTs, endTs, ['holding'])
+        fetchTrafficBatch(startTs, endTs)
       ]);
       
+      // Core safety data
       setEmergencyCodes(safetyData.emergency_codes || []);
       setNearMiss(safetyData.near_miss || []);
       setGoArounds(safetyData.go_arounds || []);
@@ -255,22 +327,16 @@ export function SafetyTab({ startTs, endTs, cacheKey = 0 }: SafetyTabProps) {
       setNearMissByCountry(safetyData.near_miss_by_country || null);
       setEmergencyClusters(safetyData.emergency_clusters || null);
       
-      // Set holding patterns from intelligence batch
-      setHoldingPatterns(intelData.holding_patterns || null);
+      // Additional safety data (now included in batch)
+      setGoAroundsHourly(safetyData.go_arounds_hourly || []);
+      setDailyIncidentClusters(safetyData.daily_incident_clusters || null);
       
-      // Load additional data in parallel
-      try {
-        const [weather, hourlyGoArounds, incidentClusters] = await Promise.all([
-          fetchWeatherImpact(startTs, endTs).catch(() => null),
-          fetchGoAroundsHourly(startTs, endTs).catch(() => []),
-          fetchDailyIncidentClusters(startTs, endTs).catch(() => null)
-        ]);
-        setWeatherImpact(weather);
-        setGoAroundsHourly(hourlyGoArounds || []);
-        setDailyIncidentClusters(incidentClusters);
-      } catch (e) {
-        console.error('Failed to load additional safety data:', e);
-      }
+      // Airline Safety Scorecard
+      setAirlineSafetyScorecard(safetyData.airline_scorecard || null);
+      
+      // Diversion data from traffic batch (Level 1 Category A - Safety)
+      setDiversionStats(trafficData.diversion_stats || null);
+      setRtbEvents(trafficData.rtb_events || []);
     } catch (error) {
       console.error('Failed to load safety data:', error);
     } finally {
@@ -360,6 +426,11 @@ export function SafetyTab({ startTs, endTs, cacheKey = 0 }: SafetyTabProps) {
     );
   }
 
+  // Helper to get emergency events array from either format
+  const emergencyEventsList: EmergencyAftermath[] = Array.isArray(emergencyAftermath) 
+    ? emergencyAftermath 
+    : (emergencyAftermath as EmergencyAftermathSummary)?.recent_events || [];
+
   const totalEmergencies = emergencyCodes.reduce((sum, code) => sum + code.count, 0);
   const highSeverityNearMiss = nearMiss.filter(e => e.severity === 'high').length;
   const totalGoArounds = goArounds.reduce((sum, ga) => sum + ga.count, 0);
@@ -368,14 +439,6 @@ export function SafetyTab({ startTs, endTs, cacheKey = 0 }: SafetyTabProps) {
   const mostDangerousMonth = safetyMonthly.length > 0 
     ? safetyMonthly.reduce((max, m) => m.total_events > max.total_events ? m : max, safetyMonthly[0])
     : null;
-
-  // Prepare holding pattern data for chart
-  const holdingByAirportData = holdingPatterns 
-    ? Object.entries(holdingPatterns.events_by_airport)
-        .sort(([, a], [, b]) => b - a)
-        .slice(0, 10)
-        .map(([airport, count]) => ({ airport, count }))
-    : [];
 
   const nearMissColumns: Column[] = [
     { key: 'timestamp', title: 'Time', render: (val) => new Date(val * 1000).toLocaleString() },
@@ -387,7 +450,11 @@ export function SafetyTab({ startTs, endTs, cacheKey = 0 }: SafetyTabProps) {
       key: 'severity', 
       title: 'Severity',
       render: (val) => (
-        <span className={val === 'high' ? 'text-red-500 font-bold' : 'text-yellow-500'}>
+        <span className={
+          val === 'critical' ? 'text-red-500 font-bold' : 
+          val === 'high' ? 'text-yellow-500 font-bold' : 
+          'text-pink-400'
+        }>
           {val.toUpperCase()}
         </span>
       )
@@ -396,6 +463,20 @@ export function SafetyTab({ startTs, endTs, cacheKey = 0 }: SafetyTabProps) {
 
   return (
     <div className="space-y-6">
+      {/* Level 1 Category A: Safety and Edge Events - Header */}
+      <div className="border-b-2 border-red-500/50 pb-4">
+        <div className="flex items-center gap-3 mb-2">
+          <div className="p-2 bg-red-500/20 rounded-lg">
+            <AlertTriangle className="w-6 h-6 text-red-400" />
+          </div>
+          <h2 className="text-white text-2xl font-bold">Safety & Edge Events</h2>
+          <span className="px-3 py-1 bg-red-500/20 text-red-400 text-xs font-bold rounded-full">LEVEL 1</span>
+        </div>
+        <p className="text-white/60 text-sm ml-12">
+          Near-miss events, emergency codes, go-arounds, diversions, and return-to-base events
+        </p>
+      </div>
+
       {/* Key Safety Metrics */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <StatCard
@@ -403,18 +484,21 @@ export function SafetyTab({ startTs, endTs, cacheKey = 0 }: SafetyTabProps) {
           value={totalEmergencies}
           subtitle="7700/7600/7500 squawks"
           icon={<AlertTriangle className="w-6 h-6" />}
+          question={{ he: "כמה מטוסים החליפו לקוד מצוקה ומה קרה להם?", en: "How many planes switched to distress code?", level: "L1" }}
         />
         <StatCard
           title="Near-Miss Events"
           value={nearMiss.length}
           subtitle={`${highSeverityNearMiss} high severity`}
           icon={<AlertOctagon className="w-6 h-6" />}
+          question={{ he: "מדד 'כמעט ונפגע' – התקרבויות בין מטוסים לפי דרגות חומרה ואזורי עניין", en: "Near-miss index by severity and areas of interest", level: "L2" }}
         />
         <StatCard
           title="Go-Arounds"
           value={totalGoArounds}
           subtitle="Aborted landings"
           icon={<Activity className="w-6 h-6" />}
+          question={{ he: "כמה מטוסים ביטלו נחיתה ברגע האחרון?", en: "How many planes aborted landing at the last minute?", level: "L1" }}
         />
         {mostDangerousMonth && (
           <StatCard
@@ -422,17 +506,221 @@ export function SafetyTab({ startTs, endTs, cacheKey = 0 }: SafetyTabProps) {
             value={mostDangerousMonth.month}
             subtitle={`${mostDangerousMonth.total_events} events`}
             icon={<Calendar className="w-6 h-6" />}
+            question={{ he: "איזה חודש היה הכי מסוכן מבחינה בטיחותית?", en: "Which month was the most dangerous safety-wise?", level: "L2" }}
           />
         )}
       </div>
 
+      {/* Airline Safety Scorecard - WOW Panel */}
+      {airlineSafetyScorecard && airlineSafetyScorecard.scorecards.length > 0 && (
+        <>
+          <div className="border-b border-white/10 pb-4 pt-4">
+            <h2 className="text-white text-xl font-bold mb-2 flex items-center gap-2">
+              <Shield className="w-5 h-5 text-emerald-500" />
+              Airline Safety Scorecard
+              <QuestionTooltip 
+                question="איזה חברת תעופה הכריזה הכי הרבה על מצב חירום או שינוי קוד?"
+                questionEn="Which airline declared the most emergency or code changes?"
+                level="L2"
+              />
+            </h2>
+            <p className="text-white/60 text-sm">
+              Comprehensive safety performance analysis for each airline
+            </p>
+          </div>
+
+          {/* Summary Cards */}
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div className="bg-gradient-to-br from-emerald-900/30 to-teal-900/30 border border-emerald-700/50 rounded-xl p-5">
+              <div className="flex items-center gap-2 mb-2">
+                <Award className="w-5 h-5 text-emerald-400" />
+                <span className="text-white/60 text-sm">Best Performer</span>
+              </div>
+              {airlineSafetyScorecard.summary.best_performer ? (
+                <>
+                  <div className="text-emerald-400 text-2xl font-bold">
+                    {airlineSafetyScorecard.summary.best_performer.airline_name}
+                  </div>
+                  <div className="text-white/50 text-sm">
+                    Score: {airlineSafetyScorecard.summary.best_performer.score}/100
+                  </div>
+                </>
+              ) : (
+                <div className="text-white/40">No data</div>
+              )}
+            </div>
+
+            <div className="bg-surface rounded-xl border border-white/10 p-5">
+              <div className="text-white/60 text-sm mb-2">Airlines Analyzed</div>
+              <div className="text-white text-2xl font-bold">{airlineSafetyScorecard.summary.total_airlines}</div>
+              <div className="text-white/50 text-sm">with 10+ flights</div>
+            </div>
+
+            <div className="bg-surface rounded-xl border border-white/10 p-5">
+              <div className="text-white/60 text-sm mb-2">Average Score</div>
+              <div className="text-white text-2xl font-bold">{airlineSafetyScorecard.summary.average_score}</div>
+              <div className="text-white/50 text-sm">across all airlines</div>
+            </div>
+
+            <div className="bg-gradient-to-br from-red-900/30 to-orange-900/30 border border-red-700/50 rounded-xl p-5">
+              <div className="flex items-center gap-2 mb-2">
+                <AlertTriangle className="w-5 h-5 text-red-400" />
+                <span className="text-white/60 text-sm">Needs Attention</span>
+              </div>
+              <div className="text-red-400 text-2xl font-bold">
+                {airlineSafetyScorecard.summary.needs_attention.length}
+              </div>
+              <div className="text-white/50 text-sm">airlines with D/F grades</div>
+            </div>
+          </div>
+
+          {/* Scorecard Table */}
+          <div className="bg-surface rounded-xl border border-white/10 overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b border-white/10">
+                    <th className="text-left text-white/60 text-sm font-medium px-4 py-3">Rank</th>
+                    <th className="text-left text-white/60 text-sm font-medium px-4 py-3">Airline</th>
+                    <th className="text-center text-white/60 text-sm font-medium px-4 py-3">Grade</th>
+                    <th className="text-center text-white/60 text-sm font-medium px-4 py-3">Score</th>
+                    <th className="text-center text-white/60 text-sm font-medium px-4 py-3">Flights</th>
+                    <th className="text-center text-white/60 text-sm font-medium px-4 py-3">Emergencies</th>
+                    <th className="text-center text-white/60 text-sm font-medium px-4 py-3">Near-Miss</th>
+                    <th className="text-center text-white/60 text-sm font-medium px-4 py-3">Go-Arounds</th>
+                    <th className="text-left text-white/60 text-sm font-medium px-4 py-3">Issues</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {[...airlineSafetyScorecard.scorecards].sort((a, b) => a.safety_score - b.safety_score).slice(0, 20).map((airline, idx) => (
+                    <tr key={airline.airline} className={`border-b border-white/5 hover:bg-white/5 ${
+                      airline.safety_grade === 'F' ? 'bg-red-900/10' :
+                      airline.safety_grade === 'D' ? 'bg-orange-900/10' : ''
+                    }`}>
+                      <td className="px-4 py-3 text-white/60 text-sm font-mono">
+                        {idx + 1}
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-2">
+                          {idx === 0 && <AlertTriangle className="w-4 h-4 text-red-400" />}
+                          <div>
+                            <div className="text-white font-medium">{airline.airline_name}</div>
+                            <div className="text-white/40 text-xs">{airline.airline}</div>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 text-center">
+                        <span className={`inline-flex items-center justify-center w-8 h-8 rounded-full text-sm font-bold ${
+                          airline.safety_grade === 'A' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/50' :
+                          airline.safety_grade === 'B' ? 'bg-blue-500/20 text-blue-400 border border-blue-500/50' :
+                          airline.safety_grade === 'C' ? 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/50' :
+                          airline.safety_grade === 'D' ? 'bg-orange-500/20 text-orange-400 border border-orange-500/50' :
+                          'bg-red-500/20 text-red-400 border border-red-500/50'
+                        }`}>
+                          {airline.safety_grade}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-center">
+                        <div className="flex items-center justify-center gap-2">
+                          <div className="w-16 bg-black/30 rounded-full h-2">
+                            <div 
+                              className={`h-2 rounded-full transition-all ${
+                                airline.safety_score >= 90 ? 'bg-emerald-500' :
+                                airline.safety_score >= 80 ? 'bg-blue-500' :
+                                airline.safety_score >= 70 ? 'bg-yellow-500' :
+                                airline.safety_score >= 60 ? 'bg-orange-500' :
+                                'bg-red-500'
+                              }`}
+                              style={{ width: `${airline.safety_score}%` }}
+                            />
+                          </div>
+                          <span className="text-white font-medium text-sm w-8">{airline.safety_score}</span>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 text-center text-white/60 text-sm">
+                        {airline.total_flights.toLocaleString()}
+                      </td>
+                      <td className="px-4 py-3 text-center">
+                        <span className={airline.emergencies > 0 ? 'text-red-400 font-bold' : 'text-white/40'}>
+                          {airline.emergencies}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-center">
+                        <span className={airline.near_miss > 0 ? 'text-orange-400 font-bold' : 'text-white/40'}>
+                          {airline.near_miss}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-center">
+                        <span className={airline.go_arounds > 0 ? 'text-purple-400' : 'text-white/40'}>
+                          {airline.go_arounds}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex flex-wrap gap-1">
+                          {airline.issues.slice(0, 2).map((issue, i) => (
+                            <span key={i} className="px-2 py-0.5 bg-surface-highlight rounded text-xs text-white/60">
+                              {issue.length > 30 ? issue.substring(0, 30) + '...' : issue}
+                            </span>
+                          ))}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {airlineSafetyScorecard.scorecards.length > 20 && (
+              <div className="px-4 py-3 bg-surface-highlight text-center">
+                <span className="text-white/50 text-sm">
+                  Showing top 20 of {airlineSafetyScorecard.scorecards.length} airlines
+                </span>
+              </div>
+            )}
+          </div>
+
+          {/* Airlines Needing Attention */}
+          {airlineSafetyScorecard.summary.needs_attention.length > 0 && (
+            <div className="bg-gradient-to-r from-red-500/10 to-orange-500/10 border border-red-500/30 rounded-xl p-4">
+              <h3 className="text-red-400 font-medium mb-3 flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4" />
+                Airlines Requiring Attention
+              </h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                {airlineSafetyScorecard.summary.needs_attention.map((airline) => (
+                  <div key={airline.airline} className="bg-black/20 rounded-lg p-3">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-white font-medium">{airline.airline_name}</span>
+                      <span className="text-white/40 text-xs">{airline.airline}</span>
+                    </div>
+                    <ul className="text-sm text-white/60 space-y-1">
+                      {airline.issues.map((issue, i) => (
+                        <li key={i} className="flex items-start gap-1">
+                          <span className="text-red-400">•</span>
+                          {issue}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </>
+      )}
+
       {/* Monthly Safety Events Breakdown */}
+      {/* Q: איזה חודש היה הכי מסוכן מבחינה בטיחותית? (L2) */}
       {safetyMonthly.length > 0 && (
         <>
           <div className="border-b border-white/10 pb-4 pt-4">
             <h2 className="text-white text-xl font-bold mb-2 flex items-center gap-2">
               <TrendingUp className="w-5 h-5 text-red-500" />
               Monthly Safety Trends
+              <QuestionTooltip 
+                question="איזה חודש היה הכי מסוכן מבחינה בטיחותית?"
+                questionEn="Which month was the most dangerous safety-wise?"
+                level="L2"
+              />
             </h2>
             <p className="text-white/60 text-sm">
               Which month was the most dangerous?
@@ -480,6 +768,11 @@ export function SafetyTab({ startTs, endTs, cacheKey = 0 }: SafetyTabProps) {
             <h2 className="text-white text-xl font-bold mb-2 flex items-center gap-2">
               <Activity className="w-5 h-5 text-purple-500" />
               Events by Flight Phase
+              <QuestionTooltip 
+                question="כמה אירועי בטיחות קרו בגובה שיוט לעומת כמה בגישה לנחיתה?"
+                questionEn="How many safety events at cruise altitude vs approach?"
+                level="L2"
+              />
             </h2>
             <p className="text-white/60 text-sm">
               How many safety events occur at cruise altitude vs approach?
@@ -506,10 +799,6 @@ export function SafetyTab({ startTs, endTs, cacheKey = 0 }: SafetyTabProps) {
                   <span className="text-white/60">Near-miss</span>
                   <span className="text-orange-400">{safetyByPhase.phases.cruise.near_miss}</span>
                 </div>
-                <div className="flex justify-between">
-                  <span className="text-white/60">Go-around</span>
-                  <span className="text-purple-400">{safetyByPhase.phases.cruise.go_around}</span>
-                </div>
               </div>
               <div className="mt-3 pt-3 border-t border-white/10">
                 <div className="text-white/40 text-xs">{safetyByPhase.percentages.cruise}% of events</div>
@@ -534,10 +823,6 @@ export function SafetyTab({ startTs, endTs, cacheKey = 0 }: SafetyTabProps) {
                 <div className="flex justify-between">
                   <span className="text-white/60">Near-miss</span>
                   <span className="text-orange-400">{safetyByPhase.phases.descent_climb.near_miss}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-white/60">Go-around</span>
-                  <span className="text-purple-400">{safetyByPhase.phases.descent_climb.go_around}</span>
                 </div>
               </div>
               <div className="mt-3 pt-3 border-t border-white/10">
@@ -697,7 +982,8 @@ export function SafetyTab({ startTs, endTs, cacheKey = 0 }: SafetyTabProps) {
       </div>
 
       {/* Emergency Aftermath Analysis */}
-      {emergencyAftermath.length > 0 && (
+      {/* Q: כמה מטוסים החליפו לקוד מצוקה ומה קרה להם (מה המטוס ביצע לאחר מכן)? (L2) */}
+      {emergencyEventsList.length > 0 && (
         <>
           <div className="border-b border-white/10 pb-4 pt-4">
             <h2 className="text-white text-xl font-bold mb-2 flex items-center gap-2">
@@ -718,7 +1004,7 @@ export function SafetyTab({ startTs, endTs, cacheKey = 0 }: SafetyTabProps) {
               { outcome: 'go_around_then_landed', label: 'Go-Around + Land', color: 'text-purple-400 bg-purple-500/20' },
               { outcome: 'continued_flight', label: 'Continued', color: 'text-blue-400 bg-blue-500/20' }
             ].map(({ outcome, label, color }) => {
-              const count = emergencyAftermath.filter(e => e.outcome === outcome).length;
+              const count = emergencyEventsList.filter(e => e.outcome === outcome).length;
               return (
                 <div key={outcome} className={`rounded-lg p-3 ${color.split(' ')[1]} border border-white/10`}>
                   <div className={`text-2xl font-bold ${color.split(' ')[0]}`}>{count}</div>
@@ -743,7 +1029,7 @@ export function SafetyTab({ startTs, endTs, cacheKey = 0 }: SafetyTabProps) {
                   </tr>
                 </thead>
                 <tbody>
-                  {emergencyAftermath.slice(0, 15).map((event, idx) => (
+                  {emergencyEventsList.slice(0, 15).map((event, idx) => (
                     <tr key={`${event.flight_id}-${idx}`} className="border-b border-white/5 hover:bg-white/5">
                       <td className="px-4 py-3 text-white/60 text-sm">
                         {new Date(event.timestamp * 1000).toLocaleString()}
@@ -788,9 +1074,9 @@ export function SafetyTab({ startTs, endTs, cacheKey = 0 }: SafetyTabProps) {
                 </tbody>
               </table>
             </div>
-            {emergencyAftermath.length > 15 && (
+            {emergencyEventsList.length > 15 && (
               <div className="px-4 py-3 bg-surface-highlight text-center">
-                <span className="text-white/50 text-sm">Showing 15 of {emergencyAftermath.length} events</span>
+                <span className="text-white/50 text-sm">Showing 15 of {emergencyEventsList.length} events</span>
               </div>
             )}
           </div>
@@ -798,6 +1084,7 @@ export function SafetyTab({ startTs, endTs, cacheKey = 0 }: SafetyTabProps) {
       )}
 
       {/* Emergency Clusters Section */}
+      {/* Q: האם היו כמה אירועים ביום אחד? האם היו באותו האזור? (L2) */}
       {emergencyClusters && emergencyClusters.total_multi_incident_days > 0 && (
         <>
           <div className="border-b border-white/10 pb-4 pt-4">
@@ -931,123 +1218,9 @@ export function SafetyTab({ startTs, endTs, cacheKey = 0 }: SafetyTabProps) {
         </>
       )}
 
-      {/* Holdings Analysis Section */}
-      {holdingPatterns && (
-        <>
-          <div className="border-b border-white/10 pb-4 pt-4">
-            <h2 className="text-white text-xl font-bold mb-2 flex items-center gap-2">
-              <Clock className="w-5 h-5 text-cyan-500" />
-              Holdings Analysis
-            </h2>
-            <p className="text-white/60 text-sm">
-              Total holding time, fuel cost estimates, and peak hours
-            </p>
-          </div>
-
-          {/* Holdings Stats */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <StatCard
-              title="Total Holding Time"
-              value={`${holdingPatterns.total_time_hours.toFixed(1)}h`}
-              subtitle="Wasted fuel time"
-              icon={<Clock className="w-6 h-6" />}
-            />
-            <StatCard
-              title="Estimated Fuel Cost"
-              value={`$${holdingPatterns.estimated_fuel_cost_usd.toLocaleString()}`}
-              subtitle="Approximate cost"
-              icon={<DollarSign className="w-6 h-6" />}
-            />
-            <StatCard
-              title="Peak Holding Hours"
-              value={holdingPatterns.peak_hours.slice(0, 3).map(h => `${h}:00`).join(', ')}
-              subtitle="Busiest times"
-              icon={<TrendingUp className="w-6 h-6" />}
-            />
-          </div>
-
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            {/* Holding Events by Airport */}
-            <ChartCard title="Holding Events by Airport">
-              {holdingByAirportData.length > 0 ? (
-                <ResponsiveContainer width="100%" height={250}>
-                  <BarChart data={holdingByAirportData} layout="vertical">
-                    <CartesianGrid strokeDasharray="3 3" stroke="#ffffff20" />
-                    <XAxis type="number" stroke="#ffffff60" tick={{ fill: '#ffffff60' }} />
-                    <YAxis 
-                      type="category" 
-                      dataKey="airport" 
-                      stroke="#ffffff60" 
-                      tick={{ fill: '#ffffff60' }} 
-                      width={60}
-                    />
-                    <Tooltip
-                      contentStyle={{
-                        backgroundColor: '#1a1a1a',
-                        border: '1px solid #ffffff20',
-                        borderRadius: '8px'
-                      }}
-                    />
-                    <Bar dataKey="count" fill="#06b6d4" radius={[0, 4, 4, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
-              ) : (
-                <div className="h-64 flex items-center justify-center text-white/40">
-                  No holding pattern data available
-                </div>
-              )}
-            </ChartCard>
-
-            {/* Holdings Distribution Summary */}
-            <div className="bg-surface rounded-xl border border-white/10 p-5">
-              <h4 className="text-white font-medium mb-4">Holdings Distribution</h4>
-              <div className="space-y-3">
-                {holdingByAirportData.slice(0, 6).map(({ airport, count }) => {
-                  const maxCount = holdingByAirportData[0]?.count || 1;
-                  const percentage = (count / maxCount) * 100;
-                  return (
-                    <div key={airport} className="flex items-center gap-3">
-                      <div className="w-12 text-white font-bold text-sm">{airport}</div>
-                      <div className="flex-1">
-                        <div className="flex justify-between items-center mb-1">
-                          <span className="text-white/60 text-sm">{count} events</span>
-                        </div>
-                        <div className="w-full bg-black/30 rounded-full h-2">
-                          <div 
-                            className="bg-cyan-500 h-2 rounded-full transition-all"
-                            style={{ width: `${percentage}%` }}
-                          />
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-              <div className="mt-4 pt-4 border-t border-white/10 text-center">
-                <div className="text-white font-bold text-2xl">{Object.keys(holdingPatterns.events_by_airport).length}</div>
-                <div className="text-white/50 text-sm">Airports with Holdings</div>
-              </div>
-            </div>
-          </div>
-
-          {/* Peak Hours Summary */}
-          {holdingPatterns.peak_hours.length > 0 && (
-            <div className="bg-gradient-to-r from-cyan-500/10 to-blue-500/10 border border-cyan-500/30 rounded-xl p-4">
-              <div className="flex items-center gap-3">
-                <Clock className="w-5 h-5 text-cyan-400" />
-                <div>
-                  <span className="text-white font-medium">Peak Holding Hours: </span>
-                  <span className="text-cyan-400 font-bold">
-                    {holdingPatterns.peak_hours.slice(0, 5).map(h => `${h}:00`).join(', ')}
-                  </span>
-                </div>
-              </div>
-            </div>
-          )}
-        </>
-      )}
 
       {/* Near-Miss by Country */}
+      {/* Q: כמה אירועי בטיחות (התקרבויות מתחת ל2000 רגל ו5 מייל) היו מעל ישראל/מעל ירדן? (L1) */}
       {nearMissByCountry && nearMissByCountry.total_near_miss > 0 && (
         <>
           <div className="border-b border-white/10 pb-4 pt-4">
@@ -1099,12 +1272,14 @@ export function SafetyTab({ startTs, endTs, cacheKey = 0 }: SafetyTabProps) {
             <EventsClusterMap 
               nearMissLocations={nearMissLocations}
               emergencyEvents={emergencyAftermath}
+              nearMissByCountry={nearMissByCountry}
             />
           </div>
         </>
       )}
 
       {/* Near-Miss Geographic Heatmap */}
+      {/* Q: איפה קורים (על איזה נתיב/איפה גיאוגרפית) הכי הרבה אירועי בטיחות? (L2) */}
       {nearMissLocations.length > 0 && (
         <>
           <div className="border-b border-white/10 pb-4 pt-4">
@@ -1190,159 +1365,182 @@ export function SafetyTab({ startTs, endTs, cacheKey = 0 }: SafetyTabProps) {
         data={nearMiss.slice(0, 20)}
       />
 
-      {/* Weather Impact Section */}
-      {weatherImpact && (
+      {/* Diversions Section - Level 1 Category A */}
+      {/* Q: כמה מטוסים לא הגיעו ליעדם המקורי? / כמה מטוסים ביצעו מעקפים גדולים מהנתיב טיסה? (L1/L2) */}
+      <>
+        <div className="border-b border-white/10 pb-4 pt-8">
+          <h2 className="text-white text-xl font-bold mb-2 flex items-center gap-2">
+            <ArrowRightLeft className="w-5 h-5 text-orange-500" />
+            Diversion Analysis
+          </h2>
+          <p className="text-white/60 text-sm">
+            Aircraft that did not reach their original destination
+          </p>
+        </div>
+
+        {diversionStats ? (
+          <>
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+              <StatCard
+                title="Total Diversions"
+                value={diversionStats.total_diversions || 0}
+                subtitle="Did not reach destination"
+                icon={<ArrowRightLeft className="w-6 h-6" />}
+              />
+              <StatCard
+                title="Large Deviations"
+                value={diversionStats.total_large_deviations || 0}
+                subtitle=">20nm off course"
+                icon={<Plane className="w-6 h-6" />}
+              />
+              <StatCard
+                title="360° Holds"
+                value={diversionStats.total_holding_360s || 0}
+                subtitle="Full circle patterns"
+                icon={<Activity className="w-6 h-6" />}
+              />
+              <StatCard
+                title="Airports Affected"
+                value={Object.keys(diversionStats.by_airport || {}).length}
+                subtitle="With diversions"
+                icon={<MapPin className="w-6 h-6" />}
+              />
+            </div>
+
+            {/* Diversions by Airport and Airline */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              {/* By Airport */}
+              {diversionStats.by_airport && Object.keys(diversionStats.by_airport).length > 0 && (
+                <div className="bg-surface rounded-xl border border-white/10 p-5">
+                  <h3 className="text-white font-bold mb-4">Diversions by Airport</h3>
+                  <div className="space-y-2 max-h-[250px] overflow-y-auto">
+                    {Object.entries(diversionStats.by_airport)
+                      .sort(([, a], [, b]) => b - a)
+                      .slice(0, 10)
+                      .map(([airport, count]) => (
+                        <div key={airport} className="flex items-center justify-between bg-surface-highlight rounded-lg p-3">
+                          <span className="text-white font-medium">{airport}</span>
+                          <span className="text-orange-400 font-bold">{count}</span>
+                        </div>
+                      ))}
+                  </div>
+                </div>
+              )}
+
+              {/* By Airline */}
+              {diversionStats.by_airline && Object.keys(diversionStats.by_airline).length > 0 && (
+                <div className="bg-surface rounded-xl border border-white/10 p-5">
+                  <h3 className="text-white font-bold mb-4">Diversions by Airline</h3>
+                  <div className="space-y-2 max-h-[250px] overflow-y-auto">
+                    {Object.entries(diversionStats.by_airline)
+                      .sort(([, a], [, b]) => b - a)
+                      .slice(0, 10)
+                      .map(([airline, count]) => (
+                        <div key={airline} className="flex items-center justify-between bg-surface-highlight rounded-lg p-3">
+                          <span className="text-white font-medium">{airline}</span>
+                          <span className="text-orange-400 font-bold">{count}</span>
+                        </div>
+                      ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </>
+        ) : (
+          <div className="bg-surface rounded-xl border border-white/10 p-8 text-center">
+            <ArrowRightLeft className="w-12 h-12 text-white/20 mx-auto mb-4" />
+            <p className="text-white/40">No diversion data available for this period</p>
+            <p className="text-white/30 text-sm mt-2">Diversions are detected from Rule 8 (destination mismatch) events</p>
+          </div>
+        )}
+      </>
+
+      {/* RTB Events Section - Level 1 Category A */}
+      {/* Q: כמה מטוסים המריאו, שהו פחות מ30 דקות באוויר וחזרו לנחיתה באותו בסיס? (L1) */}
+      {rtbEvents.length > 0 && (
         <>
           <div className="border-b border-white/10 pb-4 pt-8">
             <h2 className="text-white text-xl font-bold mb-2 flex items-center gap-2">
-              <CloudRain className="w-5 h-5 text-blue-400" />
-              Weather Impact Analysis
+              <RotateCcw className="w-5 h-5 text-yellow-500" />
+              Return to Base Events
             </h2>
             <p className="text-white/60 text-sm">
-              Diversions, go-arounds, and deviations potentially caused by weather
+              Aircraft that returned to their departure airport within 30 minutes
             </p>
           </div>
 
-          {/* Weather Stats Overview */}
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <StatCard
-              title="Weather-Related Events"
-              value={weatherImpact.weather_correlated_anomalies}
-              subtitle="Total weather-correlated"
-              icon={<Cloud className="w-6 h-6" />}
+              title="Total RTB Events"
+              value={rtbEvents.length}
+              subtitle="Short flights returned"
+              icon={<RotateCcw className="w-6 h-6" />}
             />
             <StatCard
-              title="Diversions"
-              value={weatherImpact.total_diversions}
-              subtitle="Likely weather-caused"
-              icon={<Plane className="w-6 h-6" />}
+              title="Avg Flight Time"
+              value={`${(rtbEvents.reduce((sum, e) => sum + e.duration_min, 0) / rtbEvents.length || 0).toFixed(0)} min`}
+              subtitle="Before return"
+              icon={<Clock className="w-6 h-6" />}
             />
             <StatCard
-              title="Go-Arounds"
-              value={weatherImpact.total_go_arounds}
-              subtitle="Weather pattern"
-              icon={<Activity className="w-6 h-6" />}
-            />
-            <StatCard
-              title="Route Deviations"
-              value={weatherImpact.total_deviations}
-              subtitle="Storm avoidance"
-              icon={<TrendingUp className="w-6 h-6" />}
+              title="Airports Affected"
+              value={new Set(rtbEvents.map(e => e.airport)).size}
+              subtitle="Unique airports"
+              icon={<MapPin className="w-6 h-6" />}
             />
           </div>
 
-          {/* Weather Insights */}
-          {weatherImpact.insights.length > 0 && (
-            <div className="bg-gradient-to-r from-blue-500/10 to-cyan-500/10 border border-blue-500/30 rounded-xl p-4">
-              <h3 className="text-blue-400 font-medium mb-3 flex items-center gap-2">
-                <Cloud className="w-4 h-4" />
-                Weather Impact Insights
-              </h3>
-              <ul className="space-y-2">
-                {weatherImpact.insights.map((insight, idx) => (
-                  <li key={idx} className="text-white/80 text-sm flex items-start gap-2">
-                    <span className="text-blue-400">•</span>
-                    {insight}
-                  </li>
-                ))}
-              </ul>
+          {/* RTB Events Table */}
+          <div className="bg-surface rounded-xl border border-white/10 overflow-hidden">
+            <div className="px-4 py-3 border-b border-white/10">
+              <h4 className="text-white font-medium">RTB Events</h4>
+              <p className="text-white/50 text-xs mt-1">Aircraft that returned shortly after takeoff</p>
             </div>
-          )}
-
-          {/* Weather by Airport */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            {/* Diversions by Airport */}
-            {weatherImpact.diversions_likely_weather.length > 0 && (
-              <div className="bg-surface rounded-xl border border-white/10 p-5">
-                <h3 className="text-white font-bold mb-4 flex items-center gap-2">
-                  <Plane className="w-4 h-4 text-orange-400" />
-                  Diversions by Destination Airport
-                </h3>
-                <div className="space-y-2 max-h-[250px] overflow-y-auto">
-                  {weatherImpact.diversions_likely_weather.map((d) => (
-                    <div key={d.airport} className="bg-surface-highlight rounded-lg p-3">
-                      <div className="flex justify-between items-center mb-1">
-                        <span className="text-white font-medium">{d.airport}</span>
-                        <span className="text-orange-400 font-bold">{d.count} diversions</span>
-                      </div>
-                      {d.dates.length > 0 && (
-                        <div className="text-white/50 text-xs">
-                          Dates: {d.dates.slice(0, 3).join(', ')}{d.dates.length > 3 ? '...' : ''}
-                        </div>
-                      )}
-                    </div>
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b border-white/10">
+                    <th className="text-left text-white/60 text-sm font-medium px-4 py-3">Time</th>
+                    <th className="text-left text-white/60 text-sm font-medium px-4 py-3">Callsign</th>
+                    <th className="text-left text-white/60 text-sm font-medium px-4 py-3">Airport</th>
+                    <th className="text-left text-white/60 text-sm font-medium px-4 py-3">Duration</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rtbEvents.slice(0, 15).map((event, idx) => (
+                    <tr key={`${event.flight_id}-${idx}`} className="border-b border-white/5 hover:bg-white/5">
+                      <td className="px-4 py-3 text-white/60 text-sm">
+                        {new Date(event.departure_time * 1000).toLocaleString()}
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className="text-white font-medium">{event.callsign || 'Unknown'}</span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className="text-yellow-400 font-medium">{event.airport}</span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className={`px-2 py-1 rounded text-xs font-bold ${
+                          event.duration_min < 15 ? 'bg-red-500/20 text-red-400' : 'bg-yellow-500/20 text-yellow-400'
+                        }`}>
+                          {event.duration_min} min
+                        </span>
+                      </td>
+                    </tr>
                   ))}
-                </div>
-              </div>
-            )}
-
-            {/* Go-Arounds by Airport */}
-            {weatherImpact.go_arounds_weather_pattern.length > 0 && (
-              <div className="bg-surface rounded-xl border border-white/10 p-5">
-                <h3 className="text-white font-bold mb-4 flex items-center gap-2">
-                  <Activity className="w-4 h-4 text-purple-400" />
-                  Go-Arounds by Airport
-                </h3>
-                <div className="space-y-2 max-h-[250px] overflow-y-auto">
-                  {weatherImpact.go_arounds_weather_pattern.map((g) => (
-                    <div key={g.airport} className="bg-surface-highlight rounded-lg p-3">
-                      <div className="flex justify-between items-center mb-1">
-                        <span className="text-white font-medium">{g.airport}</span>
-                        <span className="text-purple-400 font-bold">{g.count} go-arounds</span>
-                      </div>
-                      <div className="text-white/50 text-xs">
-                        Peak hour: {g.peak_hour}:00
-                      </div>
-                    </div>
-                  ))}
-                </div>
+                </tbody>
+              </table>
+            </div>
+            {rtbEvents.length > 15 && (
+              <div className="px-4 py-3 bg-surface-highlight text-center">
+                <span className="text-white/50 text-sm">Showing 15 of {rtbEvents.length} events</span>
               </div>
             )}
           </div>
-
-          {/* Monthly Weather Impact Chart */}
-          {weatherImpact.monthly_weather_impact.length > 0 && (
-            <ChartCard title="Monthly Weather Impact">
-              <ResponsiveContainer width="100%" height={300}>
-                <ComposedChart data={weatherImpact.monthly_weather_impact}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#ffffff20" />
-                  <XAxis 
-                    dataKey="month" 
-                    stroke="#ffffff60"
-                    tick={{ fill: '#ffffff60', fontSize: 11 }}
-                  />
-                  <YAxis stroke="#ffffff60" tick={{ fill: '#ffffff60' }} />
-                  <Tooltip
-                    contentStyle={{
-                      backgroundColor: '#1a1a1a',
-                      border: '1px solid #ffffff20',
-                      borderRadius: '8px'
-                    }}
-                    formatter={(value: number, name: string) => [
-                      value,
-                      name === 'diversion_count' ? 'Diversions' :
-                      name === 'go_around_count' ? 'Go-Arounds' :
-                      name === 'deviation_count' ? 'Deviations' : name
-                    ]}
-                  />
-                  <Bar dataKey="diversion_count" fill="#f97316" name="diversion_count" radius={[4, 4, 0, 0]} />
-                  <Bar dataKey="go_around_count" fill="#8b5cf6" name="go_around_count" radius={[4, 4, 0, 0]} />
-                  <Line 
-                    type="monotone" 
-                    dataKey="deviation_count" 
-                    stroke="#22c55e" 
-                    strokeWidth={2}
-                    name="deviation_count"
-                    dot={{ fill: '#22c55e', strokeWidth: 2 }}
-                  />
-                </ComposedChart>
-              </ResponsiveContainer>
-            </ChartCard>
-          )}
         </>
       )}
 
       {/* Go-Arounds Hourly Distribution */}
+      {/* Q: באיזה שעות ביום יש הכי הרבה הליכות סביב? (L2) */}
       {goAroundsHourly.length > 0 && goAroundsHourly.some(h => h.count > 0) && (
         <>
           <div className="border-b border-white/10 pb-4 pt-8">
@@ -1388,6 +1586,7 @@ export function SafetyTab({ startTs, endTs, cacheKey = 0 }: SafetyTabProps) {
       )}
 
       {/* Daily Incident Clusters */}
+      {/* Q: האם היו כמה אירועים ביום אחד? האם היו באותו האזור? (L2) */}
       {dailyIncidentClusters && dailyIncidentClusters.high_incident_days.length > 0 && (
         <>
           <div className="border-b border-white/10 pb-4 pt-8">

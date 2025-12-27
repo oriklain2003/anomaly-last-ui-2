@@ -5,11 +5,12 @@ import { OverviewTab } from './components/intelligence/OverviewTab';
 import { SafetyTab } from './components/intelligence/SafetyTab';
 import { TrafficTab } from './components/intelligence/TrafficTab';
 import { IntelligenceTab } from './components/intelligence/IntelligenceTab';
+import { MilitaryTab } from './components/intelligence/MilitaryTab';
 import { PredictTab } from './components/intelligence/PredictTab';
 import { IntelligenceHelpModal } from './components/intelligence/IntelligenceHelpModal';
 import { QuickQuestionsPanel } from './components/intelligence/QuickQuestionsPanel';
 
-type TabType = 'overview' | 'safety' | 'traffic' | 'intelligence' | 'predict';
+type TabType = 'overview' | 'safety' | 'traffic' | 'intelligence' | 'military' | 'predict';
 
 // Fixed date range (Nov 1 - Dec 31, 2025) - pre-computed for instant loading
 const CACHED_START_TS = 1761955200;
@@ -19,7 +20,7 @@ const CACHED_END_TS = 1767225599;
 function getInitialTab(): TabType {
   const params = new URLSearchParams(window.location.search);
   const tabParam = params.get('tab');
-  const validTabs = ['overview', 'safety', 'traffic', 'intelligence', 'predict'];
+  const validTabs = ['overview', 'safety', 'traffic', 'intelligence', 'military', 'predict'];
   return validTabs.includes(tabParam || '') ? (tabParam as TabType) : 'overview';
 }
 
@@ -53,6 +54,7 @@ export function IntelligencePage() {
     { id: 'safety', label: 'Safety' },
     { id: 'traffic', label: 'Traffic' },
     { id: 'intelligence', label: 'Intelligence' },
+    { id: 'military', label: '🎖️ Military' },
     { id: 'predict', label: 'Predict' }
   ];
 
@@ -160,6 +162,7 @@ export function IntelligencePage() {
           {activeTab === 'safety' && <SafetyTab startTs={dateRange.startTs} endTs={dateRange.endTs} cacheKey={cacheKey} />}
           {activeTab === 'traffic' && <TrafficTab startTs={dateRange.startTs} endTs={dateRange.endTs} cacheKey={cacheKey} />}
           {activeTab === 'intelligence' && <IntelligenceTab startTs={dateRange.startTs} endTs={dateRange.endTs} cacheKey={cacheKey} />}
+          {activeTab === 'military' && <MilitaryTab startTs={dateRange.startTs} endTs={dateRange.endTs} cacheKey={cacheKey} />}
           {activeTab === 'predict' && <PredictTab />}
         </div>
       </main>

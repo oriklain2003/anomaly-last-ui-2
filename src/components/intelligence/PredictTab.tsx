@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { Activity, AlertTriangle, TrendingUp, Shield, Search, Target, Navigation, MapPin, Crosshair } from 'lucide-react';
 import { StatCard } from './StatCard';
 import { ChartCard } from './ChartCard';
+import { QuestionTooltip } from './QuestionTooltip';
 import { fetchAirspaceRisk, fetchSafetyForecast, fetchTrajectoryPrediction, predictHostileIntent } from '../../api';
 import type { AirspaceRisk, SafetyForecast } from '../../types';
 import type { TrajectoryPrediction } from '../../api';
@@ -253,6 +254,17 @@ export function PredictTab() {
 
   return (
     <div className="space-y-6">
+      {/* Tab Header */}
+      <div className="border-b border-white/10 pb-4 mb-6">
+        <h2 className="text-white text-2xl font-bold flex items-center gap-3">
+          <Shield className="w-6 h-6 text-purple-400" />
+          Level 4: Prediction & Prevention
+        </h2>
+        <p className="text-white/60 text-sm mt-1 ml-9">
+          Forecasting future events and providing early warnings for proactive intervention.
+        </p>
+      </div>
+
       {/* Real-time Airspace Risk */}
       {airspaceRisk && (
         <>
@@ -260,6 +272,11 @@ export function PredictTab() {
             <h2 className="text-white text-xl font-bold mb-4 flex items-center gap-2">
               <Activity className="w-5 h-5" />
               Real-Time Airspace Risk Assessment
+              <QuestionTooltip 
+                question="מה הסיכוי לתאונה במשמרת הזו?"
+                questionEn="What is the chance of an accident in this shift?"
+                level="L4"
+              />
             </h2>
           </div>
 
@@ -332,6 +349,11 @@ export function PredictTab() {
             <h2 className="text-white text-xl font-bold mb-4 flex items-center gap-2">
               <TrendingUp className="w-5 h-5" />
               Safety Event Forecast (Next {forecast.forecast_period_hours}h)
+              <QuestionTooltip 
+                question="מה הסיכוי לתאונה במשמרת הזו?"
+                questionEn="What is the chance of an accident in this shift?"
+                level="L4"
+              />
             </h2>
           </div>
 
@@ -379,6 +401,11 @@ export function PredictTab() {
                 <Navigation className="w-6 h-6 text-cyan-400" />
               </div>
               Trajectory Prediction & Border Analysis
+              <QuestionTooltip 
+                question="האם המטוס הזה עומד לעשות משהו חשוד?"
+                questionEn="Is this aircraft about to do something suspicious?"
+                level="L4"
+              />
             </h2>
             <p className="text-white/60 text-sm mt-2">
               Predict flight path and detect potential restricted airspace breaches before they occur
@@ -592,6 +619,11 @@ export function PredictTab() {
         <h2 className="text-white text-xl font-bold mb-4 flex items-center gap-2">
           <Shield className="w-5 h-5 text-red-500" />
           Hostile Intent Analysis
+          <QuestionTooltip 
+            question="האם השינוי הקטן הזה הוא תחילתה של תקיפה?"
+            questionEn="Is this small change the beginning of an attack?"
+            level="L4"
+          />
         </h2>
         <p className="text-white/60 text-sm">
           Analyze a specific flight for potential hostile behavior patterns

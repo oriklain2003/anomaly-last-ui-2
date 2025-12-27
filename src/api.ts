@@ -909,6 +909,31 @@ export const fetchTaggedRoutesStats = async (startTs: number, endTs: number, lim
 // BATCH APIs - Reduces multiple API calls to single requests for better performance
 // ============================================================================
 
+// Airline Safety Scorecard
+export interface AirlineSafetyScorecardEntry {
+    airline: string;
+    airline_name: string;
+    total_flights: number;
+    emergencies: number;
+    near_miss: number;
+    go_arounds: number;
+    diversions: number;
+    safety_score: number;
+    safety_grade: 'A' | 'B' | 'C' | 'D' | 'F';
+    trend: 'improving' | 'declining' | 'stable';
+    issues: string[];
+}
+
+export interface AirlineSafetyScorecard {
+    scorecards: AirlineSafetyScorecardEntry[];
+    summary: {
+        total_airlines: number;
+        average_score: number;
+        best_performer: { airline: string; airline_name: string; score: number } | null;
+        needs_attention: Array<{ airline: string; airline_name: string; issues: string[] }>;
+    };
+}
+
 export interface SafetyBatchResponse {
     emergency_codes?: EmergencyCodeStat[];
     near_miss?: NearMissEvent[];
@@ -921,6 +946,178 @@ export interface SafetyBatchResponse {
     top_airline_emergencies?: TopAirlineEmergency[];
     near_miss_by_country?: NearMissByCountry;
     emergency_clusters?: EmergencyClusters;
+    // NEW: Additional precomputed safety data
+    weather_impact?: WeatherImpactAnalysis;
+    daily_incident_clusters?: DailyIncidentClusters;
+    // Airline Safety Scorecard
+    airline_scorecard?: AirlineSafetyScorecard;
+}
+
+// Military by Country - Country-specific military intelligence
+export interface MilitaryCountryData {
+    country_name: string;
+    total_flights: number;
+    by_type: Record<string, number>;
+    anomalies: Array<{
+        callsign: string;
+        type: string;
+        duration_hours: number;
+        reason: string;
+        timestamp: number;
+    }>;
+    anomaly_count: number;
+    avg_duration_hours: number;
+    crossed_borders: number;
+    primary_region: string;
+    recent_flights: Array<{
+        callsign: string;
+        type: string;
+        timestamp: number;
+        duration_hours: number;
+    }>;
+}
+
+export interface MilitaryAlert {
+    type: string;
+    severity: 'high' | 'medium' | 'low';
+    message: string;
+    details?: any;
+}
+
+export interface MilitaryByCountryResponse {
+    countries: Record<string, MilitaryCountryData>;
+    summary: {
+        total_military_flights: number;
+        countries_detected: number;
+        top_countries: Array<{ country: string; flights: number }>;
+        alerts: MilitaryAlert[];
+        analysis_period_days: number;
+    };
+}
+
+// Bilateral Proximity Events - Russian-American etc.
+export interface BilateralProximityEvent {
+    country1: string;
+    country2: string;
+    callsign1: string;
+    callsign2: string;
+    type1: string;
+    type2: string;
+    min_distance_nm: number;
+    timestamp: number;
+    location: { lat: number; lon: number };
+    severity: 'critical' | 'high' | 'medium' | 'low';
+    severity_score: number;
+    pair_name: string;
+    is_high_interest: boolean;
+}
+
+export interface BilateralProximityResponse {
+    events: BilateralProximityEvent[];
+    by_pair: Record<string, number>;
+    total_events: number;
+    high_risk_events: number;
+    alerts: MilitaryAlert[];
+    proximity_threshold_nm: number;
+}
+
+// Military by Destination - Syria filter, etc.
+export interface MilitaryDestinationFlight {
+    callsign: string;
+    country: string;
+    type: string;
+    destination_region: string;
+    origin_region: string;
+    heading: number | null;
+    altitude: number | null;
+    timestamp: number;
+    last_position: { lat: number; lon: number } | null;
+    risk_level: 'low' | 'medium' | 'high' | 'critical';
+}
+
+export interface SyriaFlight extends MilitaryDestinationFlight {
+    is_from_east: boolean;
+    concern_level: 'medium' | 'high';
+}
+
+export interface MilitaryByDestinationResponse {
+    flights: MilitaryDestinationFlight[];
+    by_destination: Record<string, number>;
+    by_origin: Record<string, number>;
+    syria_flights: SyriaFlight[];
+    total_flights: number;
+    syria_from_east_count: number;
+    alerts: MilitaryAlert[];
+}
+
+// Combined Threat Assessment Widget
+export interface ThreatComponent {
+    score: number;
+    weight: number;
+    description: string;
+    raw_count?: number;
+    high_severity_count?: number;
+    total_flights?: number;
+    russian_flights?: number;
+    russian_anomalies?: number;
+    cluster_count?: number;
+    high_risk_count?: number;
+    syria_flights?: number;
+    syria_from_east?: number;
+    high_risk_destinations?: number;
+    error?: string;
+}
+
+export interface ThreatConcern {
+    name: string;
+    score: number;
+    description: string;
+}
+
+export interface ThreatAssessmentResponse {
+    overall_score: number;
+    threat_level: 'LOW' | 'MODERATE' | 'ELEVATED' | 'HIGH' | 'CRITICAL' | 'UNKNOWN';
+    threat_color: string;
+    components: {
+        gps_jamming?: ThreatComponent;
+        military_activity?: ThreatComponent;
+        unusual_patterns?: ThreatComponent;
+        conflict_zone_activity?: ThreatComponent;
+    };
+    top_concerns: ThreatConcern[];
+    alerts: MilitaryAlert[];
+    recommendations: string[];
+    trend: 'increasing' | 'stable' | 'decreasing';
+    analysis_period: {
+        start_ts: number;
+        end_ts: number;
+        duration_days: number;
+    };
+}
+
+// Jamming Source Triangulation
+export interface EstimatedJammingSource {
+    lat: number;
+    lon: number;
+    confidence_radius_nm: number;
+    affected_flights_count: number;
+    affected_flights: string[];
+    confidence_level: 'high' | 'medium' | 'low';
+    estimated_power: 'high' | 'medium' | 'low';
+    first_detected: number | null;
+    last_detected: number | null;
+    avg_severity: number;
+    detection_points: number;
+    region: string;
+}
+
+export interface JammingTriangulationResponse {
+    estimated_sources: EstimatedJammingSource[];
+    total_affected_flights: number;
+    total_detection_points: number;
+    triangulation_quality: 'high' | 'medium' | 'low' | 'insufficient_data' | 'error';
+    methodology: string;
+    message?: string;
 }
 
 export interface IntelligenceBatchResponse {
@@ -931,6 +1128,21 @@ export interface IntelligenceBatchResponse {
     pattern_clusters?: PatternCluster[];
     military_routes?: MilitaryRoutes | null;
     airline_activity?: AirlineActivityTrends | null;
+    // NEW: Additional precomputed intelligence data
+    gps_jamming_temporal?: GPSJammingTemporal;
+    gps_jamming_clusters?: GPSJammingClustersResponse;
+    route_efficiency?: RouteEfficiencyComparison | RoutesSummary;
+    signal_loss_zones?: SignalLossLocation[];
+    // Country-specific military breakdown
+    military_by_country?: MilitaryByCountryResponse;
+    // Bilateral proximity detection
+    bilateral_proximity?: BilateralProximityResponse;
+    // Military by destination (Syria filter)
+    military_by_destination?: MilitaryByDestinationResponse;
+    // Combined Threat Assessment
+    threat_assessment?: ThreatAssessmentResponse;
+    // Jamming Source Triangulation
+    jamming_triangulation?: JammingTriangulationResponse;
 }
 
 /**
@@ -950,7 +1162,8 @@ export const fetchSafetyBatch = async (
             end_ts: Math.floor(endTs),
             include: include || [
                 'emergency_codes', 'near_miss', 'go_arounds', 'hourly',
-                'monthly', 'locations', 'phase', 'aftermath', 'top_airlines', 'by_country'
+                'monthly', 'locations', 'phase', 'aftermath', 'top_airlines', 'by_country',
+                'emergency_clusters', 'daily_incident_clusters', 'airline_scorecard'
             ]
         })
     });
@@ -977,7 +1190,19 @@ export const fetchIntelligenceBatch = async (
             end_ts: Math.floor(endTs),
             include: include || [
                 'efficiency', 'holding', 'gps_jamming', 'military',
-                'clusters', 'routes', 'activity'
+                'clusters', 'routes', 'activity',
+                // Additional intelligence data
+                'gps_jamming_temporal', 'gps_jamming_clusters', 'route_efficiency', 'signal_loss_zones',
+                // Country-specific military breakdown
+                'military_by_country',
+                // Bilateral proximity detection
+                'bilateral_proximity',
+                // Military by destination (Syria filter)
+                'military_by_destination',
+                // Combined Threat Assessment
+                'threat_assessment',
+                // Jamming Source Triangulation
+                'jamming_triangulation'
             ]
         })
     });
@@ -1039,6 +1264,13 @@ export interface TrafficBatchResponse {
     missing_info?: FlightsMissingInfo;
     deviations_by_type?: DeviationByType[];
     bottleneck_zones?: BottleneckZone[];
+    runway_usage?: Record<string, RunwayUsage[]>;
+    // NEW: Seasonal analysis endpoints
+    seasonal_year_comparison?: SeasonalYearComparison;
+    traffic_safety_correlation?: TrafficSafetyCorrelation;
+    special_events_impact?: SpecialEventsImpact;
+    signal_loss_anomalies?: SignalLossAnomalyResponse;
+    diversions_seasonal?: DiversionsSeasonal;
 }
 
 /**
@@ -1059,7 +1291,11 @@ export const fetchTrafficBatch = async (
             include: include || [
                 'flights_per_day', 'airports', 'signal_loss', 'signal_monthly',
                 'signal_hourly', 'peak_hours', 'diversions', 'diversions_monthly',
-                'alternates', 'rtb', 'missing_info', 'deviations', 'bottlenecks'
+                'alternates', 'rtb', 'missing_info', 'deviations', 'bottlenecks',
+                'runway_usage',
+                // Seasonal analysis endpoints
+                'seasonal_year_comparison', 'traffic_safety_correlation', 'special_events_impact',
+                'signal_loss_anomalies', 'diversions_seasonal'
             ]
         })
     });
@@ -1263,6 +1499,9 @@ export interface AlternateAirport {
     count: number;
     aircraft_types: string[];
     last_used: number;
+    wide_body_count: number;
+    narrow_body_count: number;
+    body_type_preference: 'wide_body_preferred' | 'narrow_body_preferred' | 'mixed' | 'unknown';
 }
 
 export const fetchAlternateAirportsData = async (startTs: number, endTs: number): Promise<AlternateAirport[]> => {
@@ -1499,9 +1738,17 @@ export const fetchTrajectoryPrediction = async (flightId: string): Promise<Traje
     return response.json();
 };
 
-// Anomaly DNA (enhanced)
+// Anomaly DNA (enhanced v2)
+// Uses smart matching: time-of-day ±2hr buffer, rule-based or attribute-based matching
 export const fetchAnomalyDNAEnhanced = async (flightId: string, lookbackDays = 30): Promise<AnomalyDNA> => {
-    // Alias for backwards compatibility; canonical route is `/intelligence/anomaly-dna/...`
+    // Use the v2 endpoint with enhanced matching algorithm
+    const response = await fetch(`${API_BASE}/intelligence/anomaly-dna-v2/${flightId}?lookback_days=${lookbackDays}`);
+    if (!response.ok) throw new Error('Failed to fetch anomaly DNA');
+    return response.json();
+};
+
+// Anomaly DNA (legacy v1) - for backwards compatibility
+export const fetchAnomalyDNALegacy = async (flightId: string, lookbackDays = 30): Promise<AnomalyDNA> => {
     const response = await fetch(`${API_BASE}/intelligence/anomaly-dna/${flightId}?lookback_days=${lookbackDays}`);
     if (!response.ok) throw new Error('Failed to fetch anomaly DNA');
     return response.json();
@@ -2445,5 +2692,337 @@ export interface DailyIncidentClusters {
 export const fetchDailyIncidentClusters = async (startTs: number, endTs: number): Promise<DailyIncidentClusters> => {
     const response = await fetch(`${API_BASE}/stats/incidents/daily-clusters?start_ts=${startTs}&end_ts=${endTs}`);
     if (!response.ok) throw new Error('Failed to fetch daily incident clusters');
+    return response.json();
+};
+
+
+// ============================================================================
+// MILITARY INTELLIGENCE PANEL TYPES AND FUNCTIONS
+// ============================================================================
+
+// Operational Tempo Timeline
+export interface OperationalTempoHourly {
+    timestamp: number;
+    hour: string;
+    US: number;
+    RU: number;
+    GB: number;
+    IL: number;
+    NATO: number;
+    other: number;
+    total: number;
+}
+
+export interface OperationalTempoDaily {
+    date: string;
+    US: number;
+    RU: number;
+    GB: number;
+    IL: number;
+    NATO: number;
+    other: number;
+    total: number;
+}
+
+export interface ActivitySpike {
+    timestamp: number;
+    hour: string;
+    country: string;
+    count: number;
+    average: number;
+    increase_pct: number;
+    description: string;
+}
+
+export interface OperationalTempoResponse {
+    hourly_data: OperationalTempoHourly[];
+    daily_data: OperationalTempoDaily[];
+    by_country_total: Record<string, number>;
+    peak_activity: {
+        timestamp: number;
+        hour: string;
+        country: string;
+        count: number;
+        description: string;
+    } | null;
+    activity_spikes: ActivitySpike[];
+    trend_analysis: Record<string, 'increasing' | 'stable' | 'decreasing'>;
+    alerts: Array<{ type: string; severity: string; message: string; timestamp?: number }>;
+    total_flights: number;
+}
+
+export const fetchOperationalTempo = async (startTs: number, endTs: number): Promise<OperationalTempoResponse> => {
+    const response = await fetch(`${API_BASE}/intel/operational-tempo?start_ts=${startTs}&end_ts=${endTs}`);
+    if (!response.ok) throw new Error('Failed to fetch operational tempo');
+    return response.json();
+};
+
+// Tanker Activity
+export interface TankerFlight {
+    flight_id: string;
+    callsign: string;
+    country: string;
+    holding_area: string;
+    duration_min: number;
+    orbit_count: number;
+    point_count: number;
+    start_time: number;
+    end_time: number;
+    last_position: { lat: number; lon: number; alt: number; timestamp: number } | null;
+}
+
+export interface TankerActivityResponse {
+    active_tankers: TankerFlight[];
+    by_holding_area: Record<string, number>;
+    total_tanker_hours: number;
+    tanker_count: number;
+    alerts: Array<{ type: string; severity: string; message: string; area?: string }>;
+}
+
+export const fetchTankerActivity = async (startTs: number, endTs: number): Promise<TankerActivityResponse> => {
+    const response = await fetch(`${API_BASE}/intel/tanker-activity?start_ts=${startTs}&end_ts=${endTs}`);
+    if (!response.ok) throw new Error('Failed to fetch tanker activity');
+    return response.json();
+};
+
+// Night Operations
+export interface NightFlight {
+    callsign: string;
+    country: string;
+    type: string;
+    timestamp: number;
+    hour: number;
+    duration_min: number;
+}
+
+export interface NightOperationsResponse {
+    day_vs_night: {
+        day: number;
+        night: number;
+        total: number;
+        night_pct: number;
+    };
+    night_flights: NightFlight[];
+    by_country_night: Record<string, number>;
+    unusual_night_activity: boolean;
+    alerts: Array<{ type: string; severity: string; message: string }>;
+}
+
+export const fetchNightOperations = async (startTs: number, endTs: number): Promise<NightOperationsResponse> => {
+    const response = await fetch(`${API_BASE}/intel/night-operations?start_ts=${startTs}&end_ts=${endTs}`);
+    if (!response.ok) throw new Error('Failed to fetch night operations');
+    return response.json();
+};
+
+// ISR Patterns
+export interface ISRPattern {
+    flight_id: string;
+    callsign: string;
+    country: string;
+    pattern_type: string;
+    orbit_center: { lat: number; lon: number };
+    orbit_radius_nm: number;
+    duration_min: number;
+    likely_target: string;
+    track_points_count: number;
+    track_points: Array<{ lat: number; lon: number; timestamp: number }>;
+}
+
+export interface CollectionArea {
+    lat: number;
+    lon: number;
+    flights_overhead: number;
+    callsigns: string[];
+    description: string;
+}
+
+export interface ISRPatternsResponse {
+    patterns: ISRPattern[];
+    by_pattern_type: Record<string, number>;
+    by_country: Record<string, number>;
+    likely_collection_areas: CollectionArea[];
+    total_isr_flights: number;
+    alerts: Array<{ type: string; severity: string; message: string }>;
+}
+
+export const fetchISRPatterns = async (startTs: number, endTs: number): Promise<ISRPatternsResponse> => {
+    const response = await fetch(`${API_BASE}/intel/isr-patterns?start_ts=${startTs}&end_ts=${endTs}`);
+    if (!response.ok) throw new Error('Failed to fetch ISR patterns');
+    return response.json();
+};
+
+// Airspace Denial Zones
+export interface DenialZone {
+    lat: number;
+    lon: number;
+    area_name: string;
+    radius_nm: number;
+    normal_traffic: number;
+    current_traffic: number;
+    reduction_pct: number;
+    likely_cause: string;
+    military_flights_nearby: number;
+}
+
+export interface AirspaceDenialResponse {
+    denial_zones: DenialZone[];
+    total_zones: number;
+    most_avoided_areas: Array<{ area_name: string; reduction_pct: number }>;
+    alerts: Array<{ type: string; severity: string; message: string }>;
+}
+
+export const fetchAirspaceDenialZones = async (startTs: number, endTs: number): Promise<AirspaceDenialResponse> => {
+    const response = await fetch(`${API_BASE}/intel/airspace-denial?start_ts=${startTs}&end_ts=${endTs}`);
+    if (!response.ok) throw new Error('Failed to fetch airspace denial zones');
+    return response.json();
+};
+
+// Border Crossings
+export interface BorderCrossing {
+    timestamp: number;
+    hour: string;
+    callsign: string;
+    country: string;
+    aircraft_type: string;
+    from_region: string;
+    to_region: string;
+    lat: number;
+    lon: number;
+}
+
+export interface BorderCrossingsResponse {
+    crossings: BorderCrossing[];
+    by_country_pair: Record<string, number>;
+    timeline: Array<{ hour: string; crossings: BorderCrossing[]; count: number }>;
+    high_interest_crossings: BorderCrossing[];
+    total_crossings: number;
+    alerts: Array<{ type: string; severity: string; message: string }>;
+}
+
+export const fetchBorderCrossings = async (startTs: number, endTs: number): Promise<BorderCrossingsResponse> => {
+    const response = await fetch(`${API_BASE}/intel/border-crossings?start_ts=${startTs}&end_ts=${endTs}`);
+    if (!response.ok) throw new Error('Failed to fetch border crossings');
+    return response.json();
+};
+
+// EW Correlation
+export interface EWJammingZone {
+    lat: number;
+    lon: number;
+    radius_nm: number;
+    severity: number;
+    affected_flights: number;
+    indicators: string[];
+}
+
+export interface EWMilitaryPath {
+    callsign: string;
+    country: string;
+    type: string;
+    distance_to_zone_nm: number;
+}
+
+export interface EWEstimatedSource {
+    lat: number;
+    lon: number;
+    confidence: string;
+    likely_operator: string;
+    severity: number;
+    military_correlation: number;
+}
+
+export interface EWCorrelationResponse {
+    jamming_zones: EWJammingZone[];
+    military_paths_in_zones: Array<{ zone: EWJammingZone; military_paths: EWMilitaryPath[] }>;
+    correlation_score: number;
+    estimated_ew_sources: EWEstimatedSource[];
+    total_jamming_zones: number;
+    zones_with_military: number;
+    alerts: Array<{ type: string; severity: string; message: string }>;
+}
+
+export const fetchEWCorrelation = async (startTs: number, endTs: number): Promise<EWCorrelationResponse> => {
+    const response = await fetch(`${API_BASE}/intel/ew-correlation?start_ts=${startTs}&end_ts=${endTs}`);
+    if (!response.ok) throw new Error('Failed to fetch EW correlation');
+    return response.json();
+};
+
+// Mission Readiness Indicators
+export interface MissionIndicator {
+    score: number;
+    weight: number;
+    description: string;
+    status?: string;
+    flights?: number;
+    zones?: number;
+    trend?: string;
+    error?: string;
+}
+
+export interface MissionReadinessResponse {
+    overall_readiness_score: number;
+    readiness_level: 'LOW' | 'MODERATE' | 'ELEVATED' | 'HIGH' | 'IMMINENT';
+    indicators: {
+        tanker_activity: MissionIndicator;
+        isr_density: MissionIndicator;
+        gps_jamming: MissionIndicator;
+        military_buildup: MissionIndicator;
+        syria_logistics: MissionIndicator;
+    };
+    prediction: string;
+    confidence: 'low' | 'medium' | 'high';
+    alerts: Array<{ type: string; severity: string; message: string }>;
+    analysis_period: {
+        start_ts: number;
+        end_ts: number;
+        duration_hours: number;
+    };
+}
+
+export const fetchMissionReadiness = async (startTs: number, endTs: number): Promise<MissionReadinessResponse> => {
+    const response = await fetch(`${API_BASE}/intel/mission-readiness?start_ts=${startTs}&end_ts=${endTs}`);
+    if (!response.ok) throw new Error('Failed to fetch mission readiness');
+    return response.json();
+};
+
+// ============================================================================
+// MILITARY WOW PANELS BATCH ENDPOINT - Single call for all 8 panels
+// ============================================================================
+
+export interface MilitaryBatchResponse {
+    operational_tempo?: OperationalTempoResponse;
+    tanker_activity?: TankerActivityResponse;
+    night_operations?: NightOperationsResponse;
+    isr_patterns?: ISRPatternsResponse;
+    airspace_denial?: AirspaceDenialResponse;
+    border_crossings?: BorderCrossingsResponse;
+    ew_correlation?: EWCorrelationResponse;
+    mission_readiness?: MissionReadinessResponse;
+}
+
+/**
+ * Fetch all military WOW panels in a single request.
+ * Replaces 8 parallel API calls with 1 cached batch call.
+ */
+export const fetchMilitaryBatch = async (
+    startTs: number,
+    endTs: number,
+    include?: string[]
+): Promise<MilitaryBatchResponse> => {
+    const response = await fetch(`${API_BASE}/intel/military/batch`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            start_ts: Math.floor(startTs),
+            end_ts: Math.floor(endTs),
+            include: include || [
+                'operational_tempo', 'tanker_activity', 'night_operations', 'isr_patterns',
+                'airspace_denial', 'border_crossings', 'ew_correlation', 'mission_readiness'
+            ]
+        })
+    });
+    if (!response.ok) {
+        throw new Error('Failed to fetch military batch');
+    }
     return response.json();
 };

@@ -292,15 +292,20 @@ export interface SimilarFlight {
   flight_id: string;
   callsign: string;
   similarity_score: number;
-  match_percentage: number;  // Trajectory match percentage (0-100)
-  matching_points?: number;  // Number of points that matched
-  total_points?: number;     // Total points compared
+  match_percentage?: number;  // Trajectory match percentage (0-100) - v1
+  matching_points?: number;   // Number of points that matched
+  total_points?: number;      // Total points compared
   date: string | null;
-  pattern: string;
-  origin?: string;           // Origin airport code
-  destination?: string;      // Destination airport code
-  is_anomaly?: boolean;      // Whether this flight is an anomaly
-  common_rules?: number[];   // Rule IDs in common with target flight
+  pattern?: string;           // v1 pattern description
+  origin?: string;            // Origin airport code
+  destination?: string;       // Destination airport code
+  is_anomaly?: boolean;       // Whether this flight is an anomaly
+  common_rules?: number[];    // Rule IDs in common with target flight
+  // v2 additional fields
+  hour?: number;              // Hour of day the flight occurred
+  airline?: string;           // Airline code
+  match_components?: Record<string, number>;  // Individual score components
+  match_reasons?: string[];   // Human-readable match reasons
 }
 
 export interface AnomalyDNA {
@@ -312,6 +317,13 @@ export interface AnomalyDNA {
     destination?: string;
     is_anomaly?: boolean;
     rule_ids?: number[];
+    rule_names?: string[];    // v2: Human-readable rule names
+    flight_hour?: number;     // v2: Hour of day
+    flight_time?: string;     // v2: Time string (HH:MM)
+    start_lat?: number;       // v2: Start coordinates
+    start_lon?: number;
+    end_lat?: number;         // v2: End coordinates
+    end_lon?: number;
   };
   similar_flights: SimilarFlight[];
   recurring_pattern: string;
@@ -319,9 +331,10 @@ export interface AnomalyDNA {
   insights: string[];
   anomalies_detected?: Array<{
     rule_id: number;
-    rule_name: string;
-    timestamp: number;
+    rule_name?: string;
+    timestamp?: number;
   }>;
+  // v1 search criteria
   search_criteria?: {
     origin?: string;
     destination?: string;
@@ -329,6 +342,19 @@ export interface AnomalyDNA {
     rule_ids?: number[];
     match_threshold?: number;
     distance_threshold_nm?: number;
+  };
+  // v2 enhanced fields
+  search_method?: 'rule_based' | 'attribute_based' | 'none';
+  matching_criteria?: {
+    time_buffer_hours?: number;
+    lookback_days?: number;
+    flight_hour?: number;
+    time_range?: string;        // "10:00 - 14:00"
+    has_rules?: boolean;
+    target_rules?: string[];    // Rule names
+    target_airline?: string;
+    endpoint_threshold_nm?: number;
+    anomaly_point_threshold_nm?: number;
   };
 }
 

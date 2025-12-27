@@ -54,13 +54,31 @@ function crossProduct(o: [number, number], a: [number, number], b: [number, numb
   return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
 }
 
+// Generate a circular polygon around a point (for single/pair points that can't form a convex hull)
+function generateCirclePolygon(centerLon: number, centerLat: number, radiusNm: number = 15, numPoints: number = 16): [number, number][] {
+  const coords: [number, number][] = [];
+  // Convert radius from nm to degrees (approximate)
+  const radiusDegLat = radiusNm / 60; // 1 degree lat ≈ 60 nm
+  const radiusDegLon = radiusNm / (60 * Math.cos(centerLat * Math.PI / 180)); // Adjust for latitude
+  
+  for (let i = 0; i < numPoints; i++) {
+    const angle = (i / numPoints) * 2 * Math.PI;
+    const lon = centerLon + radiusDegLon * Math.cos(angle);
+    const lat = centerLat + radiusDegLat * Math.sin(angle);
+    coords.push([lon, lat]);
+  }
+  coords.push(coords[0]); // Close the polygon
+  return coords;
+}
+
 // Cluster points that are within threshold distance (in nm)
+// Now also creates polygon-ready clusters for single and pair points using circular buffers
 function clusterPoints(locations: SignalLossLocation[], thresholdNm: number = 2): {
-  clusters: { points: SignalLossLocation[]; centroid: [number, number]; totalCount: number }[];
+  clusters: { points: SignalLossLocation[]; centroid: [number, number]; totalCount: number; circleBuffer?: [number, number][] }[];
   singles: SignalLossLocation[];
 } {
   const used = new Set<number>();
-  const clusters: { points: SignalLossLocation[]; centroid: [number, number]; totalCount: number }[] = [];
+  const clusters: { points: SignalLossLocation[]; centroid: [number, number]; totalCount: number; circleBuffer?: [number, number][] }[] = [];
   const singles: SignalLossLocation[] = [];
   
   for (let i = 0; i < locations.length; i++) {
@@ -83,18 +101,30 @@ function clusterPoints(locations: SignalLossLocation[], thresholdNm: number = 2)
       }
     }
     
+    // Calculate centroid and total count for all clusters (including small ones)
+    const sumLat = cluster.reduce((s, p) => s + p.lat, 0);
+    const sumLon = cluster.reduce((s, p) => s + p.lon, 0);
+    const totalCount = cluster.reduce((s, p) => s + p.count, 0);
+    const centroidLon = sumLon / cluster.length;
+    const centroidLat = sumLat / cluster.length;
+    
     if (cluster.length >= 3) {
-      // Calculate centroid and total count
-      const sumLat = cluster.reduce((s, p) => s + p.lat, 0);
-      const sumLon = cluster.reduce((s, p) => s + p.lon, 0);
-      const totalCount = cluster.reduce((s, p) => s + p.count, 0);
+      // Large enough for convex hull
       clusters.push({
         points: cluster,
-        centroid: [sumLon / cluster.length, sumLat / cluster.length],
+        centroid: [centroidLon, centroidLat],
         totalCount
       });
-    } else {
-      singles.push(...cluster);
+    } else if (cluster.length >= 1) {
+      // 1-2 points: create a circular buffer polygon around the centroid
+      // Use a smaller radius for signal coverage (operational) vs larger for jamming (security)
+      const bufferRadius = Math.max(8, thresholdNm / 3); // Proportional to cluster threshold
+      clusters.push({
+        points: cluster,
+        centroid: [centroidLon, centroidLat],
+        totalCount,
+        circleBuffer: generateCirclePolygon(centroidLon, centroidLat, bufferRadius)
+      });
     }
   }
   
@@ -115,12 +145,13 @@ export function SignalLossMap({
   
   const apiKey = 'r7kaQpfNDVZdaVp23F1r'; // Same key as main app
   
-  // Define cluster type with optional polygon
+  // Define cluster type with optional polygon and circle buffer
   type ClusterWithPolygon = {
     points: { lat: number; lon: number; count: number; avgDuration?: number }[];
     centroid: [number, number];
     totalCount: number;
     polygon?: [number, number][] | null;
+    circleBuffer?: [number, number][]; // For small clusters (1-2 points)
   };
 
   // Use precomputed clusters if available, otherwise compute client-side
@@ -131,19 +162,26 @@ export function SignalLossMap({
   } => {
     if (precomputedClusters && precomputedClusters.clusters.length > 0) {
       // Use backend-computed clusters with polygon coordinates
+      // Also handle any singles by creating circle buffers for them
+      const backendClusters: ClusterWithPolygon[] = precomputedClusters.clusters.map(c => ({
+        points: c.points.map(p => ({ lat: p.lat, lon: p.lon, count: p.event_count, avgDuration: 300 })),
+        centroid: c.centroid as [number, number],
+        totalCount: c.total_events,
+        polygon: c.polygon // Backend-computed polygon coordinates
+      }));
+      
+      // Convert singles to small clusters with circle buffers
+      const singleClusters: ClusterWithPolygon[] = precomputedClusters.singles.map(s => ({
+        points: [{ lat: s.lat, lon: s.lon, count: s.event_count, avgDuration: 300 }],
+        centroid: [s.lon, s.lat] as [number, number],
+        totalCount: s.event_count,
+        polygon: null,
+        circleBuffer: generateCirclePolygon(s.lon, s.lat, 12) // 12nm radius for singles
+      }));
+      
       return {
-        clusters: precomputedClusters.clusters.map(c => ({
-          points: c.points.map(p => ({ lat: p.lat, lon: p.lon, count: p.event_count, avgDuration: 300 })),
-          centroid: c.centroid as [number, number],
-          totalCount: c.total_events,
-          polygon: c.polygon // Backend-computed polygon coordinates
-        })),
-        singles: precomputedClusters.singles.map(s => ({
-          lat: s.lat,
-          lon: s.lon,
-          count: s.event_count,
-          avgDuration: 300
-        })),
+        clusters: [...backendClusters, ...singleClusters],
+        singles: [], // All points now have polygons
         useBackendPolygons: true
       };
     }
@@ -151,7 +189,11 @@ export function SignalLossMap({
     if (!showPolygonClusters) return { clusters: [], singles: locations, useBackendPolygons: false };
     const result = clusterPoints(locations, clusterThresholdNm);
     return { 
-      clusters: result.clusters.map(c => ({ ...c, polygon: null })), 
+      clusters: result.clusters.map(c => ({ 
+        ...c, 
+        polygon: null,
+        circleBuffer: c.circleBuffer 
+      })), 
       singles: result.singles, 
       useBackendPolygons: false 
     };
@@ -218,24 +260,34 @@ export function SignalLossMap({
       clusters.forEach((cluster, idx) => {
         let coordinates: [number, number][];
         
-        // Use backend-computed polygon if available, otherwise compute client-side
+        // Priority: backend polygon > circle buffer > computed convex hull
         if (useBackendPolygons && cluster.polygon && cluster.polygon.length >= 3) {
           coordinates = cluster.polygon as [number, number][];
-        } else {
-          // Fallback: compute convex hull client-side
+        } else if (cluster.circleBuffer && cluster.circleBuffer.length >= 3) {
+          // Use pre-computed circle buffer for small clusters (1-2 points)
+          coordinates = cluster.circleBuffer;
+        } else if (cluster.points.length >= 3) {
+          // Compute convex hull for larger clusters
           const hullPoints: [number, number][] = cluster.points.map(p => [p.lon, p.lat]);
           const hull = computeConvexHull(hullPoints);
           if (hull.length < 3) return; // Skip if not enough points
           coordinates = [...hull, hull[0]]; // Close the polygon
+        } else {
+          // Fallback: create circle buffer for any remaining small clusters
+          coordinates = generateCirclePolygon(cluster.centroid[0], cluster.centroid[1], 10);
         }
         
         if (coordinates.length >= 3) {
+          // Determine if this is a circle buffer (for styling)
+          const isCircleBuffer = cluster.circleBuffer || cluster.points.length < 3;
+          
           polygonFeatures.push({
             type: 'Feature',
             properties: {
               id: idx,
               totalCount: cluster.totalCount,
-              pointCount: cluster.points.length
+              pointCount: cluster.points.length,
+              isCircleBuffer
             },
             geometry: {
               type: 'Polygon',

@@ -183,7 +183,7 @@ function FlightImportContent() {
                 Array.from(selectedRuleIds),
                 allComments,
                 true, // isAnomaly
-                true  // runPipeline
+                false  // runPipeline - skip ML analysis to avoid timeout
             );
             
             setImportSuccess(true);
