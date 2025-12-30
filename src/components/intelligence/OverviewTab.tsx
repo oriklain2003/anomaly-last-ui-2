@@ -42,17 +42,17 @@ export function OverviewTab({ startTs, endTs, cacheKey = 0, sharedData }: Overvi
     try {
       // Use batch APIs with pre-computed cache
       // Fetch overview, intelligence, and safety data in parallel
+      // Include 'flights_per_day' to ensure chart loads immediately (don't rely solely on sharedData)
       const [batchData, intelligenceData, safetyData] = await Promise.all([
-        fetchOverviewBatch(startTs, endTs, ['stats', 'airspace_risk', 'monthly_flights']),
+        fetchOverviewBatch(startTs, endTs, ['stats', 'flights_per_day', 'airspace_risk', 'monthly_flights']),
         fetchIntelligenceBatch(startTs, endTs),
         fetchSafetyBatch(startTs, endTs, ['phase'])
       ]);
       
       setStats(batchData.stats || null);
-      // Only set flights_per_day if not using shared data
-      if (!sharedData || sharedData.flightsPerDay.length === 0) {
-        setFlightsPerDay(batchData.flights_per_day || []);
-      }
+      // Set flights_per_day from batch data for immediate display
+      // This ensures the chart loads on first render without waiting for sharedData
+      setFlightsPerDay(batchData.flights_per_day || []);
       setAirspaceRisk(batchData.airspace_risk || null);
       setMonthlyFlights(batchData.monthly_flights || []);
       
