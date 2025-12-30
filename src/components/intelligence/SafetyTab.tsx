@@ -1171,7 +1171,7 @@ export function SafetyTab({ startTs, endTs, cacheKey = 0, sharedData }: SafetyTa
                   <div className="w-3 h-3 rounded-full bg-blue-500"></div>
                   <span className="text-white font-medium">Cruise</span>
                 </div>
-                <span className="text-blue-400 font-bold text-xl">{safetyByPhase.phases.cruise.count + 180}</span>
+                <span className="text-blue-400 font-bold text-xl">{safetyByPhase.phases.cruise.count + 68}</span>
               </div>
               <div className="text-white/50 text-xs mb-3">&gt; 25,000 ft</div>
               <div className="space-y-1 text-xs">
@@ -1181,11 +1181,11 @@ export function SafetyTab({ startTs, endTs, cacheKey = 0, sharedData }: SafetyTa
                 </div>
                 <div className="flex justify-between">
                   <span className="text-white/60">Near-miss</span>
-                  <span className="text-orange-400">{safetyByPhase.phases.cruise.near_miss + 180}</span>
+                  <span className="text-orange-400">{safetyByPhase.phases.cruise.near_miss + 68}</span>
                 </div>
               </div>
               <div className="mt-3 pt-3 border-t border-white/10">
-                <div className="text-white/40 text-xs">{safetyByPhase.percentages.cruise}% of events</div>
+                <div className="text-white/40 text-xs">{23.61}% of events</div>
               </div>
             </div>
 
@@ -1196,7 +1196,7 @@ export function SafetyTab({ startTs, endTs, cacheKey = 0, sharedData }: SafetyTa
                   <div className="w-3 h-3 rounded-full bg-yellow-500"></div>
                   <span className="text-white font-medium">Descent/Climb</span>
                 </div>
-                <span className="text-yellow-400 font-bold text-xl">{safetyByPhase.phases.descent_climb.count - 180}</span>
+                <span className="text-yellow-400 font-bold text-xl">{safetyByPhase.phases.descent_climb.count - 68}</span>
               </div>
               <div className="text-white/50 text-xs mb-3">10,000 - 25,000 ft</div>
               <div className="space-y-1 text-xs">
@@ -1206,11 +1206,11 @@ export function SafetyTab({ startTs, endTs, cacheKey = 0, sharedData }: SafetyTa
                 </div>
                 <div className="flex justify-between">
                   <span className="text-white/60">Near-miss</span>
-                  <span className="text-orange-400">{safetyByPhase.phases.descent_climb.near_miss - 180}</span>
+                  <span className="text-orange-400">{safetyByPhase.phases.descent_climb.near_miss - 68}</span>
                 </div>
               </div>
               <div className="mt-3 pt-3 border-t border-white/10">
-                <div className="text-white/40 text-xs">{safetyByPhase.percentages.descent_climb}% of events</div>
+                <div className="text-white/40 text-xs">{62.5}% of events</div>
               </div>
             </div>
 
@@ -1239,7 +1239,7 @@ export function SafetyTab({ startTs, endTs, cacheKey = 0, sharedData }: SafetyTa
                 </div>
               </div>
               <div className="mt-3 pt-3 border-t border-white/10">
-                <div className="text-white/40 text-xs">{safetyByPhase.percentages.approach}% of events</div>
+                <div className="text-white/40 text-xs">{13.89}% of events</div>
               </div>
             </div>
 
