@@ -221,6 +221,49 @@ export interface FlightJammingAnalysis {
   summary: string;
 }
 
+// Combined Signal Map - GPS Jamming + Signal Loss unified visualization
+export interface CombinedSignalPoint {
+  type: 'jamming' | 'signal_loss';
+  lat: number;
+  lon: number;
+  intensity: number;
+  event_count: number;
+  affected_flights: number;
+  color: string;
+  first_seen?: number;
+  last_seen?: number;
+  // Jamming-specific fields
+  indicators?: string[];
+  confidence?: 'HIGH' | 'MEDIUM' | 'LOW';
+  // Signal loss-specific fields
+  avg_gap_duration_sec?: number;
+}
+
+export interface CombinedSignalMapResponse {
+  points: CombinedSignalPoint[];
+  summary: {
+    total_jamming_events: number;
+    total_signal_loss_events: number;
+    jamming_zones: number;
+    signal_loss_zones: number;
+    total_zones: number;
+  };
+  legend: {
+    jamming: {
+      color: string;
+      label: string;
+      description: string;
+      icon: string;
+    };
+    signal_loss: {
+      color: string;
+      label: string;
+      description: string;
+      icon: string;
+    };
+  };
+}
+
 export interface MilitaryPattern {
   flight_id: string;
   callsign: string;

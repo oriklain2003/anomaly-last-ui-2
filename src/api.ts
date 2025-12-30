@@ -1027,6 +1027,7 @@ export interface BilateralProximityResponse {
     high_risk_events: number;
     alerts: MilitaryAlert[];
     proximity_threshold_nm: number;
+    time_window_sec?: number;  // Time window for considering "same time" proximity
 }
 
 // Military by Destination - Syria filter, etc.
@@ -1043,19 +1044,23 @@ export interface MilitaryDestinationFlight {
     risk_level: 'low' | 'medium' | 'high' | 'critical';
 }
 
-export interface SyriaFlight extends MilitaryDestinationFlight {
+export interface SyriaFlight {
+    callsign: string;
+    country: string;
+    type: string;
+    origin_region: string;
     is_from_east: boolean;
     concern_level: 'medium' | 'high';
+    origin_airport?: string;
+    destination_airport?: string;
 }
 
 export interface MilitaryByDestinationResponse {
-    flights: MilitaryDestinationFlight[];
     by_destination: Record<string, number>;
     by_origin: Record<string, number>;
     syria_flights: SyriaFlight[];
     total_flights: number;
     syria_from_east_count: number;
-    alerts: MilitaryAlert[];
 }
 
 // Combined Threat Assessment Widget
@@ -1160,6 +1165,8 @@ export interface IntelligenceBatchResponse {
     gps_jamming_clusters?: GPSJammingClustersResponse;
     route_efficiency?: RouteEfficiencyComparison | RoutesSummary;
     signal_loss_zones?: SignalLossLocation[];
+    // NEW: GPS Jamming Zones - predictive areas with expanded polygons
+    gps_jamming_zones?: GPSJammingZonesResponse;
     // Country-specific military breakdown
     military_by_country?: MilitaryByCountryResponse;
     // Bilateral proximity detection
@@ -1222,7 +1229,7 @@ export const fetchIntelligenceBatch = async (
                 'efficiency', 'holding', 'gps_jamming', 'military',
                 'clusters', 'routes', 'activity',
                 // Additional intelligence data
-                'gps_jamming_temporal', 'gps_jamming_clusters', 'route_efficiency', 'signal_loss_zones',
+                'gps_jamming_temporal', 'gps_jamming_clusters', 'gps_jamming_zones', 'route_efficiency', 'signal_loss_zones',
                 // Country-specific military breakdown
                 'military_by_country',
                 // Bilateral proximity detection
@@ -1289,6 +1296,8 @@ export interface TrafficBatchResponse {
     signal_loss_monthly?: SignalLossMonthly[];
     signal_loss_hourly?: SignalLossHourly[];
     signal_loss_clusters?: SignalLossClustersResponse;  // NEW: Precomputed polygon clusters
+    // NEW: Coverage Gap Zones - predictive areas where flights disappear
+    coverage_gap_zones?: CoverageGapZonesResponse;
     peak_hours?: PeakHoursAnalysis;
     diversion_stats?: DiversionStats;
     diversions_monthly?: DiversionMonthly[];
@@ -2710,6 +2719,85 @@ export interface GPSJammingClustersResponse {
     total_clusters: number;
 }
 
+// ============================================================================
+// COVERAGE GAP ZONES - Predictive areas where flights disappear
+// ============================================================================
+
+export interface CoverageGapZone {
+    id: number;
+    polygon: [number, number][];  // [lon, lat] GeoJSON format - the estimated coverage gap area
+    centroid: [number, number];  // [lon, lat]
+    area_sq_nm: number;  // Estimated area in square nautical miles
+    event_count: number;  // Number of signal loss events in this zone
+    affected_flights: number;  // Unique flights affected
+    avg_gap_duration_sec: number;  // Average signal gap duration
+    max_gap_duration_sec: number;  // Longest gap observed
+    risk_score: number;  // 0-100, likelihood of losing signal in this zone
+    gap_type: 'brief' | 'medium' | 'extended';
+    first_seen: number | null;  // First event timestamp
+    last_seen: number | null;  // Last event timestamp
+    points: Array<{
+        lat: number;
+        lon: number;
+        gap_duration: number;
+        timestamp: number;
+        flight_id: string;
+    }>;
+}
+
+export interface CoverageGapZonesResponse {
+    zones: CoverageGapZone[];
+    total_events: number;
+    total_zones: number;
+    coverage_summary: {
+        total_gap_area_sq_nm: number;
+        avg_zone_risk: number;
+        hotspot_regions: string[];
+    };
+}
+
+// ============================================================================
+// GPS JAMMING ZONES - Predictive areas with GPS interference
+// ============================================================================
+
+export interface GPSJammingZone {
+    id: number;
+    polygon: [number, number][];  // [lon, lat] GeoJSON format - estimated jamming area
+    centroid: [number, number];  // [lon, lat]
+    area_sq_nm: number;
+    event_count: number;
+    affected_flights: number;
+    jamming_score: number;  // 0-100, intensity of jamming
+    jamming_type: 'spoofing' | 'denial' | 'mixed';
+    indicators: {
+        altitude_spikes: number;
+        position_teleports: number;
+        heading_anomalies: number;
+        mlat_only: number;
+    };
+    first_seen: number | null;
+    last_seen: number | null;
+    confidence: 'HIGH' | 'MEDIUM' | 'LOW';
+    points: Array<{
+        lat: number;
+        lon: number;
+        jamming_score: number;
+        event_count: number;
+    }>;
+}
+
+export interface GPSJammingZonesResponse {
+    zones: GPSJammingZone[];
+    total_events: number;
+    total_zones: number;
+    jamming_summary: {
+        total_jamming_area_sq_nm: number;
+        avg_jamming_score: number;
+        primary_type: string;
+        hotspot_regions: string[];
+    };
+}
+
 // Signal Loss Clusters (similar to GPS Jamming Clusters for Traffic Tab)
 export interface SignalLossCluster {
     id: number;
@@ -2776,6 +2864,68 @@ export const fetchGPSJammingClusters = async (
     });
     const response = await fetch(`${API_BASE}/stats/gps-jamming/clusters?${params}`);
     if (!response.ok) throw new Error('Failed to fetch GPS jamming clusters');
+    return response.json();
+};
+
+
+// ============================================================================
+// COMBINED SIGNAL MAP - GPS Jamming + Signal Loss unified visualization
+// ============================================================================
+
+export interface CombinedSignalPoint {
+    type: 'jamming' | 'signal_loss';
+    lat: number;
+    lon: number;
+    intensity: number;
+    event_count: number;
+    affected_flights: number;
+    color: string;
+    first_seen?: number;
+    last_seen?: number;
+    // Jamming-specific fields
+    indicators?: string[];
+    confidence?: 'HIGH' | 'MEDIUM' | 'LOW';
+    // Signal loss-specific fields
+    avg_gap_duration_sec?: number;
+}
+
+export interface CombinedSignalMapResponse {
+    points: CombinedSignalPoint[];
+    summary: {
+        total_jamming_events: number;
+        total_signal_loss_events: number;
+        jamming_zones: number;
+        signal_loss_zones: number;
+        total_zones: number;
+    };
+    legend: {
+        jamming: {
+            color: string;
+            label: string;
+            description: string;
+            icon: string;
+        };
+        signal_loss: {
+            color: string;
+            label: string;
+            description: string;
+            icon: string;
+        };
+    };
+}
+
+export const fetchCombinedSignalMap = async (
+    startTs: number,
+    endTs: number,
+    limit: number = 50
+): Promise<CombinedSignalMapResponse> => {
+    const params = new URLSearchParams({
+        start_ts: startTs.toString(),
+        end_ts: endTs.toString(),
+        limit: limit.toString()
+    });
+    const response = await fetch(`${API_BASE}/intel/combined-signal-map?${params}`);
+    if (!response.ok) throw new Error('Failed to fetch combined signal map');
     return response.json();
 };
 

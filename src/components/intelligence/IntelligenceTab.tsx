@@ -1,9 +1,11 @@
 import { useState, useEffect, useRef } from 'react';
-import { Shield, Radar, TrendingUp, Info, MapPin, AlertTriangle, Clock, Plane, Target, MinusCircle, Cloud, CloudRain, Calendar, Activity, Building2, Signal } from 'lucide-react';
+import { Shield, Radar, TrendingUp, Info, MapPin, AlertTriangle, Clock, Plane, Target, MinusCircle, Cloud, CloudRain, Calendar, Activity, Building2, Signal, Map, Radio } from 'lucide-react';
 import { StatCard } from './StatCard';
 import { ChartCard } from './ChartCard';
 import { QuestionTooltip } from './QuestionTooltip';
 import { SignalLossMap } from './SignalLossMap';
+import { CoverageZonesMap } from './CoverageZonesMap';
+import { CombinedSignalMap } from './CombinedSignalMap';
 import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { 
@@ -17,6 +19,7 @@ import type {
   RoutesSummary,
   GPSJammingTemporal,
   GPSJammingClustersResponse,
+  GPSJammingZonesResponse,
   WeatherImpactAnalysis,
   SeasonalYearComparison,
   TrafficSafetyCorrelation,
@@ -29,7 +32,8 @@ import type {
   JammingTriangulationResponse,
   HourlyCorrelation,
   SpecialEvent,
-  MilitaryFlightsWithTracksResponse
+  MilitaryFlightsWithTracksResponse,
+  SignalLossClustersResponse
 } from '../../api';
 import type { SignalLossLocation } from '../../types';
 import type { AirlineEfficiency, GPSJammingPoint, MilitaryPattern, PatternCluster } from '../../types';
@@ -65,6 +69,9 @@ export function IntelligenceTab({ startTs, endTs, cacheKey = 0, sharedData }: In
   // GPS Jamming Clusters (backend-computed polygons)
   const [gpsJammingClusters, setGpsJammingClusters] = useState<GPSJammingClustersResponse | null>(null);
   
+  // NEW: GPS Jamming Zones (predictive expanded polygons)
+  const [gpsJammingZones, setGpsJammingZones] = useState<GPSJammingZonesResponse | null>(null);
+  
   // Level 2 Operational Insights (moved from Traffic/Safety)
   const [weatherImpact, setWeatherImpact] = useState<WeatherImpactAnalysis | null>(null);
   const [, setSeasonalTrends] = useState<SeasonalYearComparison | null>(null);
@@ -72,6 +79,10 @@ export function IntelligenceTab({ startTs, endTs, cacheKey = 0, sharedData }: In
   const [specialEvents, setSpecialEvents] = useState<SpecialEventsImpact | null>(null);
   const [alternateAirports, setAlternateAirports] = useState<AlternateAirport[]>([]);
   const [signalLossZones, setSignalLossZones] = useState<SignalLossLocation[]>([]);
+  
+  // Signal Loss data from Safety batch (same as TrafficTab uses)
+  const [signalLoss, setSignalLoss] = useState<SignalLossLocation[]>([]);
+  const [signalLossClusters, setSignalLossClusters] = useState<SignalLossClustersResponse | null>(null);
   
   // Military by Country breakdown
   const [militaryByCountry, setMilitaryByCountry] = useState<MilitaryByCountryResponse | null>(null);
@@ -155,6 +166,8 @@ export function IntelligenceTab({ startTs, endTs, cacheKey = 0, sharedData }: In
       setAirlineActivity(intelData.airline_activity || null);
       setGpsJammingTemporal(intelData.gps_jamming_temporal || null);
       setGpsJammingClusters(intelData.gps_jamming_clusters || null);
+      // NEW: GPS Jamming Zones (predictive expanded polygons)
+      setGpsJammingZones(intelData.gps_jamming_zones || null);
       // Signal loss zones (backend computes but was not displayed)
       setSignalLossZones(intelData.signal_loss_zones || []);
       
@@ -179,13 +192,20 @@ export function IntelligenceTab({ startTs, endTs, cacheKey = 0, sharedData }: In
       // NOTE: Traffic data now comes from sharedData (parent-level fetch)
       // This eliminates the redundant fetchTrafficBatch call
       // Fallback to direct fetch if sharedData not available
-      if (!sharedData?.trafficBatch) {
+      if (sharedData?.trafficBatch) {
+        // Use shared traffic data
+        setSignalLoss(sharedData.trafficBatch.signal_loss || []);
+        setSignalLossClusters(sharedData.trafficBatch.signal_loss_clusters || null);
+      } else {
         const { fetchTrafficBatch } = await import('../../api');
         const trafficData = await fetchTrafficBatch(startTs, endTs);
         setSeasonalTrends(trafficData.seasonal_year_comparison || null);
         setTrafficSafetyCorr(trafficData.traffic_safety_correlation || null);
         setSpecialEvents(trafficData.special_events_impact || null);
         setAlternateAirports(trafficData.alternate_airports || []);
+        // Signal Loss data from Traffic batch (same as TrafficTab - full data with clusters!)
+        setSignalLoss(trafficData.signal_loss || []);
+        setSignalLossClusters(trafficData.signal_loss_clusters || null);
       }
       
       // Weather Impact (from Safety batch - Level 2 analysis)
@@ -319,8 +339,9 @@ export function IntelligenceTab({ startTs, endTs, cacheKey = 0, sharedData }: In
             'line-color': ['match', ['get', 'country'],
               'US', '#3b82f6', 'GB', '#ef4444', 'RU', '#f59e0b',
               'IL', '#10b981', 'NATO', '#8b5cf6', 'DE', '#facc15',
-              'FR', '#ec4899', 'PL', '#06b6d4', 'ES', '#f97316',
-              'AU', '#84cc16', 'CA', '#e11d48', '#6b7280'
+              'FR', '#ec4899', 'PL', '#06b6d4', 'ES', '#fb923c',
+              'AU', '#84cc16', 'CA', '#f43f5e', 'JO', '#f59e0b',
+              'UNKNOWN', '#64748b', '#6366f1'
             ],
             'line-width': 4,
             'line-opacity': 0.3,
@@ -337,8 +358,9 @@ export function IntelligenceTab({ startTs, endTs, cacheKey = 0, sharedData }: In
             'line-color': ['match', ['get', 'country'],
               'US', '#3b82f6', 'GB', '#ef4444', 'RU', '#f59e0b',
               'IL', '#10b981', 'NATO', '#8b5cf6', 'DE', '#facc15',
-              'FR', '#ec4899', 'PL', '#06b6d4', 'ES', '#f97316',
-              'AU', '#84cc16', 'CA', '#e11d48', '#6b7280'
+              'FR', '#ec4899', 'PL', '#06b6d4', 'ES', '#fb923c',
+              'AU', '#84cc16', 'CA', '#f43f5e', 'JO', '#f59e0b',
+              'UNKNOWN', '#64748b', '#6366f1'
             ],
             'line-width': 2,
             'line-opacity': 0.8
@@ -802,8 +824,53 @@ export function IntelligenceTab({ startTs, endTs, cacheKey = 0, sharedData }: In
         </>
       )}
 
-
-
+      {/* NEW: Combined Signal Map - GPS Jamming + Signal Loss on same map */}
+      {(gpsJammingClusters || signalLossClusters || signalLoss.length > 0 || signalLossZones.length > 0) && (
+        <div className="bg-surface rounded-xl border border-gradient-to-r from-red-500/30 to-orange-500/30 overflow-hidden">
+          <div className="px-6 py-4 border-b border-white/10 bg-gradient-to-r from-red-500/10 via-orange-500/10 to-yellow-500/5">
+            <div className="flex items-start justify-between">
+              <div>
+                <h3 className="text-lg font-semibold text-white flex items-center gap-2">
+                  <Radio className="w-5 h-5 text-orange-400" />
+                  Combined Signal Analysis Map
+                  <span className="px-2 py-0.5 bg-gradient-to-r from-red-500/20 to-orange-500/20 text-orange-400 text-xs font-bold rounded-full border border-orange-500/30">NEW</span>
+                </h3>
+                <p className="text-white/60 text-sm mt-1">
+                  GPS Jamming (active interference) + Signal Loss (coverage gaps) on the same map
+                </p>
+                <div className="mt-2 flex items-center gap-3">
+                  <div className="inline-flex items-center gap-2 px-2 py-1 bg-red-500/20 rounded text-xs text-red-300 border border-red-500/30">
+                    <span>🔺</span>
+                    <span>Red = GPS Jamming (active)</span>
+                  </div>
+                  <div className="inline-flex items-center gap-2 px-2 py-1 bg-orange-500/20 rounded text-xs text-orange-300 border border-orange-500/30">
+                    <span>📡</span>
+                    <span>Orange = Signal Loss (passive)</span>
+                  </div>
+                </div>
+              </div>
+              <div className="bg-gradient-to-br from-red-500/10 to-orange-500/10 border border-white/10 rounded-lg p-3 max-w-xs">
+                <div className="flex items-start gap-2">
+                  <Info className="w-4 h-4 text-orange-400 mt-0.5 shrink-0" />
+                  <div className="text-xs text-white/70">
+                    <strong className="text-orange-300">Unified View:</strong> See both types of signal anomalies 
+                    together to identify patterns and distinguish between intentional jamming vs coverage gaps.
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+          
+          <div className="p-6">
+            <CombinedSignalMap 
+              jammingClusters={gpsJammingClusters} 
+              signalLossClusters={signalLossClusters}
+              signalLossZones={signalLoss.length > 0 ? signalLoss : signalLossZones} 
+              height={500} 
+            />
+          </div>
+        </div>
+      )}
 
 
       {/* Level 3: Deep Intelligence - THE MOST IMPORTANT SECTION */}
@@ -1032,7 +1099,177 @@ export function IntelligenceTab({ startTs, endTs, cacheKey = 0, sharedData }: In
         </div>
       </div>
 
-
+      {/* NEW: GPS Jamming Predictive Zones Map */}
+      {gpsJammingZones && gpsJammingZones.zones.length > 0 && (
+        <div className="bg-surface rounded-xl border border-red-500/30 overflow-hidden">
+          <div className="px-6 py-4 border-b border-red-500/20 bg-gradient-to-r from-red-500/10 to-orange-500/10">
+            <div className="flex items-start justify-between">
+              <div>
+                <h3 className="text-lg font-semibold text-white flex items-center gap-2">
+                  <Map className="w-5 h-5 text-red-500" />
+                  GPS Jamming Prediction Zones
+                  <span className="px-2 py-0.5 bg-red-500/20 text-red-400 text-xs font-bold rounded-full">NEW</span>
+                </h3>
+                <p className="text-white/60 text-sm mt-1">
+                  Estimated areas where GPS interference affects flights - <strong>predictive polygons</strong>
+                </p>
+                <div className="mt-2 inline-flex items-center gap-2 px-2 py-1 bg-orange-500/20 rounded text-xs text-orange-300">
+                  <AlertTriangle className="w-3 h-3" />
+                  <span>Flights entering these zones may experience GPS disruption</span>
+                </div>
+              </div>
+              <div className="bg-gradient-to-br from-red-500/10 to-purple-500/10 border border-red-500/30 rounded-lg p-3 max-w-xs">
+                <div className="flex items-start gap-2">
+                  <Info className="w-4 h-4 text-red-400 mt-0.5 shrink-0" />
+                  <div className="text-xs text-white/70">
+                    <strong className="text-red-300">Predictive Analysis:</strong> These polygons estimate 
+                    the <em>actual coverage area</em> of jamming activity based on clustered events, 
+                    not just individual points.
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+          
+          <div className="p-6">
+            <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+              {/* Map */}
+              <div className="xl:col-span-2">
+                <CoverageZonesMap 
+                  jammingZones={gpsJammingZones}
+                  height={450}
+                  showCoverage={false}
+                  showJamming={true}
+                />
+              </div>
+              
+              {/* Stats Panel */}
+              <div className="space-y-4">
+                {/* Summary Stats */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-4 text-center">
+                    <div className="text-2xl font-bold text-red-400">{gpsJammingZones.total_zones}</div>
+                    <div className="text-xs text-white/50">Jamming Zones</div>
+                  </div>
+                  <div className="bg-orange-500/10 border border-orange-500/30 rounded-lg p-4 text-center">
+                    <div className="text-2xl font-bold text-orange-400">{gpsJammingZones.total_events}</div>
+                    <div className="text-xs text-white/50">Total Events</div>
+                  </div>
+                </div>
+                
+                {/* Jamming Summary */}
+                {gpsJammingZones.jamming_summary && (
+                  <div className="bg-surface-highlight rounded-lg p-4">
+                    <h4 className="text-white/80 text-sm font-medium mb-3 flex items-center gap-2">
+                      <Radar className="w-4 h-4 text-red-400" />
+                      Jamming Analysis
+                    </h4>
+                    <div className="space-y-2 text-xs">
+                      <div className="flex justify-between">
+                        <span className="text-white/60">Total Area:</span>
+                        <span className="text-red-400 font-bold">
+                          {gpsJammingZones.jamming_summary.total_jamming_area_sq_nm.toLocaleString()} sq nm
+                        </span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-white/60">Avg Score:</span>
+                        <span className={`font-bold ${
+                          gpsJammingZones.jamming_summary.avg_jamming_score >= 60 ? 'text-red-400' :
+                          gpsJammingZones.jamming_summary.avg_jamming_score >= 40 ? 'text-orange-400' : 'text-yellow-400'
+                        }`}>
+                          {gpsJammingZones.jamming_summary.avg_jamming_score}/100
+                        </span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-white/60">Primary Type:</span>
+                        <span className={`font-medium capitalize ${
+                          gpsJammingZones.jamming_summary.primary_type === 'spoofing' ? 'text-orange-400' :
+                          gpsJammingZones.jamming_summary.primary_type === 'denial' ? 'text-purple-400' : 'text-red-400'
+                        }`}>
+                          {gpsJammingZones.jamming_summary.primary_type}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+                
+                {/* Zone Type Breakdown */}
+                <div className="bg-surface-highlight rounded-lg p-4">
+                  <h4 className="text-white/80 text-sm font-medium mb-3">Zone Types</h4>
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <div className="w-3 h-3 rounded" style={{ background: 'rgba(249, 115, 22, 0.5)', border: '2px dashed #f97316' }} />
+                        <span className="text-white/70 text-xs">Spoofing</span>
+                      </div>
+                      <span className="text-orange-400 font-bold text-sm">
+                        {gpsJammingZones.zones.filter(z => z.jamming_type === 'spoofing').length}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <div className="w-3 h-3 rounded" style={{ background: 'rgba(168, 85, 247, 0.5)', border: '2px dashed #a855f7' }} />
+                        <span className="text-white/70 text-xs">Denial</span>
+                      </div>
+                      <span className="text-purple-400 font-bold text-sm">
+                        {gpsJammingZones.zones.filter(z => z.jamming_type === 'denial').length}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <div className="w-3 h-3 rounded" style={{ background: 'rgba(239, 68, 68, 0.5)', border: '2px dashed #ef4444' }} />
+                        <span className="text-white/70 text-xs">Mixed</span>
+                      </div>
+                      <span className="text-red-400 font-bold text-sm">
+                        {gpsJammingZones.zones.filter(z => z.jamming_type === 'mixed').length}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+                
+                {/* Confidence Breakdown */}
+                <div className="grid grid-cols-3 gap-2">
+                  <div className="bg-red-500/20 rounded-lg p-2 text-center">
+                    <div className="text-lg font-bold text-red-400">
+                      {gpsJammingZones.zones.filter(z => z.confidence === 'HIGH').length}
+                    </div>
+                    <div className="text-[10px] text-red-300">HIGH</div>
+                  </div>
+                  <div className="bg-orange-500/20 rounded-lg p-2 text-center">
+                    <div className="text-lg font-bold text-orange-400">
+                      {gpsJammingZones.zones.filter(z => z.confidence === 'MEDIUM').length}
+                    </div>
+                    <div className="text-[10px] text-orange-300">MEDIUM</div>
+                  </div>
+                  <div className="bg-yellow-500/20 rounded-lg p-2 text-center">
+                    <div className="text-lg font-bold text-yellow-400">
+                      {gpsJammingZones.zones.filter(z => z.confidence === 'LOW').length}
+                    </div>
+                    <div className="text-[10px] text-yellow-300">LOW</div>
+                  </div>
+                </div>
+                
+                {/* Hotspot Regions */}
+                {gpsJammingZones.jamming_summary?.hotspot_regions && gpsJammingZones.jamming_summary.hotspot_regions.length > 0 && (
+                  <div className="bg-gradient-to-br from-red-500/10 to-orange-500/10 border border-red-500/30 rounded-lg p-4">
+                    <h4 className="text-red-400 text-sm font-medium mb-2 flex items-center gap-2">
+                      <MapPin className="w-4 h-4" />
+                      Hotspot Regions
+                    </h4>
+                    <div className="flex flex-wrap gap-1">
+                      {gpsJammingZones.jamming_summary.hotspot_regions.map((region, idx) => (
+                        <span key={idx} className="px-2 py-1 bg-black/30 rounded text-xs text-white/70">
+                          {region}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* GPS Jamming Temporal Analysis */}
       {gpsJammingTemporal && gpsJammingTemporal.total_events > 0 && (
@@ -1211,8 +1448,14 @@ export function IntelligenceTab({ startTs, endTs, cacheKey = 0, sharedData }: In
                     'NATO': { bg: 'bg-purple-500/20', border: 'border-purple-500/50', text: 'text-purple-400' },
                     'DE': { bg: 'bg-yellow-500/20', border: 'border-yellow-500/50', text: 'text-yellow-400' },
                     'FR': { bg: 'bg-pink-500/20', border: 'border-pink-500/50', text: 'text-pink-400' },
+                    'JO': { bg: 'bg-amber-500/20', border: 'border-amber-500/50', text: 'text-amber-400' },
+                    'PL': { bg: 'bg-cyan-500/20', border: 'border-cyan-500/50', text: 'text-cyan-400' },
+                    'ES': { bg: 'bg-orange-400/20', border: 'border-orange-400/50', text: 'text-orange-300' },
+                    'AU': { bg: 'bg-lime-500/20', border: 'border-lime-500/50', text: 'text-lime-400' },
+                    'CA': { bg: 'bg-rose-500/20', border: 'border-rose-500/50', text: 'text-rose-400' },
+                    'UNKNOWN': { bg: 'bg-slate-600/20', border: 'border-slate-600/50', text: 'text-slate-400' },
                   };
-                  const colors = colorMap[country] || { bg: 'bg-gray-500/20', border: 'border-gray-500/50', text: 'text-gray-400' };
+                  const colors = colorMap[country] || { bg: 'bg-indigo-500/20', border: 'border-indigo-500/50', text: 'text-indigo-400' };
                   
                   // Country code to full name mapping
                   const countryNames: Record<string, string> = {
@@ -1247,6 +1490,7 @@ export function IntelligenceTab({ startTs, endTs, cacheKey = 0, sharedData }: In
                     'LT': 'Lithuania',
                     'LV': 'Latvia',
                     'EE': 'Estonia',
+                    'JO': 'Jordan',
                     'UNKNOWN': 'Unknown Country',
                   };
                   const fullName = countryNames[country] || country;
@@ -1278,7 +1522,13 @@ export function IntelligenceTab({ startTs, endTs, cacheKey = 0, sharedData }: In
                         country === 'NATO' ? 'bg-purple-400' :
                         country === 'DE' ? 'bg-yellow-400' :
                         country === 'FR' ? 'bg-pink-400' :
-                        'bg-gray-400'
+                        country === 'JO' ? 'bg-amber-400' :
+                        country === 'PL' ? 'bg-cyan-400' :
+                        country === 'ES' ? 'bg-orange-300' :
+                        country === 'AU' ? 'bg-lime-400' :
+                        country === 'CA' ? 'bg-rose-400' :
+                        country === 'UNKNOWN' ? 'bg-slate-400' :
+                        'bg-indigo-400'
                       }`} />
                       {country}
                       <span className="opacity-60">({count})</span>
@@ -1489,8 +1739,8 @@ export function IntelligenceTab({ startTs, endTs, cacheKey = 0, sharedData }: In
             />
             <StatCard
               title="Top Country"
-              value={militaryByCountry.summary.top_countries[0]?.country || 'N/A'}
-              subtitle={`${militaryByCountry.summary.top_countries[0]?.flights || 0} flights`}
+              value={militaryByCountry.summary.top_countries.find(c => c.country !== 'UNKNOWN')?.country || 'N/A'}
+              subtitle={`${militaryByCountry.summary.top_countries.find(c => c.country !== 'UNKNOWN')?.flights || 0} flights`}
               icon={<TrendingUp className="w-6 h-6" />}
             />
             <StatCard
@@ -1525,7 +1775,15 @@ export function IntelligenceTab({ startTs, endTs, cacheKey = 0, sharedData }: In
                             code === 'GB' ? 'bg-red-500/20 text-red-400' :
                             code === 'IL' ? 'bg-green-500/20 text-green-400' :
                             code === 'NATO' ? 'bg-purple-500/20 text-purple-400' :
-                            'bg-gray-500/20 text-gray-400'
+                            code === 'JO' ? 'bg-amber-500/20 text-amber-400' :
+                            code === 'DE' ? 'bg-yellow-500/20 text-yellow-400' :
+                            code === 'FR' ? 'bg-pink-500/20 text-pink-400' :
+                            code === 'PL' ? 'bg-cyan-500/20 text-cyan-400' :
+                            code === 'ES' ? 'bg-orange-400/20 text-orange-300' :
+                            code === 'AU' ? 'bg-lime-500/20 text-lime-400' :
+                            code === 'CA' ? 'bg-rose-500/20 text-rose-400' :
+                            code === 'UNKNOWN' ? 'bg-slate-600/20 text-slate-400' :
+                            'bg-indigo-500/20 text-indigo-400'
                           }`}>
                             {code}
                           </span>
@@ -1901,64 +2159,7 @@ export function IntelligenceTab({ startTs, endTs, cacheKey = 0, sharedData }: In
             </div>
           </div>
 
-          {/* Syria Flights Table */}
-          {militaryByDestination.syria_flights.length > 0 && (
-            <div className="bg-surface rounded-xl border border-orange-500/30 overflow-hidden">
-              <div className="px-6 py-4 border-b border-orange-500/20 bg-orange-500/5">
-                <h3 className="text-lg font-semibold text-orange-400 flex items-center gap-2">
-                  <AlertTriangle className="w-5 h-5" />
-                  Syria-Bound Military Flights
-                </h3>
-              </div>
-              <div className="overflow-x-auto">
-                <table className="w-full">
-                  <thead>
-                    <tr className="border-b border-white/10">
-                      <th className="text-left text-white/60 text-sm font-medium px-4 py-3">Callsign</th>
-                      <th className="text-left text-white/60 text-sm font-medium px-4 py-3">Country</th>
-                      <th className="text-left text-white/60 text-sm font-medium px-4 py-3">Type</th>
-                      <th className="text-left text-white/60 text-sm font-medium px-4 py-3">Origin</th>
-                      <th className="text-left text-white/60 text-sm font-medium px-4 py-3">Concern</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {militaryByDestination.syria_flights.slice(0, 15).map((flight, idx) => (
-                      <tr key={idx} className="border-b border-white/5 hover:bg-white/5">
-                        <td className="px-4 py-3 text-white font-mono">{flight.callsign}</td>
-                        <td className="px-4 py-3">
-                          <span className={`px-2 py-1 rounded text-xs font-bold ${
-                            flight.country === 'RU' ? 'bg-orange-500/20 text-orange-400' :
-                            flight.country === 'IR' ? 'bg-red-500/20 text-red-400' :
-                            'bg-blue-500/20 text-blue-400'
-                          }`}>
-                            {flight.country}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3 text-white/70">{flight.type}</td>
-                        <td className="px-4 py-3">
-                          <span className={`capitalize ${
-                            flight.is_from_east ? 'text-orange-400 font-medium' : 'text-white/70'
-                          }`}>
-                            {flight.origin_region}
-                            {flight.is_from_east && ' 🔶'}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3">
-                          <span className={`px-2 py-1 rounded text-xs font-bold ${
-                            flight.concern_level === 'high' 
-                              ? 'bg-red-500/20 text-red-400' 
-                              : 'bg-yellow-500/20 text-yellow-400'
-                          }`}>
-                            {flight.concern_level.toUpperCase()}
-                          </span>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
+
         </>
       )}
 
