@@ -1,9 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
-import { Shield, Radar, TrendingUp, Info, MapPin, AlertTriangle, Clock, Plane, Target, MinusCircle, Cloud, CloudRain, Calendar, Activity, Building2, Signal, Map, Radio } from 'lucide-react';
+import { Shield, Radar, TrendingUp, Info, MapPin, AlertTriangle, Clock, Plane, Target, MinusCircle, Cloud, CloudRain, Calendar, Activity, Building2, Signal, Radio } from 'lucide-react';
 import { StatCard } from './StatCard';
 import { ChartCard } from './ChartCard';
 import { QuestionTooltip } from './QuestionTooltip';
-import { CoverageZonesMap } from './CoverageZonesMap';
 import { CombinedSignalMap } from './CombinedSignalMap';
 import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
@@ -67,7 +66,7 @@ export function IntelligenceTab({ startTs, endTs, cacheKey = 0, sharedData }: In
   const [gpsJammingClusters, setGpsJammingClusters] = useState<GPSJammingClustersResponse | null>(null);
   
   // NEW: GPS Jamming Zones (predictive expanded polygons)
-  const [gpsJammingZones, setGpsJammingZones] = useState<GPSJammingZonesResponse | null>(null);
+  const [, setGpsJammingZones] = useState<GPSJammingZonesResponse | null>(null);
   
   // Level 2 Operational Insights (moved from Traffic/Safety)
   const [weatherImpact, setWeatherImpact] = useState<WeatherImpactAnalysis | null>(null);
@@ -759,177 +758,7 @@ export function IntelligenceTab({ startTs, endTs, cacheKey = 0, sharedData }: In
 
 
 
-      {/* NEW: GPS Jamming Predictive Zones Map */}
-      {gpsJammingZones && gpsJammingZones.zones.length > 0 && (
-        <div className="bg-surface rounded-xl border border-red-500/30 overflow-hidden">
-          <div className="px-6 py-4 border-b border-red-500/20 bg-gradient-to-r from-red-500/10 to-orange-500/10">
-            <div className="flex items-start justify-between">
-              <div>
-                <h3 className="text-lg font-semibold text-white flex items-center gap-2">
-                  <Map className="w-5 h-5 text-red-500" />
-                  GPS Jamming Prediction Zones
-                  <span className="px-2 py-0.5 bg-red-500/20 text-red-400 text-xs font-bold rounded-full">NEW</span>
-                </h3>
-                <p className="text-white/60 text-sm mt-1">
-                  Estimated areas where GPS interference affects flights - <strong>predictive polygons</strong>
-                </p>
-                <div className="mt-2 inline-flex items-center gap-2 px-2 py-1 bg-orange-500/20 rounded text-xs text-orange-300">
-                  <AlertTriangle className="w-3 h-3" />
-                  <span>Flights entering these zones may experience GPS disruption</span>
-                </div>
-              </div>
-              <div className="bg-gradient-to-br from-red-500/10 to-purple-500/10 border border-red-500/30 rounded-lg p-3 max-w-xs">
-                <div className="flex items-start gap-2">
-                  <Info className="w-4 h-4 text-red-400 mt-0.5 shrink-0" />
-                  <div className="text-xs text-white/70">
-                    <strong className="text-red-300">Predictive Analysis:</strong> These polygons estimate 
-                    the <em>actual coverage area</em> of jamming activity based on clustered events, 
-                    not just individual points.
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-          
-          <div className="p-6">
-            <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-              {/* Map */}
-              <div className="xl:col-span-2">
-                <CoverageZonesMap 
-                  jammingZones={gpsJammingZones}
-                  height={450}
-                  showCoverage={false}
-                  showJamming={true}
-                />
-              </div>
-              
-              {/* Stats Panel */}
-              <div className="space-y-4">
-                {/* Summary Stats */}
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-4 text-center">
-                    <div className="text-2xl font-bold text-red-400">{gpsJammingZones.total_zones}</div>
-                    <div className="text-xs text-white/50">Jamming Zones</div>
-                  </div>
-                  <div className="bg-orange-500/10 border border-orange-500/30 rounded-lg p-4 text-center">
-                    <div className="text-2xl font-bold text-orange-400">{gpsJammingZones.total_events}</div>
-                    <div className="text-xs text-white/50">Total Events</div>
-                  </div>
-                </div>
-                
-                {/* Jamming Summary */}
-                {gpsJammingZones.jamming_summary && (
-                  <div className="bg-surface-highlight rounded-lg p-4">
-                    <h4 className="text-white/80 text-sm font-medium mb-3 flex items-center gap-2">
-                      <Radar className="w-4 h-4 text-red-400" />
-                      Jamming Analysis
-                    </h4>
-                    <div className="space-y-2 text-xs">
-                      <div className="flex justify-between">
-                        <span className="text-white/60">Total Area:</span>
-                        <span className="text-red-400 font-bold">
-                          {gpsJammingZones.jamming_summary.total_jamming_area_sq_nm.toLocaleString()} sq nm
-                        </span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-white/60">Avg Score:</span>
-                        <span className={`font-bold ${
-                          gpsJammingZones.jamming_summary.avg_jamming_score >= 60 ? 'text-red-400' :
-                          gpsJammingZones.jamming_summary.avg_jamming_score >= 40 ? 'text-orange-400' : 'text-yellow-400'
-                        }`}>
-                          {gpsJammingZones.jamming_summary.avg_jamming_score}/100
-                        </span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-white/60">Primary Type:</span>
-                        <span className={`font-medium capitalize ${
-                          gpsJammingZones.jamming_summary.primary_type === 'spoofing' ? 'text-orange-400' :
-                          gpsJammingZones.jamming_summary.primary_type === 'denial' ? 'text-purple-400' : 'text-red-400'
-                        }`}>
-                          {gpsJammingZones.jamming_summary.primary_type}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                )}
-                
-                {/* Zone Type Breakdown */}
-                <div className="bg-surface-highlight rounded-lg p-4">
-                  <h4 className="text-white/80 text-sm font-medium mb-3">Zone Types</h4>
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <div className="w-3 h-3 rounded" style={{ background: 'rgba(249, 115, 22, 0.5)', border: '2px dashed #f97316' }} />
-                        <span className="text-white/70 text-xs">Spoofing</span>
-                      </div>
-                      <span className="text-orange-400 font-bold text-sm">
-                        {gpsJammingZones.zones.filter(z => z.jamming_type === 'spoofing').length}
-                      </span>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <div className="w-3 h-3 rounded" style={{ background: 'rgba(168, 85, 247, 0.5)', border: '2px dashed #a855f7' }} />
-                        <span className="text-white/70 text-xs">Denial</span>
-                      </div>
-                      <span className="text-purple-400 font-bold text-sm">
-                        {gpsJammingZones.zones.filter(z => z.jamming_type === 'denial').length}
-                      </span>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <div className="w-3 h-3 rounded" style={{ background: 'rgba(239, 68, 68, 0.5)', border: '2px dashed #ef4444' }} />
-                        <span className="text-white/70 text-xs">Mixed</span>
-                      </div>
-                      <span className="text-red-400 font-bold text-sm">
-                        {gpsJammingZones.zones.filter(z => z.jamming_type === 'mixed').length}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-                
-                {/* Confidence Breakdown */}
-                <div className="grid grid-cols-3 gap-2">
-                  <div className="bg-red-500/20 rounded-lg p-2 text-center">
-                    <div className="text-lg font-bold text-red-400">
-                      {gpsJammingZones.zones.filter(z => z.confidence === 'HIGH').length}
-                    </div>
-                    <div className="text-[10px] text-red-300">HIGH</div>
-                  </div>
-                  <div className="bg-orange-500/20 rounded-lg p-2 text-center">
-                    <div className="text-lg font-bold text-orange-400">
-                      {gpsJammingZones.zones.filter(z => z.confidence === 'MEDIUM').length}
-                    </div>
-                    <div className="text-[10px] text-orange-300">MEDIUM</div>
-                  </div>
-                  <div className="bg-yellow-500/20 rounded-lg p-2 text-center">
-                    <div className="text-lg font-bold text-yellow-400">
-                      {gpsJammingZones.zones.filter(z => z.confidence === 'LOW').length}
-                    </div>
-                    <div className="text-[10px] text-yellow-300">LOW</div>
-                  </div>
-                </div>
-                
-                {/* Hotspot Regions */}
-                {gpsJammingZones.jamming_summary?.hotspot_regions && gpsJammingZones.jamming_summary.hotspot_regions.length > 0 && (
-                  <div className="bg-gradient-to-br from-red-500/10 to-orange-500/10 border border-red-500/30 rounded-lg p-4">
-                    <h4 className="text-red-400 text-sm font-medium mb-2 flex items-center gap-2">
-                      <MapPin className="w-4 h-4" />
-                      Hotspot Regions
-                    </h4>
-                    <div className="flex flex-wrap gap-1">
-                      {gpsJammingZones.jamming_summary.hotspot_regions.map((region, idx) => (
-                        <span key={idx} className="px-2 py-1 bg-black/30 rounded text-xs text-white/70">
-                          {region}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+
 
       {/* GPS Jamming Temporal Analysis */}
       {gpsJammingTemporal && gpsJammingTemporal.total_events > 0 && (
