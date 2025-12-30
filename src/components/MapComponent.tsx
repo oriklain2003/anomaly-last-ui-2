@@ -91,6 +91,8 @@ export const MapComponent = forwardRef<MapComponentHandle, MapComponentProps>(({
   const [showMLPoints, setShowMLPoints] = useState(true);
   const [selectedPathCluster, setSelectedPathCluster] = useState<string>('all');
   const [showPathSelector, setShowPathSelector] = useState(false);
+  const [clickedPathInfo, setClickedPathInfo] = useState<{ id: string; origin?: string; destination?: string; member_count?: number } | null>(null);
+  const [mapLoaded, setMapLoaded] = useState(false);
 
   // Group paths by origin-destination cluster
   const pathClusters = useMemo(() => {
@@ -501,6 +503,9 @@ export const MapComponent = forwardRef<MapComponentHandle, MapComponentProps>(({
       
       map.current.on('mouseenter', 'secondary-route-points', showPopup);
       map.current.on('mouseleave', 'secondary-route-points', hidePopup);
+      
+      // Mark map as loaded
+      setMapLoaded(true);
     });
 
     return () => {
@@ -644,17 +649,25 @@ export const MapComponent = forwardRef<MapComponentHandle, MapComponentProps>(({
 
   // Learned Layers Visualization (Paths, Turns, SIDs, STARs)
   useEffect(() => {
-    if (!map.current) return;
+    if (!map.current || !mapLoaded) return;
 
     // Helper to add a source and layer safely
     const addLayerSafe = (id: string, color: string, dashArray: number[], type: 'line' | 'fill' = 'line') => {
+        // Add source if it doesn't exist
         if (!map.current!.getSource(id)) {
             try {
                 map.current!.addSource(id, {
                     type: 'geojson',
                     data: { type: 'FeatureCollection', features: [] }
                 });
-                
+            } catch (e) {
+                // Source already exists - ignore
+            }
+        }
+        
+        // Add layer if it doesn't exist (separate check from source)
+        if (!map.current!.getLayer(`${id}-layer`)) {
+            try {
                 const beforeId = map.current!.getLayer('route-line') ? 'route-line' : undefined;
 
                 const paint: any = type === 'line' ? {
@@ -681,7 +694,7 @@ export const MapComponent = forwardRef<MapComponentHandle, MapComponentProps>(({
             } catch (e) {
                 // Layer already exists or other error - ignore
             }
-        } 
+        }
     };
 
     // Create all layer sources
@@ -689,6 +702,100 @@ export const MapComponent = forwardRef<MapComponentHandle, MapComponentProps>(({
     addLayerSafe('learned-turns', '#FF9800', [], 'fill');           // Orange fill for turns
     addLayerSafe('learned-sids', '#2196F3', [5, 5], 'line');        // Blue dashed for SIDs
     addLayerSafe('learned-stars', '#E91E63', [5, 5], 'line');       // Pink dashed for STARs
+
+    // Register click handlers immediately after layer creation
+    const mapInstance = map.current as any;
+    if (!mapInstance._pathClickHandlersRegistered) {
+      // Click handler for learned paths
+      if (map.current.getLayer('learned-paths-layer')) {
+        map.current.on('click', 'learned-paths-layer', (e: any) => {
+          if (!e.features || e.features.length === 0) return;
+          
+          const props = e.features[0].properties;
+          setClickedPathInfo({
+            id: props?.id || 'Unknown',
+            origin: props?.origin,
+            destination: props?.destination,
+            member_count: props?.member_count
+          });
+        });
+
+        map.current.on('mouseenter', 'learned-paths-layer', () => {
+          if (map.current) map.current.getCanvas().style.cursor = 'pointer';
+        });
+        map.current.on('mouseleave', 'learned-paths-layer', () => {
+          if (map.current) map.current.getCanvas().style.cursor = '';
+        });
+      }
+
+      // Click handler for SIDs
+      if (map.current.getLayer('learned-sids-layer')) {
+        map.current.on('click', 'learned-sids-layer', (e: any) => {
+          if (!e.features || e.features.length === 0) return;
+          
+          const props = e.features[0].properties;
+          setClickedPathInfo({
+            id: props?.id || 'Unknown',
+            origin: props?.airport,
+            destination: 'SID Departure',
+            member_count: props?.member_count
+          });
+        });
+
+        map.current.on('mouseenter', 'learned-sids-layer', () => {
+          if (map.current) map.current.getCanvas().style.cursor = 'pointer';
+        });
+        map.current.on('mouseleave', 'learned-sids-layer', () => {
+          if (map.current) map.current.getCanvas().style.cursor = '';
+        });
+      }
+
+      // Click handler for STARs
+      if (map.current.getLayer('learned-stars-layer')) {
+        map.current.on('click', 'learned-stars-layer', (e: any) => {
+          if (!e.features || e.features.length === 0) return;
+          
+          const props = e.features[0].properties;
+          setClickedPathInfo({
+            id: props?.id || 'Unknown',
+            origin: 'STAR Arrival',
+            destination: props?.airport,
+            member_count: props?.member_count
+          });
+        });
+
+        map.current.on('mouseenter', 'learned-stars-layer', () => {
+          if (map.current) map.current.getCanvas().style.cursor = 'pointer';
+        });
+        map.current.on('mouseleave', 'learned-stars-layer', () => {
+          if (map.current) map.current.getCanvas().style.cursor = '';
+        });
+      }
+
+      // Click handler for Turns
+      if (map.current.getLayer('learned-turns-layer')) {
+        map.current.on('click', 'learned-turns-layer', (e: any) => {
+          if (!e.features || e.features.length === 0) return;
+          
+          const props = e.features[0].properties;
+          setClickedPathInfo({
+            id: props?.id || 'Unknown',
+            origin: `Turn Zone (${props?.avg_alt_ft?.toFixed(0) || '?'} ft)`,
+            destination: `Radius: ${props?.radius_nm?.toFixed(1) || '?'} nm`,
+            member_count: props?.member_count
+          });
+        });
+
+        map.current.on('mouseenter', 'learned-turns-layer', () => {
+          if (map.current) map.current.getCanvas().style.cursor = 'pointer';
+        });
+        map.current.on('mouseleave', 'learned-turns-layer', () => {
+          if (map.current) map.current.getCanvas().style.cursor = '';
+        });
+      }
+
+      mapInstance._pathClickHandlersRegistered = true;
+    }
 
     // Helper to create circle polygon from center and radius
     const createCirclePolygon = (lat: number, lon: number, radiusNm: number) => {
@@ -819,7 +926,7 @@ export const MapComponent = forwardRef<MapComponentHandle, MapComponentProps>(({
     updateTurns();
     updateSids();
     updateStars();
-  }, [showPaths, showTurns, showSids, showStars, learnedLayers, filteredPaths, selectedPathCluster]);
+  }, [mapLoaded, showPaths, showTurns, showSids, showStars, learnedLayers, filteredPaths, selectedPathCluster]);
 
   useEffect(() => {
     if (!map.current) return;
@@ -1140,6 +1247,47 @@ export const MapComponent = forwardRef<MapComponentHandle, MapComponentProps>(({
                 </button>
             )}
         </div>
+        
+        {/* Clicked Path Info Panel */}
+        {clickedPathInfo && (
+            <div className="absolute bottom-4 left-4 z-10 bg-gray-900/95 border border-gray-700 rounded-lg shadow-xl p-3 max-w-xs backdrop-blur-sm">
+                <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs font-semibold text-green-400 uppercase tracking-wide">Path Info</span>
+                    <button 
+                        onClick={() => setClickedPathInfo(null)}
+                        className="text-gray-400 hover:text-white transition-colors"
+                    >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                    </button>
+                </div>
+                <div className="space-y-1.5">
+                    <div className="flex items-center gap-2">
+                        <span className="text-gray-400 text-xs">ID:</span>
+                        <span className="text-white text-xs font-mono bg-gray-800 px-2 py-0.5 rounded select-all">{clickedPathInfo.id}</span>
+                    </div>
+                    {clickedPathInfo.origin && (
+                        <div className="flex items-center gap-2">
+                            <span className="text-gray-400 text-xs">From:</span>
+                            <span className="text-white text-xs">{clickedPathInfo.origin}</span>
+                        </div>
+                    )}
+                    {clickedPathInfo.destination && (
+                        <div className="flex items-center gap-2">
+                            <span className="text-gray-400 text-xs">To:</span>
+                            <span className="text-white text-xs">{clickedPathInfo.destination}</span>
+                        </div>
+                    )}
+                    {clickedPathInfo.member_count && (
+                        <div className="flex items-center gap-2">
+                            <span className="text-gray-400 text-xs">Flights:</span>
+                            <span className="text-white text-xs">{clickedPathInfo.member_count}</span>
+                        </div>
+                    )}
+                </div>
+            </div>
+        )}
         
         {/* CSS for AI Highlight Marker Animation */}
         <style>{`

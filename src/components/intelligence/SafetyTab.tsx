@@ -13,7 +13,7 @@ import type { SafetyMonthly, NearMissLocation, SafetyByPhase, EmergencyAftermath
 import type { EmergencyCodeStat, NearMissEvent, GoAroundStat, FlightPerDay, SignalLossLocation, SignalLossMonthly, SignalLossHourly, BusiestAirport } from '../../types';
 import type { HoldingPatternAnalysis } from '../../types';
 import type { SharedDashboardData } from '../../IntelligencePage';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 
@@ -1752,71 +1752,7 @@ export function SafetyTab({ startTs, endTs, cacheKey = 0, sharedData }: SafetyTa
                 />
               </div>
 
-              {holdingPatterns.events_by_airport && Object.keys(holdingPatterns.events_by_airport).length > 0 && (
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                  <ChartCard title="Holding Events by Airport">
-                    <ResponsiveContainer width="100%" height={250}>
-                      <BarChart 
-                        data={Object.entries(holdingPatterns.events_by_airport)
-                          .sort(([,a], [,b]) => (b as number) - (a as number))
-                          .slice(0, 8)
-                          .map(([airport, count]) => ({ airport, count }))}
-                      >
-                        <CartesianGrid strokeDasharray="3 3" stroke="#ffffff20" />
-                        <XAxis 
-                          dataKey="airport" 
-                          stroke="#ffffff60" 
-                          tick={{ fill: '#ffffff60', fontSize: 11 }}
-                        />
-                        <YAxis stroke="#ffffff60" tick={{ fill: '#ffffff60' }} />
-                        <Tooltip
-                          contentStyle={{
-                            backgroundColor: '#1a1a1a',
-                            border: '1px solid #ffffff20',
-                            borderRadius: '8px'
-                          }}
-                        />
-                        <Bar dataKey="count" fill="#f59e0b" name="Holding Events" radius={[4, 4, 0, 0]} />
-                      </BarChart>
-                    </ResponsiveContainer>
-                  </ChartCard>
 
-                  <ChartCard title="Distribution">
-                    <ResponsiveContainer width="100%" height={250}>
-                      <PieChart>
-                        <Pie
-                          data={Object.entries(holdingPatterns.events_by_airport)
-                            .sort(([,a], [,b]) => (b as number) - (a as number))
-                            .slice(0, 5)
-                            .map(([airport, count]) => ({ name: airport, value: count }))}
-                          cx="50%"
-                          cy="50%"
-                          innerRadius={50}
-                          outerRadius={80}
-                          paddingAngle={5}
-                          dataKey="value"
-                          label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
-                        >
-                          {Object.entries(holdingPatterns.events_by_airport)
-                            .slice(0, 5)
-                            .map((_, index) => (
-                              <Cell key={`cell-${index}`} fill={[
-                                '#f59e0b', '#3b82f6', '#10b981', '#ef4444', '#8b5cf6'
-                              ][index]} />
-                            ))}
-                        </Pie>
-                        <Tooltip
-                          contentStyle={{
-                            backgroundColor: '#1a1a1a',
-                            border: '1px solid #ffffff20',
-                            borderRadius: '8px'
-                          }}
-                        />
-                      </PieChart>
-                    </ResponsiveContainer>
-                  </ChartCard>
-                </div>
-              )}
             </div>
           )}
 
