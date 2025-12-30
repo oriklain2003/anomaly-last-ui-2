@@ -2,14 +2,17 @@ import { useEffect, useRef, useState, useMemo } from 'react';
 import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import type { SignalLossLocation } from '../../types';
-import type { GPSJammingClustersResponse } from '../../api';
+import type { GPSJammingClustersResponse, SignalLossClustersResponse } from '../../api';
+
+// Generic clusters response type that works for both GPS jamming and signal loss
+type ClustersResponse = GPSJammingClustersResponse | SignalLossClustersResponse;
 
 interface SignalLossMapProps {
   locations: SignalLossLocation[];
   height?: number;
   showPolygonClusters?: boolean; // Enable polygon visualization for clusters
   clusterThresholdNm?: number; // Distance threshold for clustering (in nautical miles)
-  precomputedClusters?: GPSJammingClustersResponse | null; // Backend-computed clusters with polygons
+  precomputedClusters?: ClustersResponse | null; // Backend-computed clusters with polygons
 }
 
 // Haversine distance in nautical miles
@@ -171,13 +174,17 @@ export function SignalLossMap({
       }));
       
       // Convert singles to small clusters with circle buffers
-      const singleClusters: ClusterWithPolygon[] = precomputedClusters.singles.map(s => ({
-        points: [{ lat: s.lat, lon: s.lon, count: s.event_count, avgDuration: 300 }],
-        centroid: [s.lon, s.lat] as [number, number],
-        totalCount: s.event_count,
-        polygon: null,
-        circleBuffer: generateCirclePolygon(s.lon, s.lat, 12) // 12nm radius for singles
-      }));
+      // Handle both GPS jamming singles (event_count) and signal loss singles (count)
+      const singleClusters: ClusterWithPolygon[] = precomputedClusters.singles.map(s => {
+        const eventCount = 'event_count' in s ? s.event_count : ('count' in s ? s.count : 1);
+        return {
+          points: [{ lat: s.lat, lon: s.lon, count: eventCount, avgDuration: 300 }],
+          centroid: [s.lon, s.lat] as [number, number],
+          totalCount: eventCount,
+          polygon: null,
+          circleBuffer: generateCirclePolygon(s.lon, s.lat, 12) // 12nm radius for singles
+        };
+      });
       
       return {
         clusters: [...backendClusters, ...singleClusters],

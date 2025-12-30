@@ -100,10 +100,14 @@ export interface EmergencyCodeStat {
 export interface NearMissEvent {
   timestamp: number;
   flight_id: string;
+  callsign: string;
   other_flight_id: string;
+  other_callsign: string;
   distance_nm: number;
   altitude_diff_ft: number;
   severity: 'high' | 'medium';
+  is_military?: boolean;
+  other_is_military?: boolean;
 }
 
 export interface GoAroundStat {
@@ -122,6 +126,7 @@ export interface FlightPerDay {
 
 export interface BusiestAirport {
   airport: string;
+  name?: string;  // Full airport name (e.g., "Ben Gurion")
   arrivals: number;
   departures: number;
   total: number;
@@ -157,9 +162,10 @@ export interface SignalLossHourly {
 
 export interface AirlineEfficiency {
   airline: string;
-  avg_flight_time_min: number;
-  avg_holding_time_min: number;
-  sample_count: number;
+  avg_duration_hours: number;
+  avg_distance_nm: number;
+  avg_speed_kts: number;
+  flight_count: number;
 }
 
 export interface HoldingPatternAnalysis {
@@ -263,6 +269,7 @@ export interface RTBEvent {
   landing_time: number;
   duration_min: number;
   airport: string;
+  max_outbound_nm?: number;  // How far the aircraft traveled before returning
 }
 
 export interface RunwayStats {

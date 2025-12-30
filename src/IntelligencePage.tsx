@@ -1,16 +1,24 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { Settings, Bell, Home, RefreshCw, HelpCircle, Zap } from 'lucide-react';
+import { Settings, Bell, Home, HelpCircle, Zap } from 'lucide-react';
 import { OverviewTab } from './components/intelligence/OverviewTab';
 import { SafetyTab } from './components/intelligence/SafetyTab';
-import { TrafficTab } from './components/intelligence/TrafficTab';
 import { IntelligenceTab } from './components/intelligence/IntelligenceTab';
 import { MilitaryTab } from './components/intelligence/MilitaryTab';
 import { PredictTab } from './components/intelligence/PredictTab';
 import { IntelligenceHelpModal } from './components/intelligence/IntelligenceHelpModal';
 import { QuickQuestionsPanel } from './components/intelligence/QuickQuestionsPanel';
+import { fetchTrafficBatch, type TrafficBatchResponse } from './api';
+import type { FlightPerDay } from './types';
 
-type TabType = 'overview' | 'safety' | 'traffic' | 'intelligence' | 'military' | 'predict';
+type TabType = 'overview' | 'safety' | 'intelligence' | 'military' | 'predict';
+
+// Shared data that's lifted to parent to avoid redundant fetches
+export interface SharedDashboardData {
+  flightsPerDay: FlightPerDay[];
+  trafficBatch: TrafficBatchResponse | null;
+  loading: boolean;
+}
 
 // Fixed date range (Nov 1 - Dec 31, 2025) - pre-computed for instant loading
 const CACHED_START_TS = 1761955200;
@@ -20,7 +28,9 @@ const CACHED_END_TS = 1767225599;
 function getInitialTab(): TabType {
   const params = new URLSearchParams(window.location.search);
   const tabParam = params.get('tab');
-  const validTabs = ['overview', 'safety', 'traffic', 'intelligence', 'military', 'predict'];
+  // Redirect old 'traffic' tab to 'safety' (merged)
+  if (tabParam === 'traffic') return 'safety';
+  const validTabs = ['overview', 'safety', 'intelligence', 'military', 'predict'];
   return validTabs.includes(tabParam || '') ? (tabParam as TabType) : 'overview';
 }
 
@@ -29,12 +39,39 @@ export function IntelligencePage() {
   const initialTab = getInitialTab();
   
   const [activeTab, setActiveTab] = useState<TabType>(initialTab);
-  const [cacheKey, setCacheKey] = useState(0); // Used to force refresh data
-  const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
+  const [cacheKey] = useState(0); // Used to force refresh data
+  const [lastRefresh] = useState<Date | null>(null);
   const [showHelp, setShowHelp] = useState(false);
+  
+  // OPTIMIZATION: Shared data lifted to parent to avoid redundant fetches
+  const [sharedData, setSharedData] = useState<SharedDashboardData>({
+    flightsPerDay: [],
+    trafficBatch: null,
+    loading: true
+  });
   
   // Fixed date range - always use cached data
   const dateRange = { startTs: CACHED_START_TS, endTs: CACHED_END_TS };
+  
+  // OPTIMIZATION: Load shared data once at parent level
+  useEffect(() => {
+    const loadSharedData = async () => {
+      setSharedData(prev => ({ ...prev, loading: true }));
+      try {
+        // Traffic batch contains flights_per_day and other data used by multiple tabs
+        const trafficBatch = await fetchTrafficBatch(dateRange.startTs, dateRange.endTs);
+        setSharedData({
+          flightsPerDay: trafficBatch.flights_per_day || [],
+          trafficBatch,
+          loading: false
+        });
+      } catch (error) {
+        console.error('Failed to load shared dashboard data:', error);
+        setSharedData(prev => ({ ...prev, loading: false }));
+      }
+    };
+    loadSharedData();
+  }, [dateRange.startTs, dateRange.endTs, cacheKey]);
   
   // Update URL when tab changes
   useEffect(() => {
@@ -43,16 +80,9 @@ export function IntelligencePage() {
     setSearchParams(newParams, { replace: true });
   }, [activeTab, setSearchParams]);
   
-  // Force refresh handler
-  const handleForceRefresh = useCallback(() => {
-    setCacheKey(prev => prev + 1);
-    setLastRefresh(new Date());
-  }, []);
-
   const tabs: { id: TabType; label: string }[] = [
     { id: 'overview', label: 'Overview' },
-    { id: 'safety', label: 'Safety' },
-    { id: 'traffic', label: 'Traffic' },
+    { id: 'safety', label: 'Safety & Traffic' },  // Merged tab
     { id: 'intelligence', label: 'Intelligence' },
     { id: 'military', label: '🎖️ Military' },
     { id: 'predict', label: 'Predict' }
@@ -124,15 +154,7 @@ export function IntelligencePage() {
           {/* Date Range Selector with Display */}
           <div className="flex gap-3 items-center relative">
             {/* Refresh Button */}
-            <button
-              onClick={handleForceRefresh}
-              className="flex h-10 items-center justify-center gap-2 rounded-lg bg-primary/20 text-primary hover:bg-primary/30 transition-colors border border-primary/30 px-3"
-              title="Refresh data (bypass cache)"
-            >
-              <RefreshCw className="h-4 w-4" />
-              <span className="text-sm font-medium">Refresh</span>
-            </button>
-            
+
             {/* Last Refresh Time */}
             {lastRefresh && (
               <span className="text-xs text-white/40">
@@ -158,10 +180,30 @@ export function IntelligencePage() {
       {/* Tab Content */}
       <main className="flex-1 overflow-auto p-6">
         <div className="max-w-[1600px] mx-auto">
-          {activeTab === 'overview' && <OverviewTab startTs={dateRange.startTs} endTs={dateRange.endTs} cacheKey={cacheKey} />}
-          {activeTab === 'safety' && <SafetyTab startTs={dateRange.startTs} endTs={dateRange.endTs} cacheKey={cacheKey} />}
-          {activeTab === 'traffic' && <TrafficTab startTs={dateRange.startTs} endTs={dateRange.endTs} cacheKey={cacheKey} />}
-          {activeTab === 'intelligence' && <IntelligenceTab startTs={dateRange.startTs} endTs={dateRange.endTs} cacheKey={cacheKey} />}
+          {activeTab === 'overview' && (
+            <OverviewTab 
+              startTs={dateRange.startTs} 
+              endTs={dateRange.endTs} 
+              cacheKey={cacheKey}
+              sharedData={sharedData}
+            />
+          )}
+          {activeTab === 'safety' && (
+            <SafetyTab 
+              startTs={dateRange.startTs} 
+              endTs={dateRange.endTs} 
+              cacheKey={cacheKey}
+              sharedData={sharedData}
+            />
+          )}
+          {activeTab === 'intelligence' && (
+            <IntelligenceTab 
+              startTs={dateRange.startTs} 
+              endTs={dateRange.endTs} 
+              cacheKey={cacheKey}
+              sharedData={sharedData}
+            />
+          )}
           {activeTab === 'military' && <MilitaryTab startTs={dateRange.startTs} endTs={dateRange.endTs} cacheKey={cacheKey} />}
           {activeTab === 'predict' && <PredictTab />}
         </div>

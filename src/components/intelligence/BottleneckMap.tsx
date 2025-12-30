@@ -11,10 +11,17 @@ interface BottleneckMapProps {
 export function BottleneckMap({ zones, height = 400 }: BottleneckMapProps) {
   const mapContainer = useRef<HTMLDivElement>(null);
   const map = useRef<maplibregl.Map | null>(null);
-  const markersRef = useRef<maplibregl.Marker[]>([]);
   const [mapLoaded, setMapLoaded] = useState(false);
   
   const apiKey = 'r7kaQpfNDVZdaVp23F1r'; // Same key as main app
+
+  // Color configuration for congestion levels
+  const colors = {
+    critical: { fill: 'rgba(239, 68, 68, 0.4)', stroke: 'rgba(239, 68, 68, 0.9)' },
+    high: { fill: 'rgba(249, 115, 22, 0.35)', stroke: 'rgba(249, 115, 22, 0.9)' },
+    moderate: { fill: 'rgba(234, 179, 8, 0.3)', stroke: 'rgba(234, 179, 8, 0.9)' },
+    low: { fill: 'rgba(34, 197, 94, 0.25)', stroke: 'rgba(34, 197, 94, 0.9)' }
+  };
 
   // Initialize map
   useEffect(() => {
@@ -40,23 +47,40 @@ export function BottleneckMap({ zones, height = 400 }: BottleneckMapProps) {
     });
 
     return () => {
-      markersRef.current.forEach(m => m.remove());
       map.current?.remove();
       map.current = null;
     };
   }, []);
 
-  // Update markers when zones change
+  // Helper: Generate default polygon from grid cell center
+  const generateGridPolygon = (lat: number, lon: number, gridSize = 0.25): [number, number][] => {
+    const half = gridSize / 2;
+    return [
+      [lon - half, lat - half],
+      [lon + half, lat - half],
+      [lon + half, lat + half],
+      [lon - half, lat + half],
+      [lon - half, lat - half]  // Close the polygon
+    ];
+  };
+
+  // Update polygon layers when zones change
   useEffect(() => {
     if (!map.current || !mapLoaded) return;
 
-    // Remove existing markers
-    markersRef.current.forEach(m => m.remove());
-    markersRef.current = [];
+    // Remove existing layers and sources
+    ['bottleneck-fill', 'bottleneck-outline', 'bottleneck-labels'].forEach(id => {
+      if (map.current?.getLayer(id)) {
+        map.current.removeLayer(id);
+      }
+    });
+    if (map.current?.getSource('bottlenecks')) {
+      map.current.removeSource('bottlenecks');
+    }
 
     if (zones.length === 0) return;
 
-    // Filter and sort zones
+    // Filter zones by geographic bounds (accept zones with or without polygon)
     const validZones = zones.filter(z => 
       z.lat >= -10 && z.lat <= 60 && 
       z.lon >= -30 && z.lon <= 100
@@ -64,122 +88,156 @@ export function BottleneckMap({ zones, height = 400 }: BottleneckMapProps) {
     
     const displayZones = validZones
       .sort((a, b) => b.density_score - a.density_score)
-      .slice(0, 10);
+      .slice(0, 15);
 
-    // Calculate max score for intensity scaling
-    const maxScore = Math.max(...displayZones.map(z => z.density_score), 1);
-
-    // Add markers for each bottleneck zone
-    displayZones.forEach((zone, idx) => {
-      const intensity = zone.density_score / maxScore;
-      const size = 25 + intensity * 45; // 25-70px based on intensity
+    // Convert zones to GeoJSON
+    const features = displayZones.map((zone, idx) => {
+      const colorConfig = colors[zone.congestion_level as keyof typeof colors] || colors.moderate;
       
-      // Color based on congestion level
-      const colors = {
-        critical: { main: '239, 68, 68', border: 'rgba(239, 68, 68, 0.8)' },    // red
-        high: { main: '249, 115, 22', border: 'rgba(249, 115, 22, 0.8)' },      // orange
-        moderate: { main: '234, 179, 8', border: 'rgba(234, 179, 8, 0.8)' },    // yellow
-        low: { main: '34, 197, 94', border: 'rgba(34, 197, 94, 0.8)' }          // green
+      // Use existing polygon or generate from grid cell
+      const polygon = (zone.polygon && zone.polygon.length >= 3) 
+        ? zone.polygon 
+        : generateGridPolygon(zone.lat, zone.lon);
+      
+      return {
+        type: 'Feature' as const,
+        properties: {
+          id: idx,
+          lat: zone.lat,
+          lon: zone.lon,
+          density_score: zone.density_score,
+          flight_count: zone.flight_count,
+          holding_count: zone.holding_count,
+          avg_altitude: zone.avg_altitude,
+          flights_per_hour: zone.flights_per_hour,
+          congestion_level: zone.congestion_level,
+          fill_color: colorConfig.fill,
+          stroke_color: colorConfig.stroke,
+          rank: idx + 1
+        },
+        geometry: {
+          type: 'Polygon' as const,
+          coordinates: [polygon]
+        }
       };
-      const color = colors[zone.congestion_level as keyof typeof colors] || colors.moderate;
-      
-      const wrapper = document.createElement('div');
-      wrapper.className = 'bottleneck-marker-wrapper';
-      
-      const el = document.createElement('div');
-      el.className = 'bottleneck-marker';
-      el.style.cssText = `
-        width: ${size}px;
-        height: ${size}px;
-        border-radius: 50%;
-        background: radial-gradient(circle, 
-          rgba(${color.main}, ${0.7 + intensity * 0.2}) 0%, 
-          rgba(${color.main}, ${0.3 + intensity * 0.2}) 50%,
-          rgba(${color.main}, 0) 100%);
-        border: 3px solid ${color.border};
-        cursor: pointer;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-size: 12px;
-        font-weight: bold;
-        color: white;
-        text-shadow: 0 1px 3px rgba(0,0,0,0.9);
-        animation: bottleneck-pulse 3s ease-in-out infinite;
-        animation-delay: ${idx * 0.2}s;
-      `;
-      
-      wrapper.appendChild(el);
-      
-      // Show rank for top zones
-      if (idx < 5) {
-        el.textContent = `#${idx + 1}`;
-      } else if ((zone.flight_count ?? 0) >= 10) {
-        el.textContent = (zone.flight_count ?? 0).toString();
-      }
-
-      // Create popup with details
-      const popup = new maplibregl.Popup({
-        offset: 25,
-        closeButton: false,
-        className: 'bottleneck-popup'
-      }).setHTML(`
-        <div style="padding: 10px; background: #1f2937; border-radius: 8px; color: white; min-width: 200px; border: 1px solid ${color.border};">
-          <div style="font-weight: bold; color: rgb(${color.main}); margin-bottom: 8px; font-size: 14px; display: flex; align-items: center; gap: 6px;">
-            <span style="font-size: 16px;">⚠️</span>
-            ${(zone.congestion_level || 'unknown').toUpperCase()} Congestion
-          </div>
-          <div style="display: grid; gap: 6px; font-size: 12px;">
-            <div style="display: flex; justify-content: space-between;">
-              <span style="color: #9ca3af;">Location:</span>
-              <span>${(zone.lat ?? 0).toFixed(2)}°N, ${(zone.lon ?? 0).toFixed(2)}°E</span>
-            </div>
-            <div style="display: flex; justify-content: space-between;">
-              <span style="color: #9ca3af;">Density Score:</span>
-              <span style="color: rgb(${color.main}); font-weight: bold;">${zone.density_score ?? 0}</span>
-            </div>
-            <div style="display: flex; justify-content: space-between;">
-              <span style="color: #9ca3af;">Flights:</span>
-              <span style="font-weight: bold;">${zone.flight_count ?? 0}</span>
-            </div>
-            <div style="display: flex; justify-content: space-between;">
-              <span style="color: #9ca3af;">Holding Patterns:</span>
-              <span style="color: #a855f7; font-weight: bold;">${zone.holding_count ?? 0}</span>
-            </div>
-            <div style="display: flex; justify-content: space-between;">
-              <span style="color: #9ca3af;">Avg Altitude:</span>
-              <span>${(zone.avg_altitude ?? 0).toLocaleString()} ft</span>
-            </div>
-            <div style="display: flex; justify-content: space-between;">
-              <span style="color: #9ca3af;">Flights/Hour:</span>
-              <span>${zone.flights_per_hour ?? 0}</span>
-            </div>
-          </div>
-          <div style="margin-top: 10px; padding-top: 8px; border-top: 1px solid #374151; font-size: 11px; color: #6b7280;">
-            High density = potential delays & increased workload
-          </div>
-        </div>
-      `);
-
-      const marker = new maplibregl.Marker({ 
-        element: wrapper,
-        anchor: 'center'
-      })
-        .setLngLat([zone.lon, zone.lat])
-        .setPopup(popup)
-        .addTo(map.current!);
-
-      markersRef.current.push(marker);
     });
 
-    // Fit bounds to show all markers
+    const geojson = {
+      type: 'FeatureCollection' as const,
+      features
+    };
+
+    // Add source
+    map.current.addSource('bottlenecks', {
+      type: 'geojson',
+      data: geojson as GeoJSON.FeatureCollection
+    });
+
+    // Add fill layer
+    map.current.addLayer({
+      id: 'bottleneck-fill',
+      type: 'fill',
+      source: 'bottlenecks',
+      paint: {
+        'fill-color': ['get', 'fill_color'],
+        'fill-opacity': 0.7
+      }
+    });
+
+    // Add outline layer
+    map.current.addLayer({
+      id: 'bottleneck-outline',
+      type: 'line',
+      source: 'bottlenecks',
+      paint: {
+        'line-color': ['get', 'stroke_color'],
+        'line-width': 2.5,
+        'line-opacity': 1
+      }
+    });
+
+    // Add popups on click
+    map.current.on('click', 'bottleneck-fill', (e) => {
+      if (!e.features || e.features.length === 0) return;
+      
+      const props = e.features[0].properties;
+      if (!props) return;
+
+      const levelColors: Record<string, string> = {
+        critical: 'rgb(239, 68, 68)',
+        high: 'rgb(249, 115, 22)',
+        moderate: 'rgb(234, 179, 8)',
+        low: 'rgb(34, 197, 94)'
+      };
+      const color = levelColors[props.congestion_level] || levelColors.moderate;
+
+      new maplibregl.Popup({ closeButton: true, className: 'bottleneck-popup' })
+        .setLngLat(e.lngLat)
+        .setHTML(`
+          <div style="padding: 12px; background: #1f2937; border-radius: 8px; color: white; min-width: 220px; border: 2px solid ${color};">
+            <div style="font-weight: bold; color: ${color}; margin-bottom: 10px; font-size: 14px; display: flex; align-items: center; gap: 6px;">
+              <span style="font-size: 16px;">⚠️</span>
+              #${props.rank} ${(props.congestion_level || 'unknown').toUpperCase()} Zone
+            </div>
+            <div style="display: grid; gap: 8px; font-size: 12px;">
+              <div style="display: flex; justify-content: space-between;">
+                <span style="color: #9ca3af;">Center:</span>
+                <span>${Number(props.lat).toFixed(2)}°N, ${Number(props.lon).toFixed(2)}°E</span>
+              </div>
+              <div style="display: flex; justify-content: space-between;">
+                <span style="color: #9ca3af;">Density Score:</span>
+                <span style="color: ${color}; font-weight: bold;">${props.density_score}</span>
+              </div>
+              <div style="display: flex; justify-content: space-between;">
+                <span style="color: #9ca3af;">Flights:</span>
+                <span style="font-weight: bold;">${props.flight_count?.toLocaleString() || 0}</span>
+              </div>
+              <div style="display: flex; justify-content: space-between;">
+                <span style="color: #9ca3af;">Holding Patterns:</span>
+                <span style="color: #a855f7; font-weight: bold;">${props.holding_count || 0}</span>
+              </div>
+              <div style="display: flex; justify-content: space-between;">
+                <span style="color: #9ca3af;">Avg Altitude:</span>
+                <span>${Number(props.avg_altitude || 0).toLocaleString()} ft</span>
+              </div>
+              <div style="display: flex; justify-content: space-between;">
+                <span style="color: #9ca3af;">Flights/Hour:</span>
+                <span>${props.flights_per_hour || 0}</span>
+              </div>
+            </div>
+            <div style="margin-top: 12px; padding-top: 10px; border-top: 1px solid #374151; font-size: 11px; color: #6b7280;">
+              High density = potential delays & controller workload
+            </div>
+          </div>
+        `)
+        .addTo(map.current!);
+    });
+
+    // Change cursor on hover
+    map.current.on('mouseenter', 'bottleneck-fill', () => {
+      if (map.current) map.current.getCanvas().style.cursor = 'pointer';
+    });
+    map.current.on('mouseleave', 'bottleneck-fill', () => {
+      if (map.current) map.current.getCanvas().style.cursor = '';
+    });
+
+    // Fit bounds to show all polygons
     if (displayZones.length > 0) {
       const bounds = new maplibregl.LngLatBounds();
-      displayZones.forEach(zone => bounds.extend([zone.lon, zone.lat]));
+      displayZones.forEach(zone => {
+        if (zone.polygon && zone.polygon.length >= 3) {
+          zone.polygon.forEach(([lon, lat]) => bounds.extend([lon, lat]));
+        } else {
+          // Fallback to center point with padding
+          const half = 0.125; // Half of grid size
+          bounds.extend([zone.lon - half, zone.lat - half]);
+          bounds.extend([zone.lon + half, zone.lat + half]);
+        }
+      });
       
       map.current.fitBounds(bounds, {
         padding: { top: 60, bottom: 60, left: 60, right: 60 },
-        maxZoom: 7,
+        maxZoom: 8,
         minZoom: 4
       });
     }
@@ -201,19 +259,20 @@ export function BottleneckMap({ zones, height = 400 }: BottleneckMapProps) {
     airports.forEach(apt => {
       const el = document.createElement('div');
       el.style.cssText = `
-        width: 8px;
-        height: 8px;
+        width: 10px;
+        height: 10px;
         background: #10b981;
         border: 2px solid white;
         border-radius: 50%;
         cursor: pointer;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.3);
       `;
 
       const popup = new maplibregl.Popup({
         offset: 15,
         closeButton: false
       }).setHTML(`
-        <div style="padding: 4px 8px; background: #1f2937; border-radius: 4px; color: white; font-size: 12px;">
+        <div style="padding: 6px 10px; background: #1f2937; border-radius: 4px; color: white; font-size: 12px;">
           <strong style="color: #10b981;">${apt.name}</strong> - ${apt.label}
         </div>
       `);
@@ -237,19 +296,19 @@ export function BottleneckMap({ zones, height = 400 }: BottleneckMapProps) {
         <div className="text-white/80 font-medium mb-2">Congestion Level</div>
         <div className="space-y-1.5">
           <div className="flex items-center gap-2">
-            <div className="w-4 h-4 rounded-full bg-red-500/70 border-2 border-red-500" />
+            <div className="w-4 h-4 rounded bg-red-500/50 border-2 border-red-500" />
             <span className="text-white">Critical</span>
           </div>
           <div className="flex items-center gap-2">
-            <div className="w-4 h-4 rounded-full bg-orange-500/70 border-2 border-orange-500" />
+            <div className="w-4 h-4 rounded bg-orange-500/50 border-2 border-orange-500" />
             <span className="text-white">High</span>
           </div>
           <div className="flex items-center gap-2">
-            <div className="w-4 h-4 rounded-full bg-yellow-500/70 border-2 border-yellow-500" />
+            <div className="w-4 h-4 rounded bg-yellow-500/50 border-2 border-yellow-500" />
             <span className="text-white">Moderate</span>
           </div>
           <div className="flex items-center gap-2">
-            <div className="w-4 h-4 rounded-full bg-green-500/70 border-2 border-green-500" />
+            <div className="w-4 h-4 rounded bg-green-500/50 border-2 border-green-500" />
             <span className="text-white">Low</span>
           </div>
         </div>
@@ -258,7 +317,7 @@ export function BottleneckMap({ zones, height = 400 }: BottleneckMapProps) {
           <span className="text-white">Airport</span>
         </div>
         <div className="text-white/50 mt-2 text-[10px]">
-          Circle size = density score
+          Click zone for details
         </div>
       </div>
 
@@ -273,12 +332,8 @@ export function BottleneckMap({ zones, height = 400 }: BottleneckMapProps) {
         </div>
       )}
 
-      {/* CSS for pulse animation */}
+      {/* CSS for popup styling */}
       <style>{`
-        @keyframes bottleneck-pulse {
-          0%, 100% { transform: scale(1); opacity: 1; }
-          50% { transform: scale(1.15); opacity: 0.85; }
-        }
         .maplibregl-popup-content {
           background: transparent !important;
           padding: 0 !important;
@@ -287,8 +342,12 @@ export function BottleneckMap({ zones, height = 400 }: BottleneckMapProps) {
         .maplibregl-popup-tip {
           display: none !important;
         }
+        .maplibregl-popup-close-button {
+          color: white !important;
+          font-size: 18px !important;
+          padding: 4px 8px !important;
+        }
       `}</style>
     </div>
   );
 }
-

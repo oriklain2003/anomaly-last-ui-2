@@ -260,3 +260,28 @@
     inset 0 0 6px #00d4ff;
   text-shadow: 0 0 3px black, 0 0 6px #00d4ff;
 }
+
+/* MapLibre Path Tooltip Styles */
+.path-tooltip .maplibregl-popup-content {
+  background: transparent !important;
+  padding: 0 !important;
+  box-shadow: none !important;
+  border-radius: 0 !important;
+}
+
+.path-tooltip .maplibregl-popup-tip {
+  display: none !important;
+}
+
+.path-tooltip .maplibregl-popup-close-button {
+  color: #94a3b8 !important;
+  font-size: 16px !important;
+  padding: 4px 8px !important;
+  right: 2px !important;
+  top: 2px !important;
+}
+
+.path-tooltip .maplibregl-popup-close-button:hover {
+  color: white !important;
+  background: transparent !important;
+}

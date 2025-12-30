@@ -131,7 +131,19 @@ export function MilitaryTab({ startTs, endTs, cacheKey = 0 }: MilitaryTabProps) 
     map.on('load', () => {
       // Add jamming zones as circles
       ewCorrelation.jamming_zones.forEach((zone) => {
-        if (!zone.lat || !zone.lon) return;
+        // Handle both possible field names and validate coordinates
+        const lat = zone.lat;
+        const lon = zone.lon;
+        
+        // Strict coordinate validation
+        if (typeof lat !== 'number' || typeof lon !== 'number') return;
+        if (isNaN(lat) || isNaN(lon)) return;
+        if (lat === 0 && lon === 0) return; // Skip invalid coordinates
+        if (lat < -90 || lat > 90 || lon < -180 || lon > 180) return; // Invalid range
+        
+        // Support both 'severity' and 'jamming_score' field names from backend
+        const severity = (zone as any).severity ?? (zone as any).jamming_score ?? (zone as any).intensity ?? 50;
+        const indicators = zone.indicators ?? (zone as any).jamming_indicators ?? [];
         
         // Create a circle feature for the jamming zone
         const el = document.createElement('div');
@@ -139,19 +151,20 @@ export function MilitaryTab({ startTs, endTs, cacheKey = 0 }: MilitaryTabProps) 
         el.style.width = '40px';
         el.style.height = '40px';
         el.style.borderRadius = '50%';
-        el.style.backgroundColor = `rgba(239, 68, 68, ${Math.min(0.8, zone.severity / 100)})`;
+        el.style.backgroundColor = `rgba(239, 68, 68, ${Math.min(0.8, severity / 100)})`;
         el.style.border = '2px solid #EF4444';
         el.style.cursor = 'pointer';
         el.style.animation = 'pulse 2s infinite';
         
-        new maplibregl.Marker({ element: el })
-          .setLngLat([zone.lon, zone.lat])
-          .setPopup(new maplibregl.Popup().setHTML(`
+        // Use anchor: 'center' to position marker at its center point
+        new maplibregl.Marker({ element: el, anchor: 'center' })
+          .setLngLat([lon, lat])
+          .setPopup(new maplibregl.Popup({ offset: 25 }).setHTML(`
             <div style="color: #000; padding: 8px;">
               <strong>GPS Jamming Zone</strong><br/>
-              Severity: ${zone.severity}/100<br/>
+              Severity: ${severity}/100<br/>
               Affected Flights: ${zone.affected_flights || 'Unknown'}<br/>
-              Indicators: ${zone.indicators?.join(', ') || 'N/A'}
+              Indicators: ${Array.isArray(indicators) ? indicators.join(', ') : 'N/A'}
             </div>
           `))
           .addTo(map);
@@ -159,14 +172,24 @@ export function MilitaryTab({ startTs, endTs, cacheKey = 0 }: MilitaryTabProps) 
 
       // Add estimated EW sources as triangles
       ewCorrelation.estimated_ew_sources.forEach((source) => {
+        const lat = source.lat;
+        const lon = source.lon;
+        
+        // Strict coordinate validation
+        if (typeof lat !== 'number' || typeof lon !== 'number') return;
+        if (isNaN(lat) || isNaN(lon)) return;
+        if (lat === 0 && lon === 0) return;
+        if (lat < -90 || lat > 90 || lon < -180 || lon > 180) return;
+        
         const el = document.createElement('div');
         el.innerHTML = '⚠';
         el.style.fontSize = '24px';
         el.style.cursor = 'pointer';
         
-        new maplibregl.Marker({ element: el })
-          .setLngLat([source.lon, source.lat])
-          .setPopup(new maplibregl.Popup().setHTML(`
+        // Use anchor: 'center' to position marker at its center point
+        new maplibregl.Marker({ element: el, anchor: 'center' })
+          .setLngLat([lon, lat])
+          .setPopup(new maplibregl.Popup({ offset: 15 }).setHTML(`
             <div style="color: #000; padding: 8px;">
               <strong>Estimated EW Source</strong><br/>
               Likely Operator: ${source.likely_operator}<br/>
@@ -221,7 +244,14 @@ export function MilitaryTab({ startTs, endTs, cacheKey = 0 }: MilitaryTabProps) 
 
     map.on('load', () => {
       tankerActivity.active_tankers.forEach((tanker) => {
-        if (!tanker.last_position?.lat || !tanker.last_position?.lon) return;
+        const lat = tanker.last_position?.lat;
+        const lon = tanker.last_position?.lon;
+        
+        // Strict coordinate validation
+        if (typeof lat !== 'number' || typeof lon !== 'number') return;
+        if (isNaN(lat) || isNaN(lon)) return;
+        if (lat === 0 && lon === 0) return;
+        if (lat < -90 || lat > 90 || lon < -180 || lon > 180) return;
         
         const el = document.createElement('div');
         el.innerHTML = '✈';
@@ -230,9 +260,10 @@ export function MilitaryTab({ startTs, endTs, cacheKey = 0 }: MilitaryTabProps) 
         el.style.cursor = 'pointer';
         el.style.color = COUNTRY_COLORS[tanker.country] || COUNTRY_COLORS.other;
         
-        new maplibregl.Marker({ element: el })
-          .setLngLat([tanker.last_position.lon, tanker.last_position.lat])
-          .setPopup(new maplibregl.Popup().setHTML(`
+        // Use anchor: 'center' to position marker correctly
+        new maplibregl.Marker({ element: el, anchor: 'center' })
+          .setLngLat([lon, lat])
+          .setPopup(new maplibregl.Popup({ offset: 15 }).setHTML(`
             <div style="color: #000; padding: 8px;">
               <strong>${tanker.callsign}</strong><br/>
               Country: ${tanker.country}<br/>
@@ -288,6 +319,15 @@ export function MilitaryTab({ startTs, endTs, cacheKey = 0 }: MilitaryTabProps) 
 
     map.on('load', () => {
       isrPatterns.patterns.forEach((pattern, idx) => {
+        const lat = pattern.orbit_center?.lat;
+        const lon = pattern.orbit_center?.lon;
+        
+        // Strict coordinate validation
+        if (typeof lat !== 'number' || typeof lon !== 'number') return;
+        if (isNaN(lat) || isNaN(lon)) return;
+        if (lat === 0 && lon === 0) return;
+        if (lat < -90 || lat > 90 || lon < -180 || lon > 180) return;
+        
         // Draw orbit center marker
         const el = document.createElement('div');
         el.innerHTML = '◎';
@@ -295,9 +335,10 @@ export function MilitaryTab({ startTs, endTs, cacheKey = 0 }: MilitaryTabProps) 
         el.style.color = COUNTRY_COLORS[pattern.country] || COUNTRY_COLORS.other;
         el.style.cursor = 'pointer';
         
-        new maplibregl.Marker({ element: el })
-          .setLngLat([pattern.orbit_center.lon, pattern.orbit_center.lat])
-          .setPopup(new maplibregl.Popup().setHTML(`
+        // Use anchor: 'center' to position marker correctly
+        new maplibregl.Marker({ element: el, anchor: 'center' })
+          .setLngLat([lon, lat])
+          .setPopup(new maplibregl.Popup({ offset: 15 }).setHTML(`
             <div style="color: #000; padding: 8px;">
               <strong>${pattern.callsign}</strong><br/>
               Pattern: ${pattern.pattern_type}<br/>
@@ -311,7 +352,9 @@ export function MilitaryTab({ startTs, endTs, cacheKey = 0 }: MilitaryTabProps) 
 
         // Draw orbit path if track points exist
         if (pattern.track_points && pattern.track_points.length > 1) {
-          const coordinates = pattern.track_points.map(p => [p.lon, p.lat] as [number, number]);
+          const coordinates = pattern.track_points
+            .filter(p => typeof p.lon === 'number' && typeof p.lat === 'number' && !isNaN(p.lon) && !isNaN(p.lat))
+            .map(p => [p.lon, p.lat] as [number, number]);
           
           map.addSource(`isr-path-${idx}`, {
             type: 'geojson',
@@ -454,7 +497,7 @@ export function MilitaryTab({ startTs, endTs, cacheKey = 0 }: MilitaryTabProps) 
             <div className="lg:col-span-2 bg-gray-800/60 rounded-xl p-4 border border-gray-700">
               <h3 className="text-sm font-semibold text-gray-300 mb-3">Indicator Breakdown</h3>
               <div className="space-y-3">
-                {Object.entries(missionReadiness.indicators).map(([key, indicator]) => (
+                {Object.entries(missionReadiness.indicators || {}).map(([key, indicator]) => (
                   <div key={key} className="flex items-center gap-3">
                     <div className="w-28 text-xs text-gray-400 capitalize">{key.replace(/_/g, ' ')}</div>
                     <div className="flex-1 h-4 bg-gray-700 rounded-full overflow-hidden">
@@ -493,31 +536,70 @@ export function MilitaryTab({ startTs, endTs, cacheKey = 0 }: MilitaryTabProps) 
         </h2>
         
         {operationalTempo && (
-          <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
-            <StatCard
-              title="Total Military Flights"
-              value={operationalTempo.total_flights}
-              icon={<Plane className="w-5 h-5 text-blue-400" />}
-            />
-            <StatCard
-              title="Activity Spikes"
-              value={operationalTempo.activity_spikes.length}
-              icon={<AlertTriangle className="w-5 h-5 text-amber-400" />}
-              trend={operationalTempo.activity_spikes.length > 3 ? { direction: 'up', value: `${operationalTempo.activity_spikes.length} detected` } : undefined}
-            />
-            <StatCard
-              title="Peak Activity"
-              value={operationalTempo.peak_activity?.country || 'N/A'}
-              subtitle={operationalTempo.peak_activity?.hour || ''}
-              icon={<TrendingUp className="w-5 h-5 text-green-400" />}
-            />
-            <StatCard
-              title="Trend: Russia"
-              value={operationalTempo.trend_analysis?.RU || 'N/A'}
-              icon={<Activity className="w-5 h-5 text-red-400" />}
-              trend={operationalTempo.trend_analysis?.RU === 'increasing' ? { direction: 'up', value: 'Rising' } : operationalTempo.trend_analysis?.RU === 'decreasing' ? { direction: 'down', value: 'Declining' } : undefined}
-            />
-          </div>
+          <>
+            <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
+              <StatCard
+                title="Total Military Flights"
+                value={operationalTempo.total_flights}
+                icon={<Plane className="w-5 h-5 text-blue-400" />}
+              />
+              <StatCard
+                title="Activity Spikes"
+                value={operationalTempo.activity_spikes.length}
+                icon={<AlertTriangle className="w-5 h-5 text-amber-400" />}
+                trend={operationalTempo.activity_spikes.length > 3 ? { direction: 'up', value: `${operationalTempo.activity_spikes.length} detected` } : undefined}
+              />
+              <StatCard
+                title="Peak Activity"
+                value={operationalTempo.peak_activity?.country || 'N/A'}
+                subtitle={operationalTempo.peak_activity?.hour || ''}
+                icon={<TrendingUp className="w-5 h-5 text-green-400" />}
+              />
+              <StatCard
+                title="Trend: Russia"
+                value={operationalTempo.trend_analysis?.RU || 'N/A'}
+                icon={<Activity className="w-5 h-5 text-red-400" />}
+                trend={operationalTempo.trend_analysis?.RU === 'increasing' ? { direction: 'up', value: 'Rising' } : operationalTempo.trend_analysis?.RU === 'decreasing' ? { direction: 'down', value: 'Declining' } : undefined}
+              />
+            </div>
+
+            {/* Country Breakdown */}
+            {operationalTempo.by_country_total && Object.keys(operationalTempo.by_country_total).length > 0 && (
+              <div className="mt-4 bg-gray-800/60 rounded-xl p-4 border border-gray-700">
+                <h3 className="text-sm font-semibold text-gray-300 mb-3 flex items-center gap-2">
+                  <Shield className="w-4 h-4" /> Flights by Country/Alliance
+                </h3>
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+                  {['US', 'RU', 'GB', 'IL', 'NATO', 'other'].map((country) => {
+                    const count = operationalTempo.by_country_total?.[country] || 0;
+                    const pct = operationalTempo.total_flights > 0 
+                      ? ((count / operationalTempo.total_flights) * 100).toFixed(1) 
+                      : '0';
+                    return (
+                      <div 
+                        key={country} 
+                        className="bg-gray-900/60 rounded-lg p-3 border border-gray-700 text-center"
+                      >
+                        <div 
+                          className="text-2xl font-bold"
+                          style={{ color: COUNTRY_COLORS[country as keyof typeof COUNTRY_COLORS] || COUNTRY_COLORS.other }}
+                        >
+                          {count.toLocaleString()}
+                        </div>
+                        <div className="text-xs text-gray-400 mt-1">
+                          {country === 'other' ? 'Other Countries' : country}
+                        </div>
+                        <div className="text-xs text-gray-500">{pct}%</div>
+                      </div>
+                    );
+                  })}
+                </div>
+                <div className="mt-3 text-xs text-gray-500 italic">
+                  Note: "Other Countries" includes military flights from countries not specifically tracked (Turkey, Jordan, Saudi Arabia, Egypt, etc.)
+                </div>
+              </div>
+            )}
+          </>
         )}
 
         {operationalTempo?.daily_data && operationalTempo.daily_data.length > 0 && (
@@ -532,11 +614,12 @@ export function MilitaryTab({ startTs, endTs, cacheKey = 0 }: MilitaryTabProps) 
                     contentStyle={{ backgroundColor: '#1F2937', border: '1px solid #374151' }}
                     labelStyle={{ color: '#F9FAFB' }}
                   />
-                  <Area type="monotone" dataKey="US" stackId="1" stroke={COUNTRY_COLORS.US} fill={COUNTRY_COLORS.US} fillOpacity={0.6} />
-                  <Area type="monotone" dataKey="RU" stackId="1" stroke={COUNTRY_COLORS.RU} fill={COUNTRY_COLORS.RU} fillOpacity={0.6} />
-                  <Area type="monotone" dataKey="GB" stackId="1" stroke={COUNTRY_COLORS.GB} fill={COUNTRY_COLORS.GB} fillOpacity={0.6} />
-                  <Area type="monotone" dataKey="IL" stackId="1" stroke={COUNTRY_COLORS.IL} fill={COUNTRY_COLORS.IL} fillOpacity={0.6} />
-                  <Area type="monotone" dataKey="NATO" stackId="1" stroke={COUNTRY_COLORS.NATO} fill={COUNTRY_COLORS.NATO} fillOpacity={0.6} />
+                  <Area type="monotone" dataKey="US" stackId="1" stroke={COUNTRY_COLORS.US} fill={COUNTRY_COLORS.US} fillOpacity={0.6} name="US" />
+                  <Area type="monotone" dataKey="RU" stackId="1" stroke={COUNTRY_COLORS.RU} fill={COUNTRY_COLORS.RU} fillOpacity={0.6} name="Russia" />
+                  <Area type="monotone" dataKey="GB" stackId="1" stroke={COUNTRY_COLORS.GB} fill={COUNTRY_COLORS.GB} fillOpacity={0.6} name="UK" />
+                  <Area type="monotone" dataKey="IL" stackId="1" stroke={COUNTRY_COLORS.IL} fill={COUNTRY_COLORS.IL} fillOpacity={0.6} name="Israel" />
+                  <Area type="monotone" dataKey="NATO" stackId="1" stroke={COUNTRY_COLORS.NATO} fill={COUNTRY_COLORS.NATO} fillOpacity={0.6} name="NATO" />
+                  <Area type="monotone" dataKey="other" stackId="1" stroke={COUNTRY_COLORS.other} fill={COUNTRY_COLORS.other} fillOpacity={0.6} name="Other Countries" />
                   <Legend />
                 </AreaChart>
               </ResponsiveContainer>
@@ -548,21 +631,35 @@ export function MilitaryTab({ startTs, endTs, cacheKey = 0 }: MilitaryTabProps) 
           <div className="mt-4 bg-gray-800/60 rounded-xl p-4 border border-gray-700">
             <h3 className="text-sm font-semibold text-amber-400 mb-3 flex items-center gap-2">
               <AlertTriangle className="w-4 h-4" /> Activity Spikes Detected
+              <span className="text-xs text-gray-500 font-normal ml-2">(Days with &gt;50% above average activity)</span>
             </h3>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
-              {operationalTempo.activity_spikes.slice(0, 6).map((spike, idx) => (
-                <div key={idx} className="bg-gray-900/60 rounded-lg p-3 border border-gray-700">
-                  <div className="flex items-center justify-between">
-                    <span style={{ color: COUNTRY_COLORS[spike.country] || COUNTRY_COLORS.other }} className="font-semibold">
-                      {spike.country}
-                    </span>
-                    <span className="text-red-400 font-mono text-sm">+{spike.increase_pct}%</span>
+              {operationalTempo.activity_spikes.slice(0, 6).map((spike, idx) => {
+                const countryDisplay = spike.country === 'other' ? 'Other Countries' : spike.country;
+                const countryColor = COUNTRY_COLORS[spike.country as keyof typeof COUNTRY_COLORS] || COUNTRY_COLORS.other;
+                return (
+                  <div key={idx} className="bg-gray-900/60 rounded-lg p-3 border border-gray-700">
+                    <div className="flex items-center justify-between">
+                      <span style={{ color: countryColor }} className="font-semibold">
+                        {countryDisplay}
+                      </span>
+                      <span className="text-red-400 font-mono text-sm">+{spike.increase_pct}%</span>
+                    </div>
+                    <div className="text-xs text-gray-400 mt-1">{spike.hour}</div>
+                    <div className="text-xs text-gray-500">
+                      <span className="text-white font-medium">{spike.count}</span> flights 
+                      <span className="text-gray-600 mx-1">vs</span>
+                      avg <span className="text-gray-400">{spike.average}</span>/day
+                    </div>
                   </div>
-                  <div className="text-xs text-gray-400 mt-1">{spike.hour}</div>
-                  <div className="text-xs text-gray-500">{spike.count} flights (avg: {spike.average})</div>
-                </div>
-              ))}
+                );
+              })}
             </div>
+            {operationalTempo.activity_spikes.length === 0 && (
+              <div className="text-xs text-gray-500 text-center py-2">
+                No significant spikes detected (requires ≥5 flights, ≥50% above avg of ≥2/day)
+              </div>
+            )}
           </div>
         )}
       </section>
@@ -651,7 +748,7 @@ export function MilitaryTab({ startTs, endTs, cacheKey = 0 }: MilitaryTabProps) 
               subtitle="Combined holding time"
               icon={<Clock className="w-5 h-5 text-amber-400" />}
             />
-            {Object.entries(tankerActivity.by_holding_area).slice(0, 2).map(([area, count]) => (
+            {Object.entries(tankerActivity.by_holding_area || {}).slice(0, 2).map(([area, count]) => (
               <StatCard
                 key={area}
                 title={area}
@@ -714,7 +811,7 @@ export function MilitaryTab({ startTs, endTs, cacheKey = 0 }: MilitaryTabProps) 
                 value={nightOperations.day_vs_night.day}
                 icon={<Sun className="w-5 h-5 text-amber-400" />}
               />
-              {Object.entries(nightOperations.by_country_night).slice(0, 2).map(([country, count]) => (
+              {Object.entries(nightOperations.by_country_night || {}).slice(0, 2).map(([country, count]) => (
                 <StatCard
                   key={country}
                   title={`${country} Night Ops`}
@@ -787,7 +884,7 @@ export function MilitaryTab({ startTs, endTs, cacheKey = 0 }: MilitaryTabProps) 
                 value={isrPatterns.total_isr_flights}
                 icon={<Eye className="w-5 h-5 text-purple-400" />}
               />
-              {Object.entries(isrPatterns.by_pattern_type).slice(0, 3).map(([type, count]) => (
+              {Object.entries(isrPatterns.by_pattern_type || {}).slice(0, 3).map(([type, count]) => (
                 <StatCard
                   key={type}
                   title={type.charAt(0).toUpperCase() + type.slice(1)}
@@ -902,7 +999,7 @@ export function MilitaryTab({ startTs, endTs, cacheKey = 0 }: MilitaryTabProps) 
                 icon={<AlertTriangle className="w-5 h-5 text-red-400" />}
                 trend={borderCrossings.high_interest_crossings.length > 5 ? { direction: 'up', value: 'Alert' } : undefined}
               />
-              {Object.entries(borderCrossings.by_country_pair).slice(0, 2).map(([pair, count]) => (
+              {Object.entries(borderCrossings.by_country_pair || {}).slice(0, 2).map(([pair, count]) => (
                 <StatCard
                   key={pair}
                   title={pair}

@@ -125,9 +125,9 @@ export function TableCard({
         <table className="w-full">
           <thead>
             <tr className="border-b border-white/10">
-              {columns.map((col) => (
+              {columns.map((col, index) => (
                 <th
-                  key={col.key}
+                  key={`${col.key}-${index}`}
                   className={`text-left text-white/60 text-sm font-medium py-3 px-4 ${
                     sortable && col.sortable !== false ? 'cursor-pointer hover:text-white' : ''
                   }`}
@@ -150,8 +150,8 @@ export function TableCard({
           <tbody>
             {sortedData.map((row, idx) => (
               <tr key={idx} className="border-b border-white/5 hover:bg-white/5">
-                {columns.map((col) => (
-                  <td key={col.key} className="text-white text-sm py-3 px-4">
+                {columns.map((col, index) => (
+                  <td key={`${col.key}-${index}`} className="text-white text-sm py-3 px-4">
                     {col.render ? col.render(row[col.key], row) : row[col.key]}
                   </td>
                 ))}

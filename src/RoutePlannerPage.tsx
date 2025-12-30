@@ -504,6 +504,107 @@ export const RoutePlannerPage: React.FC = () => {
                     'line-dasharray': [6, 3],
                 },
             }, 'routes-glow');
+
+            // ============================================================
+            // PATH CLICK HANDLERS - Show ID tooltip on click
+            // ============================================================
+            let pathPopup: maplibregl.Popup | null = null;
+
+            // Learned paths click handler
+            map.current!.on('click', 'learned-paths-line', (e) => {
+                if (!e.features || e.features.length === 0) return;
+                
+                const props = e.features[0].properties;
+                if (!props) return;
+
+                // Remove existing popup
+                if (pathPopup) {
+                    pathPopup.remove();
+                }
+
+                pathPopup = new maplibregl.Popup({
+                    closeButton: true,
+                    closeOnClick: true,
+                    className: 'path-tooltip'
+                })
+                    .setLngLat(e.lngLat)
+                    .setHTML(`
+                        <div style="background: #1e293b; color: white; padding: 8px 12px; border-radius: 6px; font-size: 12px; border: 1px solid #6366f1;">
+                            <div style="font-weight: 600; color: #a5b4fc; margin-bottom: 4px;">Learned Path</div>
+                            <div style="font-family: monospace; color: #e0e7ff;">${props.id}</div>
+                            ${props.origin && props.destination ? `<div style="margin-top: 4px; color: #94a3b8;">${props.origin} → ${props.destination}</div>` : ''}
+                            ${props.member_count ? `<div style="color: #94a3b8;">Flights: ${props.member_count}</div>` : ''}
+                        </div>
+                    `)
+                    .addTo(map.current!);
+            });
+
+            // Used corridors click handler
+            map.current!.on('click', 'used-corridors-line', (e) => {
+                if (!e.features || e.features.length === 0) return;
+                
+                const props = e.features[0].properties;
+                if (!props) return;
+
+                // Remove existing popup
+                if (pathPopup) {
+                    pathPopup.remove();
+                }
+
+                pathPopup = new maplibregl.Popup({
+                    closeButton: true,
+                    closeOnClick: true,
+                    className: 'path-tooltip'
+                })
+                    .setLngLat(e.lngLat)
+                    .setHTML(`
+                        <div style="background: #1e293b; color: white; padding: 8px 12px; border-radius: 6px; font-size: 12px; border: 1px solid #10b981;">
+                            <div style="font-weight: 600; color: #6ee7b7; margin-bottom: 4px;">Used Corridor</div>
+                            <div style="font-family: monospace; color: #d1fae5;">${props.id}</div>
+                            ${props.origin && props.destination ? `<div style="margin-top: 4px; color: #94a3b8;">${props.origin} → ${props.destination}</div>` : ''}
+                            ${props.member_count ? `<div style="color: #94a3b8;">Flights: ${props.member_count}</div>` : ''}
+                        </div>
+                    `)
+                    .addTo(map.current!);
+            });
+
+            // Routes click handler
+            map.current!.on('click', 'routes-line', (e) => {
+                if (!e.features || e.features.length === 0) return;
+                
+                const props = e.features[0].properties;
+                if (!props) return;
+
+                // Remove existing popup
+                if (pathPopup) {
+                    pathPopup.remove();
+                }
+
+                pathPopup = new maplibregl.Popup({
+                    closeButton: true,
+                    closeOnClick: true,
+                    className: 'path-tooltip'
+                })
+                    .setLngLat(e.lngLat)
+                    .setHTML(`
+                        <div style="background: #1e293b; color: white; padding: 8px 12px; border-radius: 6px; font-size: 12px; border: 1px solid ${props.color || '#22c55e'};">
+                            <div style="font-weight: 600; color: ${props.color || '#22c55e'}; margin-bottom: 4px;">Planned Route</div>
+                            <div style="font-family: monospace; color: #e0e7ff;">${props.id}</div>
+                        </div>
+                    `)
+                    .addTo(map.current!);
+            });
+
+            // Change cursor on hover for path layers
+            const pathLayers = ['learned-paths-line', 'learned-paths-bg', 'used-corridors-line', 'used-corridors-bg', 'routes-line', 'routes-glow'];
+            pathLayers.forEach(layer => {
+                map.current!.on('mouseenter', layer, () => {
+                    map.current!.getCanvas().style.cursor = 'pointer';
+                });
+                map.current!.on('mouseleave', layer, () => {
+                    map.current!.getCanvas().style.cursor = '';
+                });
+            });
         });
 
         // Map click handler - use function that reads from refs to avoid stale closure

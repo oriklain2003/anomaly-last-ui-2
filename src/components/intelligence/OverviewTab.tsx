@@ -5,15 +5,17 @@ import { ChartCard } from './ChartCard';
 import { QuestionTooltip } from './QuestionTooltip';
 import { fetchOverviewBatch, type MonthlyFlightStats } from '../../api';
 import type { OverviewStats, FlightPerDay, AirspaceRisk } from '../../types';
+import type { SharedDashboardData } from '../../IntelligencePage';
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
 interface OverviewTabProps {
   startTs: number;
   endTs: number;
   cacheKey?: number;
+  sharedData?: SharedDashboardData;  // OPTIMIZATION: Use shared data from parent
 }
 
-export function OverviewTab({ startTs, endTs, cacheKey = 0 }: OverviewTabProps) {
+export function OverviewTab({ startTs, endTs, cacheKey = 0, sharedData }: OverviewTabProps) {
   const [stats, setStats] = useState<OverviewStats | null>(null);
   const [flightsPerDay, setFlightsPerDay] = useState<FlightPerDay[]>([]);
   const [airspaceRisk, setAirspaceRisk] = useState<AirspaceRisk | null>(null);
@@ -24,16 +26,28 @@ export function OverviewTab({ startTs, endTs, cacheKey = 0 }: OverviewTabProps) 
     loadData();
   }, [startTs, endTs, cacheKey]);
 
+  // OPTIMIZATION: Use shared flights_per_day from parent when available
+  useEffect(() => {
+    if (sharedData && sharedData.flightsPerDay.length > 0) {
+      setFlightsPerDay(sharedData.flightsPerDay);
+    }
+  }, [sharedData]);
+
   const loadData = async () => {
     setLoading(true);
     try {
       // Use batch API with pre-computed cache
+      // OPTIMIZATION: Only fetch stats, airspace_risk, monthly_flights
+      // flights_per_day comes from shared parent data
       const batchData = await fetchOverviewBatch(startTs, endTs, [
-        'stats', 'flights_per_day', 'airspace_risk', 'monthly_flights'
+        'stats', 'airspace_risk', 'monthly_flights'
       ]);
       
       setStats(batchData.stats || null);
-      setFlightsPerDay(batchData.flights_per_day || []);
+      // Only set flights_per_day if not using shared data
+      if (!sharedData || sharedData.flightsPerDay.length === 0) {
+        setFlightsPerDay(batchData.flights_per_day || []);
+      }
       setAirspaceRisk(batchData.airspace_risk || null);
       setMonthlyFlights(batchData.monthly_flights || []);
     } catch (error) {
@@ -107,10 +121,10 @@ export function OverviewTab({ startTs, endTs, cacheKey = 0 }: OverviewTabProps) 
         />
       </div>
 
-      {/* Flights Per Day Chart */}
+      {/* Flight Traffic Over Time Chart */}
       <ChartCard 
-        title="Flights Per Day (Last 30 Days)"
-        question={{ he: "כמה מטוסים עוברים מעל ישראל ביום?", en: "How many planes pass over Israel per day?", level: "L1" }}
+        title="Flight Traffic Over Time"
+        question={{ he: "כמה מטוסים עוברים מעל ישראל ביום?/בשבוע?/בחודש?", en: "How many planes pass over Israel per day/week/month?", level: "L1" }}
       >
         {flightsPerDay.length > 0 ? (
           <ResponsiveContainer width="100%" height={300}>
@@ -138,7 +152,7 @@ export function OverviewTab({ startTs, endTs, cacheKey = 0 }: OverviewTabProps) 
                 dataKey="count" 
                 stroke="#3b82f6" 
                 strokeWidth={2}
-                name="Total Flights"
+                name="Total"
               />
               <Line 
                 type="monotone" 
@@ -146,6 +160,13 @@ export function OverviewTab({ startTs, endTs, cacheKey = 0 }: OverviewTabProps) 
                 stroke="#ef4444" 
                 strokeWidth={2}
                 name="Military"
+              />
+              <Line 
+                type="monotone" 
+                dataKey="civilian_count" 
+                stroke="#10b981" 
+                strokeWidth={2}
+                name="Civilian"
               />
             </LineChart>
           </ResponsiveContainer>
@@ -294,15 +315,15 @@ export function OverviewTab({ startTs, endTs, cacheKey = 0 }: OverviewTabProps) 
               </div>
               <div>
                 <div className="text-2xl font-bold text-white">
-                  {flightsPerDay.length > 0 
-                    ? Math.round(flightsPerDay.reduce((sum, d) => sum + d.count, 0) / flightsPerDay.length)
+                  {stats.total_flights > 0 
+                    ? Math.round(stats.total_flights / 60).toLocaleString()
                     : '--'}
                 </div>
-                <div className="text-xs text-cyan-300">Avg Daily Flights</div>
+                <div className="text-xs text-cyan-300">Avg Flights/Day</div>
               </div>
             </div>
             <div className="mt-3 text-xs text-cyan-200/70">
-              {flightsPerDay.length} days analyzed
+              {stats.total_flights.toLocaleString()} total / 60 days
             </div>
           </div>
         </div>

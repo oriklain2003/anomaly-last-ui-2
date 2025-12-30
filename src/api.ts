@@ -583,6 +583,7 @@ export interface NearMissLocation {
     count: number;
     severity_high: number;
     severity_medium: number;
+    sample_flight_ids?: string[];  // Up to 5 sample flight IDs from this location
 }
 
 export const fetchNearMissLocations = async (startTs: number, endTs: number, limit = 50): Promise<NearMissLocation[]> => {
@@ -692,6 +693,7 @@ export interface BottleneckZone {
     avg_altitude: number;
     flights_per_hour: number;
     congestion_level: 'critical' | 'high' | 'moderate' | 'low';
+    polygon?: [number, number][]; // [[lon, lat], ...] for polygon rendering
 }
 
 export const fetchBottleneckZones = async (startTs: number, endTs: number, limit = 20): Promise<BottleneckZone[]> => {
@@ -919,6 +921,10 @@ export interface AirlineSafetyScorecardEntry {
     go_arounds: number;
     diversions: number;
     safety_score: number;
+    weighted_score?: number;          // Score adjusted for statistical confidence
+    confidence?: 'high' | 'medium' | 'low' | 'very_low';  // Statistical reliability
+    market_share?: number;            // Percentage of total flights
+    is_priority?: boolean;            // Key airline for TLV
     safety_grade: 'A' | 'B' | 'C' | 'D' | 'F';
     trend: 'improving' | 'declining' | 'stable';
     issues: string[];
@@ -929,8 +935,8 @@ export interface AirlineSafetyScorecard {
     summary: {
         total_airlines: number;
         average_score: number;
-        best_performer: { airline: string; airline_name: string; score: number } | null;
-        needs_attention: Array<{ airline: string; airline_name: string; issues: string[] }>;
+        best_performer: { airline: string; airline_name: string; score: number; flights?: number } | null;
+        needs_attention: Array<{ airline: string; airline_name: string; issues: string[]; flights?: number }>;
     };
 }
 
@@ -951,6 +957,8 @@ export interface SafetyBatchResponse {
     daily_incident_clusters?: DailyIncidentClusters;
     // Airline Safety Scorecard
     airline_scorecard?: AirlineSafetyScorecard;
+    // Near-miss polygon clusters (convex hull)
+    near_miss_clusters?: NearMissClustersResponse;
 }
 
 // Military by Country - Country-specific military intelligence
@@ -1120,6 +1128,25 @@ export interface JammingTriangulationResponse {
     message?: string;
 }
 
+// Military flight with full track for map visualization
+export interface MilitaryFlightWithTrack {
+    flight_id: string;
+    callsign: string;
+    country: string;
+    type: string;  // tanker, ISR, transport, fighter, etc.
+    type_name: string;
+    first_seen: number;
+    track: [number, number][];  // [[lon, lat], ...] GeoJSON format
+    track_points: number;
+}
+
+export interface MilitaryFlightsWithTracksResponse {
+    flights: MilitaryFlightWithTrack[];
+    by_country: Record<string, number>;
+    total_flights: number;
+    countries: string[];
+}
+
 export interface IntelligenceBatchResponse {
     airline_efficiency?: AirlineEfficiency[];
     holding_patterns?: HoldingPatternAnalysis;
@@ -1143,6 +1170,8 @@ export interface IntelligenceBatchResponse {
     threat_assessment?: ThreatAssessmentResponse;
     // Jamming Source Triangulation
     jamming_triangulation?: JammingTriangulationResponse;
+    // Military flights with full tracks for map visualization
+    military_flights_with_tracks?: MilitaryFlightsWithTracksResponse;
 }
 
 /**
@@ -1163,7 +1192,8 @@ export const fetchSafetyBatch = async (
             include: include || [
                 'emergency_codes', 'near_miss', 'go_arounds', 'hourly',
                 'monthly', 'locations', 'phase', 'aftermath', 'top_airlines', 'by_country',
-                'emergency_clusters', 'daily_incident_clusters', 'airline_scorecard'
+                'emergency_clusters', 'daily_incident_clusters', 'airline_scorecard',
+                'near_miss_clusters'  // Near-miss polygon clusters
             ]
         })
     });
@@ -1202,7 +1232,9 @@ export const fetchIntelligenceBatch = async (
                 // Combined Threat Assessment
                 'threat_assessment',
                 // Jamming Source Triangulation
-                'jamming_triangulation'
+                'jamming_triangulation',
+                // Military flights with full tracks for map visualization
+                'military_flights_with_tracks'
             ]
         })
     });
@@ -1256,6 +1288,7 @@ export interface TrafficBatchResponse {
     signal_loss?: SignalLossLocation[];
     signal_loss_monthly?: SignalLossMonthly[];
     signal_loss_hourly?: SignalLossHourly[];
+    signal_loss_clusters?: SignalLossClustersResponse;  // NEW: Precomputed polygon clusters
     peak_hours?: PeakHoursAnalysis;
     diversion_stats?: DiversionStats;
     diversions_monthly?: DiversionMonthly[];
@@ -1271,6 +1304,8 @@ export interface TrafficBatchResponse {
     special_events_impact?: SpecialEventsImpact;
     signal_loss_anomalies?: SignalLossAnomalyResponse;
     diversions_seasonal?: DiversionsSeasonal;
+    // Holding patterns (moved from intelligence tab)
+    holding_patterns?: HoldingPatternAnalysis;
 }
 
 /**
@@ -1290,12 +1325,14 @@ export const fetchTrafficBatch = async (
             end_ts: Math.floor(endTs),
             include: include || [
                 'flights_per_day', 'airports', 'signal_loss', 'signal_monthly',
-                'signal_hourly', 'peak_hours', 'diversions', 'diversions_monthly',
+                'signal_hourly', 'signal_loss_clusters', 'peak_hours', 'diversions', 'diversions_monthly',
                 'alternates', 'rtb', 'missing_info', 'deviations', 'bottlenecks',
-                'runway_usage',
+                // runway_usage is loaded separately - not in pre-computed cache
                 // Seasonal analysis endpoints
                 'seasonal_year_comparison', 'traffic_safety_correlation', 'special_events_impact',
-                'signal_loss_anomalies', 'diversions_seasonal'
+                'signal_loss_anomalies', 'diversions_seasonal',
+                // Holding patterns (moved from intelligence tab)
+                'holding_patterns'
             ]
         })
     });
@@ -1469,7 +1506,27 @@ export interface PeakHoursAnalysis {
     peak_traffic_hours: number[];
     peak_safety_hours: number[];
     correlation_score: number;
-    hourly_data: { hour: number; traffic: number; safety_events: number }[];
+    hourly_data: { 
+        hour: number; 
+        traffic: number;           // Daily average ALL flights at this hour
+        safety_events: number;     // Daily average ANOMALY flights at this hour
+        normal_flights?: number;   // Daily average NORMAL flights at this hour
+        traffic_total?: number;    // Total flights across period
+        safety_total?: number;     // Total anomaly flights across period
+        traffic_pct?: number;
+        safety_pct?: number;
+    }[];
+    // Context fields
+    total_flights?: number;
+    total_normal_flights?: number;
+    total_anomaly_flights?: number;
+    anomaly_rate_pct?: number;      // Percentage of flights that are anomalies
+    num_days?: number;              // Number of days in the period
+    explanation?: {
+        traffic: string;
+        safety_events: string;
+        correlation: string;
+    };
 }
 
 export const fetchPeakHoursAnalysis = async (startTs: number, endTs: number): Promise<PeakHoursAnalysis> => {
@@ -1795,6 +1852,7 @@ export interface RTBEvent {
     landing_time: number;
     duration_min: number;
     airport: string;
+    max_outbound_nm?: number;  // How far the aircraft traveled before returning
 }
 
 export const fetchRTBEvents = async (startTs: number, endTs: number, maxDurationMin = 30): Promise<RTBEvent[]> => {
@@ -2648,6 +2706,58 @@ export interface GPSJammingClustersResponse {
         jamming_indicators?: string[];
         affected_flights?: number;
     }>;
+    total_points: number;
+    total_clusters: number;
+}
+
+// Signal Loss Clusters (similar to GPS Jamming Clusters for Traffic Tab)
+export interface SignalLossCluster {
+    id: number;
+    polygon: [number, number][] | null;  // [lon, lat] coordinates in GeoJSON format
+    centroid: [number, number];  // [lon, lat]
+    point_count: number;
+    total_events: number;
+    affected_flights: number;
+    avg_duration: number;
+    points: Array<{
+        lat: number;
+        lon: number;
+        count: number;
+        avgDuration: number;
+        event_count: number;  // Alias for consistency
+    }>;
+}
+
+export interface SignalLossClustersResponse {
+    clusters: SignalLossCluster[];
+    singles: SignalLossLocation[];
+    total_points: number;
+    total_clusters: number;
+}
+
+// Near-Miss Clusters with polygon boundaries (convex hull)
+export interface NearMissCluster {
+    id: number;
+    polygon: [number, number][] | null;  // [lon, lat] coordinates in GeoJSON format
+    centroid: [number, number];  // [lon, lat]
+    point_count: number;
+    total_events: number;
+    severity_high: number;
+    severity_medium: number;
+    sample_flight_ids?: string[];  // Up to 5 sample flight IDs from this cluster
+    points: Array<{
+        lat: number;
+        lon: number;
+        count: number;
+        severity_high: number;
+        severity_medium: number;
+        event_count: number;  // Alias for consistency
+    }>;
+}
+
+export interface NearMissClustersResponse {
+    clusters: NearMissCluster[];
+    singles: NearMissLocation[];
     total_points: number;
     total_clusters: number;
 }
