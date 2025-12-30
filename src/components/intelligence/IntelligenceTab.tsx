@@ -3,7 +3,6 @@ import { Shield, Radar, TrendingUp, Info, MapPin, AlertTriangle, Clock, Plane, T
 import { StatCard } from './StatCard';
 import { ChartCard } from './ChartCard';
 import { QuestionTooltip } from './QuestionTooltip';
-import { SignalLossMap } from './SignalLossMap';
 import { CoverageZonesMap } from './CoverageZonesMap';
 import { CombinedSignalMap } from './CombinedSignalMap';
 import maplibregl from 'maplibre-gl';
@@ -22,7 +21,6 @@ import type {
   GPSJammingZonesResponse,
   WeatherImpactAnalysis,
   SeasonalYearComparison,
-  TrafficSafetyCorrelation,
   SpecialEventsImpact,
   AlternateAirport,
   MilitaryByCountryResponse,
@@ -30,7 +28,6 @@ import type {
   MilitaryByDestinationResponse,
   ThreatAssessmentResponse,
   JammingTriangulationResponse,
-  HourlyCorrelation,
   SpecialEvent,
   MilitaryFlightsWithTracksResponse,
   SignalLossClustersResponse
@@ -75,7 +72,6 @@ export function IntelligenceTab({ startTs, endTs, cacheKey = 0, sharedData }: In
   // Level 2 Operational Insights (moved from Traffic/Safety)
   const [weatherImpact, setWeatherImpact] = useState<WeatherImpactAnalysis | null>(null);
   const [, setSeasonalTrends] = useState<SeasonalYearComparison | null>(null);
-  const [trafficSafetyCorr, setTrafficSafetyCorr] = useState<TrafficSafetyCorrelation | null>(null);
   const [specialEvents, setSpecialEvents] = useState<SpecialEventsImpact | null>(null);
   const [alternateAirports, setAlternateAirports] = useState<AlternateAirport[]>([]);
   const [signalLossZones, setSignalLossZones] = useState<SignalLossLocation[]>([]);
@@ -141,7 +137,6 @@ export function IntelligenceTab({ startTs, endTs, cacheKey = 0, sharedData }: In
     if (sharedData && sharedData.trafficBatch) {
       const tb = sharedData.trafficBatch;
       setSeasonalTrends(tb.seasonal_year_comparison || null);
-      setTrafficSafetyCorr(tb.traffic_safety_correlation || null);
       setSpecialEvents(tb.special_events_impact || null);
       setAlternateAirports(tb.alternate_airports || []);
     }
@@ -200,7 +195,6 @@ export function IntelligenceTab({ startTs, endTs, cacheKey = 0, sharedData }: In
         const { fetchTrafficBatch } = await import('../../api');
         const trafficData = await fetchTrafficBatch(startTs, endTs);
         setSeasonalTrends(trafficData.seasonal_year_comparison || null);
-        setTrafficSafetyCorr(trafficData.traffic_safety_correlation || null);
         setSpecialEvents(trafficData.special_events_impact || null);
         setAlternateAirports(trafficData.alternate_airports || []);
         // Signal Loss data from Traffic batch (same as TrafficTab - full data with clusters!)
@@ -489,152 +483,6 @@ export function IntelligenceTab({ startTs, endTs, cacheKey = 0, sharedData }: In
 
 
 
-      {/* Traffic-Safety Correlation (Pressure Hours) - Level 2 */}
-      {trafficSafetyCorr && trafficSafetyCorr.hourly_correlation && trafficSafetyCorr.hourly_correlation.length > 0 && (
-        <>
-          <div className="border-b border-white/10 pb-4 pt-8">
-            <h2 className="text-white text-xl font-bold mb-2 flex items-center gap-2">
-              <Clock className="w-5 h-5 text-orange-400" />
-              Peak Risk Periods
-              <QuestionTooltip 
-                question="מתי הכי מסוכן בשמיים בטיחותית?"
-                questionEn="When is it most dangerous in the sky safety-wise?"
-                level="L2"
-              />
-            </h2>
-            <p className="text-white/60 text-sm">
-              When is it most dangerous in the sky? Rush hours correlate with safety incidents
-            </p>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-
-            <StatCard
-              title="Peak Risk Hour"
-              value={"17:00 - 21:00, 05:00-09:00"}
-              subtitle="Highest incident rate"
-              icon={<Clock className="w-8 h-8" />}
-            />
-
-            <StatCard
-              title="Safest Hour"
-              value={(() => {
-                const withTraffic = trafficSafetyCorr.hourly_correlation.filter((h: HourlyCorrelation) => h.traffic_count > 0);
-                if (withTraffic.length === 0) return 'N/A';
-                const safest = withTraffic.reduce((min: HourlyCorrelation, h: HourlyCorrelation) => 
-                  h.safety_per_1000 < min.safety_per_1000 ? h : min);
-                return `${safest.hour}:00`;
-              })()}
-              subtitle="Lowest risk"
-              icon={<Shield className="w-6 h-6" />}
-            />
-          </div>
-
-          {/* Hourly Chart */}
-          <ChartCard title="Safety Events by Hour">
-            <ResponsiveContainer width="100%" height={250}>
-              <BarChart data={(() => {
-                // Adjust data to match peak risk hours: 05:00-09:00 and 17:00-21:00
-                const data = [...trafficSafetyCorr.hourly_correlation];
-                
-                // Find max value in the data to scale appropriately
-                const maxVal = Math.max(...data.map((h: HourlyCorrelation) => h.safety_count));
-                
-                // Peak hours that should show high values
-                const morningPeak = [5, 6, 7, 8, 9];
-                const eveningPeak = [17, 18, 19, 20, 21];
-                const peakHours = [...morningPeak, ...eveningPeak];
-                
-                // Hours to reduce (mid-day lull and late night)
-                const reduceHours = [10, 11, 12, 13, 14, 15, 16, 22, 23, 0, 1, 2, 3, 4];
-                
-                return data.map((h: HourlyCorrelation) => {
-                  const isPeakRisk = peakHours.includes(h.hour);
-                  const isMorningPeak = morningPeak.includes(h.hour);
-                  const isEveningPeak = eveningPeak.includes(h.hour);
-                  const shouldReduce = reduceHours.includes(h.hour);
-                  
-                  let adjustedCount = h.safety_count;
-                  
-                  // Hardcoded boost for evening peak (17-21) to match morning
-                  if (isEveningPeak) {
-                    // Create a bell curve for evening: 17->18->19->20->21
-                    const eveningBoosts: Record<number, number> = {
-                      17: Math.round(maxVal * 0.65),
-                      18: Math.round(maxVal * 0.85),
-                      19: Math.round(maxVal * 1.0),  // Peak
-                      20: Math.round(maxVal * 0.85),
-                      21: Math.round(maxVal * 0.55)
-                    };
-                    adjustedCount = eveningBoosts[h.hour] || adjustedCount;
-                  } else if (isMorningPeak) {
-                    // Keep morning peak as-is or slightly boost if needed
-                    const morningBoosts: Record<number, number> = {
-                      5: Math.round(maxVal * 0.55),
-                      6: Math.round(maxVal * 0.75),
-                      7: Math.round(maxVal * 1.0),   // Peak
-                      8: Math.round(maxVal * 0.95),
-                      9: Math.round(maxVal * 0.5)
-                    };
-                    adjustedCount = Math.max(adjustedCount, morningBoosts[h.hour] || adjustedCount);
-                  } else if (shouldReduce) {
-                    // Reduce non-peak hours to create contrast
-                    adjustedCount = Math.round(h.safety_count * 0.4);
-                  }
-                  
-                  return {
-                    ...h,
-                    safety_count: Math.max(1, adjustedCount), // Ensure at least 1
-                    isPeakRisk
-                  };
-                });
-              })()}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#ffffff20" />
-                <XAxis dataKey="hour" stroke="#ffffff60" tick={{ fill: '#ffffff60' }} tickFormatter={(h) => `${h}:00`} />
-                <YAxis stroke="#ffffff60" tick={{ fill: '#ffffff60' }} />
-                <Tooltip
-                  contentStyle={{ backgroundColor: '#1a1a2e', border: '1px solid rgba(255,255,255,0.1)' }}
-                  labelStyle={{ color: '#fff' }}
-                  formatter={(value: number, name: string) => [value, name === 'safety_count' ? 'Safety Events' : name === 'traffic_count' ? 'Flights' : name]}
-                  labelFormatter={(hour) => `Hour: ${hour}:00`}
-                />
-                <Bar 
-                  dataKey="safety_count" 
-                  name="Safety Events" 
-                  radius={[2, 2, 0, 0]}
-                  fill="#f97316"
-                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                  shape={(props: any) => {
-                    const { x, y, width, height, isPeakRisk } = props;
-                    return (
-                      <rect
-                        x={x}
-                        y={y}
-                        width={width}
-                        height={height}
-                        fill={isPeakRisk ? '#ef4444' : '#f97316'}
-                        rx={2}
-                        ry={2}
-                      />
-                    );
-                  }}
-                />
-              </BarChart>
-            </ResponsiveContainer>
-            <div className="flex items-center justify-center gap-6 mt-2 text-xs">
-              <div className="flex items-center gap-2">
-                <div className="w-3 h-3 rounded-sm bg-[#ef4444]" />
-                <span className="text-white/60">Peak Risk Hours (05-09, 17-21)</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <div className="w-3 h-3 rounded-sm bg-[#f97316]" />
-                <span className="text-white/60">Other Hours</span>
-              </div>
-            </div>
-          </ChartCard>
-
-        </>
-      )}
 
       {/* Special Events Impact - Level 2 */}
       {specialEvents && specialEvents.events && specialEvents.events.length > 0 && (
@@ -909,195 +757,7 @@ export function IntelligenceTab({ startTs, endTs, cacheKey = 0, sharedData }: In
         />
       </div>
 
-      {/* GPS Jamming Map Visualization */}
-      <div className="bg-surface rounded-xl border border-white/10 overflow-hidden">
-        <div className="px-6 py-4 border-b border-white/10">
-          <div className="flex items-start justify-between">
-            <div>
-              <h3 className="text-lg font-semibold text-white flex items-center gap-2">
-                <Radar className="w-5 h-5 text-red-500" />
-                GPS Jamming Threat Map
-              </h3>
-              <p className="text-white/60 text-sm mt-1">
-                Security-focused analysis of potential GPS interference zones
-              </p>
-              <div className="mt-2 inline-flex items-center gap-2 px-2 py-1 bg-red-500/20 rounded text-xs text-red-300">
-                <AlertTriangle className="w-3 h-3" />
-                <span>Security Intelligence - Potential hostile interference</span>
-              </div>
-            </div>
-            <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-3 max-w-xs">
-              <div className="flex items-start gap-2">
-                <Info className="w-4 h-4 text-red-400 mt-0.5 shrink-0" />
-                <div className="text-xs text-red-300">
-                  <strong>Focus:</strong> Identifies zones where signal loss patterns suggest 
-                  intentional GPS jamming. For general coverage gaps, see the <strong>Traffic Tab</strong>.
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-        
-        <div className="p-6">
-          <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-            {/* Map */}
-            <div className="xl:col-span-2">
-              {gpsJamming.length > 0 || (gpsJammingClusters && gpsJammingClusters.total_points > 0) ? (
-                <SignalLossMap 
-                  locations={gpsJamming.map(j => ({
-                    lat: j.lat,
-                    lon: j.lon,
-                    count: j.event_count,
-                    avgDuration: 300, // Default 5 min for jamming zones
-                    intensity: j.intensity,
-                    affected_flights: j.affected_flights
-                  }))} 
-                  height={400}
-                  showPolygonClusters={true}
-                  clusterThresholdNm={50}
-                  precomputedClusters={gpsJammingClusters} // Backend-computed polygon clusters
-                />
-              ) : (
-                <div className="h-[400px] flex items-center justify-center bg-surface-highlight rounded-lg border border-white/10">
-                  <div className="text-white/40 text-center">
-                    <Radar className="w-12 h-12 mx-auto mb-3 opacity-30" />
-                    <p>No GPS jamming detected in this period</p>
-                  </div>
-                </div>
-              )}
-            </div>
-            
-            {/* Stats Panel */}
-            <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-3">
-                <div className="bg-surface-highlight rounded-lg p-4 text-center">
-                  <div className="text-2xl font-bold text-red-400">{gpsJamming.length}</div>
-                  <div className="text-xs text-white/50">Jamming Zones</div>
-                </div>
-                <div className="bg-surface-highlight rounded-lg p-4 text-center">
-                  <div className="text-2xl font-bold text-orange-400">
-                    {gpsJamming.reduce((sum, j) => sum + j.affected_flights, 0)}
-                  </div>
-                  <div className="text-xs text-white/50">Affected Flights</div>
-                </div>
-              </div>
-              
-              {/* Confidence breakdown */}
-              <div className="grid grid-cols-4 gap-2">
-                <div className="bg-red-500/20 rounded-lg p-2 text-center">
-                  <div className="text-lg font-bold text-red-400">
-                    {gpsJamming.filter(j => j.jamming_confidence === 'HIGH').length}
-                  </div>
-                  <div className="text-[10px] text-red-300">HIGH</div>
-                </div>
-                <div className="bg-orange-500/20 rounded-lg p-2 text-center">
-                  <div className="text-lg font-bold text-orange-400">
-                    {gpsJamming.filter(j => j.jamming_confidence === 'MEDIUM').length}
-                  </div>
-                  <div className="text-[10px] text-orange-300">MEDIUM</div>
-                </div>
-                <div className="bg-yellow-500/20 rounded-lg p-2 text-center">
-                  <div className="text-lg font-bold text-yellow-400">
-                    {gpsJamming.filter(j => j.jamming_confidence === 'LOW').length}
-                  </div>
-                  <div className="text-[10px] text-yellow-300">LOW</div>
-                </div>
-                <div className="bg-green-500/20 rounded-lg p-2 text-center">
-                  <div className="text-lg font-bold text-green-400">
-                    {gpsJamming.filter(j => !j.jamming_confidence || j.jamming_confidence === 'UNLIKELY').length}
-                  </div>
-                  <div className="text-[10px] text-green-300">UNLIKELY</div>
-                </div>
-              </div>
-              
 
-              <div className="bg-gradient-to-br from-red-500/10 to-orange-500/10 border border-red-500/30 rounded-lg p-4">
-                <h4 className="text-red-400 text-sm font-medium mb-2 flex items-center gap-2">
-                  <AlertTriangle className="w-4 h-4" />
-                  Security Implications
-                </h4>
-                <ul className="text-xs text-white/70 space-y-1.5">
-                  <li className="flex items-start gap-2">
-                    <span className="text-red-400">•</span>
-                    <span>GPS jamming can indicate hostile activity</span>
-                  </li>
-                  <li className="flex items-start gap-2">
-                    <span className="text-orange-400">•</span>
-                    <span>May affect aircraft navigation systems</span>
-                  </li>
-                  <li className="flex items-start gap-2">
-                    <span className="text-yellow-400">•</span>
-                    <span>Report persistent zones to aviation authorities</span>
-                  </li>
-                </ul>
-              </div>
-              
-              {/* Jamming Score Calculation Explanation */}
-              <div className="bg-gradient-to-br from-purple-500/10 to-blue-500/10 border border-purple-500/30 rounded-lg p-4">
-                <h4 className="text-purple-400 text-sm font-medium mb-2 flex items-center gap-2">
-                  <Info className="w-4 h-4" />
-                  How Jamming Score is Calculated
-                </h4>
-                <p className="text-xs text-white/60 mb-3">
-                  Each zone gets a score (0-100) based on 8 jamming signatures detected in aircraft data:
-                </p>
-                <div className="space-y-2 text-xs">
-                  <div className="flex justify-between items-center">
-                    <span className="text-white/70">🔺 Altitude Jumps</span>
-                    <span className="text-purple-400 font-mono">max 20 pts</span>
-                  </div>
-                  <p className="text-white/50 ml-4 text-[10px]">Sudden altitude changes &gt;3,000 ft/sec (physically impossible)</p>
-                  
-                  <div className="flex justify-between items-center">
-                    <span className="text-white/70">📡 Spoofed Altitudes</span>
-                    <span className="text-purple-400 font-mono">max 15 pts</span>
-                  </div>
-                  <p className="text-white/50 ml-4 text-[10px]">Known fake values (34764ft, 44700ft) from Middle East jamming</p>
-                  
-                  <div className="flex justify-between items-center">
-                    <span className="text-white/70">⚡ Impossible Speed</span>
-                    <span className="text-purple-400 font-mono">max 15 pts</span>
-                  </div>
-                  <p className="text-white/50 ml-4 text-[10px]">Ground speed &gt;600 knots (faster than any commercial aircraft)</p>
-                  
-                  <div className="flex justify-between items-center">
-                    <span className="text-white/70">🔀 Position Teleport</span>
-                    <span className="text-purple-400 font-mono">max 15 pts</span>
-                  </div>
-                  <p className="text-white/50 ml-4 text-[10px]">Implied &gt;600kt movement between consecutive positions</p>
-                  
-                  <div className="flex justify-between items-center">
-                    <span className="text-white/70">📶 MLAT-Only</span>
-                    <span className="text-purple-400 font-mono">8 pts</span>
-                  </div>
-                  <p className="text-white/50 ml-4 text-[10px]">GPS blocked, only multilateration works (&gt;80% MLAT data)</p>
-                  
-                  <div className="flex justify-between items-center">
-                    <span className="text-white/70">🔄 Impossible Turns</span>
-                    <span className="text-purple-400 font-mono">max 12 pts</span>
-                  </div>
-                  <p className="text-white/50 ml-4 text-[10px]">Turn rates faster than any aircraft can physically achieve</p>
-                  
-                  <div className="flex justify-between items-center">
-                    <span className="text-white/70">🚫 Signal Loss</span>
-                    <span className="text-purple-400 font-mono">max 20 pts</span>
-                  </div>
-                  <p className="text-white/50 ml-4 text-[10px]">5+ minute gaps between track points (strongest indicator)</p>
-                </div>
-                
-                <div className="mt-3 pt-3 border-t border-white/10">
-                  <div className="text-[10px] text-white/50 space-y-1">
-                    <div><span className="text-red-400 font-bold">HIGH ≥60:</span> Multiple strong jamming signatures</div>
-                    <div><span className="text-orange-400 font-bold">MEDIUM 35-59:</span> Several indicators present</div>
-                    <div><span className="text-yellow-400 font-bold">LOW 15-34:</span> Some anomalies, may be other causes</div>
-                    <div><span className="text-green-400 font-bold">UNLIKELY &lt;15:</span> Normal flight data</div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
 
       {/* NEW: GPS Jamming Predictive Zones Map */}
       {gpsJammingZones && gpsJammingZones.zones.length > 0 && (

@@ -84,8 +84,6 @@ export function IntelligencePage() {
     { id: 'overview', label: 'Overview' },
     { id: 'safety', label: 'Safety & Traffic' },  // Merged tab
     { id: 'intelligence', label: 'Intelligence' },
-    { id: 'military', label: '🎖️ Military' },
-    { id: 'predict', label: 'Predict' }
   ];
 
   return (

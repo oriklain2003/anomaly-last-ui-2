@@ -3,7 +3,7 @@ import { AlertTriangle, Plane, TrendingUp, AlertCircle, Shield, Activity, Rotate
 import { StatCard } from './StatCard';
 import { ChartCard } from './ChartCard';
 import { QuestionTooltip } from './QuestionTooltip';
-import { fetchOverviewBatch, type MonthlyFlightStats } from '../../api';
+import { fetchOverviewBatch, fetchIntelligenceBatch, fetchSafetyBatch, type MonthlyFlightStats, type MilitaryByDestinationResponse, type SafetyByPhase } from '../../api';
 import type { OverviewStats, FlightPerDay, AirspaceRisk } from '../../types';
 import type { SharedDashboardData } from '../../IntelligencePage';
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
@@ -21,6 +21,10 @@ export function OverviewTab({ startTs, endTs, cacheKey = 0, sharedData }: Overvi
   const [airspaceRisk, setAirspaceRisk] = useState<AirspaceRisk | null>(null);
   const [monthlyFlights, setMonthlyFlights] = useState<MonthlyFlightStats[]>([]);
   const [loading, setLoading] = useState(true);
+  
+  // Data from Intelligence and Safety batches for consistency with other tabs
+  const [militaryByDestination, setMilitaryByDestination] = useState<MilitaryByDestinationResponse | null>(null);
+  const [safetyByPhase, setSafetyByPhase] = useState<SafetyByPhase | null>(null);
 
   useEffect(() => {
     loadData();
@@ -36,11 +40,12 @@ export function OverviewTab({ startTs, endTs, cacheKey = 0, sharedData }: Overvi
   const loadData = async () => {
     setLoading(true);
     try {
-      // Use batch API with pre-computed cache
-      // OPTIMIZATION: Only fetch stats, airspace_risk, monthly_flights
-      // flights_per_day comes from shared parent data
-      const batchData = await fetchOverviewBatch(startTs, endTs, [
-        'stats', 'airspace_risk', 'monthly_flights'
+      // Use batch APIs with pre-computed cache
+      // Fetch overview, intelligence, and safety data in parallel
+      const [batchData, intelligenceData, safetyData] = await Promise.all([
+        fetchOverviewBatch(startTs, endTs, ['stats', 'airspace_risk', 'monthly_flights']),
+        fetchIntelligenceBatch(startTs, endTs),
+        fetchSafetyBatch(startTs, endTs, ['phase'])
       ]);
       
       setStats(batchData.stats || null);
@@ -50,6 +55,12 @@ export function OverviewTab({ startTs, endTs, cacheKey = 0, sharedData }: Overvi
       }
       setAirspaceRisk(batchData.airspace_risk || null);
       setMonthlyFlights(batchData.monthly_flights || []);
+      
+      // Set intelligence data for military flights count (same as IntelligenceTab)
+      setMilitaryByDestination(intelligenceData.military_by_destination || null);
+      
+      // Set safety data for total events (same as SafetyTab's Events by Flight Phase)
+      setSafetyByPhase(safetyData.safety_by_phase || null);
     } catch (error) {
       console.error('Failed to load overview data:', error);
     } finally {
@@ -107,8 +118,8 @@ export function OverviewTab({ startTs, endTs, cacheKey = 0, sharedData }: Overvi
         />
         <StatCard
           title="Safety Events"
-          value={stats.safety_events.toLocaleString()}
-          subtitle="Critical incidents"
+          value={(safetyByPhase?.total_events || stats.safety_events).toLocaleString()}
+          subtitle="Total events by phase"
           icon={<AlertCircle className="w-6 h-6" />}
           question={{ he: "כמה אירועי בטיחות (התקרבויות מתחת ל2000 רגל ו5 מייל) היו מעל ישראל/מעל ירדן?", en: "How many safety events were over Israel/Jordan?", level: "L1" }}
         />
@@ -259,7 +270,7 @@ export function OverviewTab({ startTs, endTs, cacheKey = 0, sharedData }: Overvi
         />
         <StatCard
           title="Military Flights"
-          value={(stats.military_flights || 0).toLocaleString()}
+          value={(militaryByDestination?.total_flights || stats.military_flights || 0).toLocaleString()}
           subtitle="Military/Government"
           icon={<Plane className="w-5 h-5" />}
           question={{ he: "כמה מטוסים צבאיים טסים בשמי המזרח התיכון?", en: "How many military planes fly in Middle East skies?", level: "L1" }}
