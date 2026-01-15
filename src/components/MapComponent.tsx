@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useImperativeHandle, forwardRef, useMemo }
 import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import type { TrackPoint } from '../types';
-import { fetchLearnedLayers, type LearnedLayers } from '../api';
+import { fetchLearnedLayers, type LearnedLayers, fetchUnionTubes, type UnionTubesResponse } from '../api';
 
 // Fix for Hebrew text rendering (RTL)
 try {
@@ -52,6 +52,8 @@ interface MapComponentProps {
   aiHighlightedPoint?: AIHighlightedPoint | null;
   aiHighlightedSegment?: AIHighlightedSegment | null;
   onClearAIHighlights?: () => void;
+  currentFlightOrigin?: string;
+  currentFlightDestination?: string;
 }
 
 export interface MapComponentHandle {
@@ -75,7 +77,9 @@ export const MapComponent = forwardRef<MapComponentHandle, MapComponentProps>(({
     mlAnomalyPoints = [],
     aiHighlightedPoint,
     aiHighlightedSegment,
-    onClearAIHighlights
+    onClearAIHighlights,
+    currentFlightOrigin,
+    currentFlightDestination
 }, ref) => {
   const mapContainer = useRef<HTMLDivElement>(null);
   const map = useRef<maplibregl.Map | null>(null);
@@ -84,15 +88,33 @@ export const MapComponent = forwardRef<MapComponentHandle, MapComponentProps>(({
   const apiKey = 'r7kaQpfNDVZdaVp23F1r';
 
   const [learnedLayers, setLearnedLayers] = useState<LearnedLayers | null>(null);
+  const [unionTubes, setUnionTubes] = useState<UnionTubesResponse | null>(null);
   const [showPaths, setShowPaths] = useState(false);
   const [showTurns, setShowTurns] = useState(false);
   const [showSids, setShowSids] = useState(false);
   const [showStars, setShowStars] = useState(false);
+  const [showTubes, setShowTubes] = useState(false);
+  const [showUnionTubes, setShowUnionTubes] = useState(false);
   const [showMLPoints, setShowMLPoints] = useState(true);
   const [selectedPathCluster, setSelectedPathCluster] = useState<string>('all');
   const [showPathSelector, setShowPathSelector] = useState(false);
-  const [clickedPathInfo, setClickedPathInfo] = useState<{ id: string; origin?: string; destination?: string; member_count?: number } | null>(null);
+  const [selectedTubeCluster, setSelectedTubeCluster] = useState<string>('all');
+  const [showTubeSelector, setShowTubeSelector] = useState(false);
+  const [clickedPathInfo, setClickedPathInfo] = useState<{ id: string; origin?: string; destination?: string; member_count?: number; type?: 'path' | 'tube' | 'union_tube' | 'sid' | 'star' | 'turn' } | null>(null);
   const [mapLoaded, setMapLoaded] = useState(false);
+  const [originSearchQuery, setOriginSearchQuery] = useState<string>('');
+  const [destSearchQuery, setDestSearchQuery] = useState<string>('');
+  const [tubeOriginSearchQuery, setTubeOriginSearchQuery] = useState<string>('');
+  const [tubeDestSearchQuery, setTubeDestSearchQuery] = useState<string>('');
+  const [unionTubeOriginSearchQuery, setUnionTubeOriginSearchQuery] = useState<string>('');
+  const [unionTubeDestSearchQuery, setUnionTubeDestSearchQuery] = useState<string>('');
+  const [showUnionTubeSelector, setShowUnionTubeSelector] = useState(false);
+
+  // Calculate total valid paths (backend already filters these)
+  const totalValidPaths = useMemo(() => {
+    if (!learnedLayers?.paths) return 0;
+    return learnedLayers.paths.length;
+  }, [learnedLayers?.paths]);
 
   // Group paths by origin-destination cluster
   const pathClusters = useMemo(() => {
@@ -103,6 +125,7 @@ export const MapComponent = forwardRef<MapComponentHandle, MapComponentProps>(({
     learnedLayers.paths.forEach(path => {
       const origin = path.origin || 'Unknown';
       const dest = path.destination || 'Unknown';
+      
       const key = `${origin}_${dest}`;
       const label = `${origin} → ${dest}`;
       
@@ -117,9 +140,77 @@ export const MapComponent = forwardRef<MapComponentHandle, MapComponentProps>(({
     return Array.from(clusterMap.values()).sort((a, b) => b.count - a.count);
   }, [learnedLayers?.paths]);
 
+  // Calculate total valid tubes (backend already filters these)
+  const totalValidTubes = useMemo(() => {
+    if (!learnedLayers?.tubes) return 0;
+    return learnedLayers.tubes.length;
+  }, [learnedLayers?.tubes]);
+
+  // Group tubes by origin-destination cluster
+  const tubeClusters = useMemo(() => {
+    if (!learnedLayers?.tubes) return [];
+    
+    const clusterMap = new Map<string, { key: string; label: string; count: number }>();
+    
+    learnedLayers.tubes.forEach(tube => {
+      const origin = tube.origin || 'Unknown';
+      const dest = tube.destination || 'Unknown';
+      
+      const key = `${origin}_${dest}`;
+      const label = `${origin} → ${dest}`;
+      
+      if (clusterMap.has(key)) {
+        clusterMap.get(key)!.count++;
+      } else {
+        clusterMap.set(key, { key, label, count: 1 });
+      }
+    });
+    
+    // Sort by count descending
+    return Array.from(clusterMap.values()).sort((a, b) => b.count - a.count);
+  }, [learnedLayers?.tubes]);
+
+  // Filter clusters by airport search queries
+  const filteredPathClusters = useMemo(() => {
+    const hasOriginQuery = originSearchQuery.trim().length > 0;
+    const hasDestQuery = destSearchQuery.trim().length > 0;
+    
+    if (!hasOriginQuery && !hasDestQuery) return pathClusters;
+    
+    const originQuery = originSearchQuery.trim().toUpperCase();
+    const destQuery = destSearchQuery.trim().toUpperCase();
+    
+    return pathClusters.filter(cluster => {
+      const [origin, dest] = cluster.key.split('_');
+      const matchesOrigin = !hasOriginQuery || origin.toUpperCase().includes(originQuery);
+      const matchesDestination = !hasDestQuery || dest.toUpperCase().includes(destQuery);
+      return matchesOrigin && matchesDestination;
+    });
+  }, [pathClusters, originSearchQuery, destSearchQuery]);
+
+  // Filter tube clusters by airport search queries
+  const filteredTubeClusters = useMemo(() => {
+    const hasOriginQuery = tubeOriginSearchQuery.trim().length > 0;
+    const hasDestQuery = tubeDestSearchQuery.trim().length > 0;
+    
+    if (!hasOriginQuery && !hasDestQuery) return tubeClusters;
+    
+    const originQuery = tubeOriginSearchQuery.trim().toUpperCase();
+    const destQuery = tubeDestSearchQuery.trim().toUpperCase();
+    
+    return tubeClusters.filter(cluster => {
+      const [origin, dest] = cluster.key.split('_');
+      const matchesOrigin = !hasOriginQuery || origin.toUpperCase().includes(originQuery);
+      const matchesDestination = !hasDestQuery || dest.toUpperCase().includes(destQuery);
+      return matchesOrigin && matchesDestination;
+    });
+  }, [tubeClusters, tubeOriginSearchQuery, tubeDestSearchQuery]);
+
   // Filter paths based on selected cluster
+  // Note: Backend now filters out Unknown and applies member_count thresholds
   const filteredPaths = useMemo(() => {
     if (!learnedLayers?.paths) return [];
+    
     if (selectedPathCluster === 'all') return learnedLayers.paths;
     
     const [origin, dest] = selectedPathCluster.split('_');
@@ -129,6 +220,46 @@ export const MapComponent = forwardRef<MapComponentHandle, MapComponentProps>(({
       return pathOrigin === origin && pathDest === dest;
     });
   }, [learnedLayers?.paths, selectedPathCluster]);
+
+  // Filter tubes based on selected cluster
+  // Note: Backend now filters out Unknown and applies member_count thresholds
+  const filteredTubes = useMemo(() => {
+    if (!learnedLayers?.tubes) return [];
+    
+    if (selectedTubeCluster === 'all') return learnedLayers.tubes;
+    
+    const [origin, dest] = selectedTubeCluster.split('_');
+    return learnedLayers.tubes.filter(tube => {
+      const tubeOrigin = tube.origin || 'Unknown';
+      const tubeDest = tube.destination || 'Unknown';
+      return tubeOrigin === origin && tubeDest === dest;
+    });
+  }, [learnedLayers?.tubes, selectedTubeCluster]);
+
+  // Filter union tubes based on search queries
+  const filteredUnionTubes = useMemo(() => {
+    if (!unionTubes?.union_tubes) return [];
+    
+    const hasOriginQuery = unionTubeOriginSearchQuery.trim().length > 0;
+    const hasDestQuery = unionTubeDestSearchQuery.trim().length > 0;
+    
+    if (!hasOriginQuery && !hasDestQuery) {
+      return unionTubes.union_tubes;
+    }
+    
+    const originQuery = unionTubeOriginSearchQuery.trim().toUpperCase();
+    const destQuery = unionTubeDestSearchQuery.trim().toUpperCase();
+    
+    return unionTubes.union_tubes.filter(tube => {
+      const tubeOrigin = (tube.origin || '').toUpperCase();
+      const tubeDest = (tube.destination || '').toUpperCase();
+      
+      const matchesOrigin = !hasOriginQuery || tubeOrigin.includes(originQuery);
+      const matchesDest = !hasDestQuery || tubeDest.includes(destQuery);
+      
+      return matchesOrigin && matchesDest;
+    });
+  }, [unionTubes, unionTubeOriginSearchQuery, unionTubeDestSearchQuery]);
 
   // Expose imperative handle for parent components
   useImperativeHandle(ref, () => ({
@@ -323,10 +454,22 @@ export const MapComponent = forwardRef<MapComponentHandle, MapComponentProps>(({
                 paths: data.paths?.length || 0,
                 turns: data.turns?.length || 0,
                 sids: data.sids?.length || 0,
-                stars: data.stars?.length || 0
+                stars: data.stars?.length || 0,
+                tubes: data.tubes?.length || 0
             });
         })
         .catch(err => console.error("[MapComponent] Failed to load learned layers", err));
+  }, []);
+
+  useEffect(() => {
+    fetchUnionTubes()
+        .then(data => {
+            setUnionTubes(data);
+            console.log("[MapComponent] Loaded union tubes:", {
+                union_tubes: data.union_tubes?.length || 0
+            });
+        })
+        .catch(err => console.error("[MapComponent] Failed to load union tubes", err));
   }, []);
 
   useEffect(() => {
@@ -702,6 +845,8 @@ export const MapComponent = forwardRef<MapComponentHandle, MapComponentProps>(({
     addLayerSafe('learned-turns', '#FF9800', [], 'fill');           // Orange fill for turns
     addLayerSafe('learned-sids', '#2196F3', [5, 5], 'line');        // Blue dashed for SIDs
     addLayerSafe('learned-stars', '#E91E63', [5, 5], 'line');       // Pink dashed for STARs
+    addLayerSafe('learned-tubes', '#9C27B0', [], 'fill');           // Purple fill for tubes
+    addLayerSafe('union-tubes', '#00BCD4', [], 'fill');             // Cyan fill for union tubes
 
     // Register click handlers immediately after layer creation
     const mapInstance = map.current as any;
@@ -716,7 +861,8 @@ export const MapComponent = forwardRef<MapComponentHandle, MapComponentProps>(({
             id: props?.id || 'Unknown',
             origin: props?.origin,
             destination: props?.destination,
-            member_count: props?.member_count
+            member_count: props?.member_count,
+            type: 'path'
           });
         });
 
@@ -738,7 +884,8 @@ export const MapComponent = forwardRef<MapComponentHandle, MapComponentProps>(({
             id: props?.id || 'Unknown',
             origin: props?.airport,
             destination: 'SID Departure',
-            member_count: props?.member_count
+            member_count: props?.member_count,
+            type: 'sid'
           });
         });
 
@@ -760,7 +907,8 @@ export const MapComponent = forwardRef<MapComponentHandle, MapComponentProps>(({
             id: props?.id || 'Unknown',
             origin: 'STAR Arrival',
             destination: props?.airport,
-            member_count: props?.member_count
+            member_count: props?.member_count,
+            type: 'star'
           });
         });
 
@@ -782,7 +930,8 @@ export const MapComponent = forwardRef<MapComponentHandle, MapComponentProps>(({
             id: props?.id || 'Unknown',
             origin: `Turn Zone (${props?.avg_alt_ft?.toFixed(0) || '?'} ft)`,
             destination: `Radius: ${props?.radius_nm?.toFixed(1) || '?'} nm`,
-            member_count: props?.member_count
+            member_count: props?.member_count,
+            type: 'turn'
           });
         });
 
@@ -790,6 +939,52 @@ export const MapComponent = forwardRef<MapComponentHandle, MapComponentProps>(({
           if (map.current) map.current.getCanvas().style.cursor = 'pointer';
         });
         map.current.on('mouseleave', 'learned-turns-layer', () => {
+          if (map.current) map.current.getCanvas().style.cursor = '';
+        });
+      }
+
+      // Click handler for Tubes
+      if (map.current.getLayer('learned-tubes-layer')) {
+        map.current.on('click', 'learned-tubes-layer', (e: any) => {
+          if (!e.features || e.features.length === 0) return;
+          
+          const props = e.features[0].properties;
+          setClickedPathInfo({
+            id: props?.id || 'Unknown',
+            origin: props?.origin || 'Unknown',
+            destination: props?.destination || 'Unknown',
+            member_count: props?.member_count,
+            type: 'tube'
+          });
+        });
+
+        map.current.on('mouseenter', 'learned-tubes-layer', () => {
+          if (map.current) map.current.getCanvas().style.cursor = 'pointer';
+        });
+        map.current.on('mouseleave', 'learned-tubes-layer', () => {
+          if (map.current) map.current.getCanvas().style.cursor = '';
+        });
+      }
+
+      // Click handler for Union Tubes
+      if (map.current.getLayer('union-tubes-layer')) {
+        map.current.on('click', 'union-tubes-layer', (e: any) => {
+          if (!e.features || e.features.length === 0) return;
+          
+          const props = e.features[0].properties;
+          setClickedPathInfo({
+            id: props?.id || 'Unknown',
+            origin: props?.origin || 'Unknown',
+            destination: props?.destination || 'Unknown',
+            member_count: props?.member_count,
+            type: 'union_tube'
+          });
+        });
+
+        map.current.on('mouseenter', 'union-tubes-layer', () => {
+          if (map.current) map.current.getCanvas().style.cursor = 'pointer';
+        });
+        map.current.on('mouseleave', 'union-tubes-layer', () => {
           if (map.current) map.current.getCanvas().style.cursor = '';
         });
       }
@@ -921,12 +1116,73 @@ export const MapComponent = forwardRef<MapComponentHandle, MapComponentProps>(({
         }
     };
 
+    // Update Tubes source
+    const updateTubes = () => {
+        const source = map.current!.getSource('learned-tubes') as maplibregl.GeoJSONSource;
+        if (!source) return;
+
+        if (showTubes && filteredTubes && filteredTubes.length > 0) {
+            const features = filteredTubes
+                .filter(tube => tube.geometry && tube.geometry.length >= 3)
+                .map(tube => ({
+                    type: 'Feature' as const,
+                    properties: { 
+                        id: tube.id,
+                        origin: tube.origin,
+                        destination: tube.destination,
+                        min_alt_ft: tube.min_alt_ft,
+                        max_alt_ft: tube.max_alt_ft,
+                        member_count: tube.member_count
+                    },
+                    geometry: {
+                        type: 'Polygon' as const,
+                        coordinates: [tube.geometry.map(coord => [coord[1], coord[0]])] // Convert [lat, lon] to [lon, lat]
+                    }
+                }));
+            source.setData({ type: 'FeatureCollection', features });
+        } else {
+            source.setData({ type: 'FeatureCollection', features: [] });
+        }
+    };
+
+    // Update Union Tubes source
+    const updateUnionTubes = () => {
+        const source = map.current!.getSource('union-tubes') as maplibregl.GeoJSONSource;
+        if (!source) return;
+
+        if (showUnionTubes && filteredUnionTubes && filteredUnionTubes.length > 0) {
+            const features = filteredUnionTubes
+                .filter(tube => tube.geometry && tube.geometry.length >= 3)
+                .map(tube => ({
+                    type: 'Feature' as const,
+                    properties: { 
+                        id: tube.id,
+                        origin: tube.origin,
+                        destination: tube.destination,
+                        min_alt_ft: tube.min_alt_ft,
+                        max_alt_ft: tube.max_alt_ft,
+                        tube_count: tube.tube_count,
+                        member_count: tube.member_count
+                    },
+                    geometry: {
+                        type: 'Polygon' as const,
+                        coordinates: [tube.geometry.map(coord => [coord[1], coord[0]])] // Convert [lat, lon] to [lon, lat]
+                    }
+                }));
+            source.setData({ type: 'FeatureCollection', features });
+        } else {
+            source.setData({ type: 'FeatureCollection', features: [] });
+        }
+    };
+
     // Update all sources
     updatePaths();
     updateTurns();
     updateSids();
     updateStars();
-  }, [mapLoaded, showPaths, showTurns, showSids, showStars, learnedLayers, filteredPaths, selectedPathCluster]);
+    updateTubes();
+    updateUnionTubes();
+  }, [mapLoaded, showPaths, showTurns, showSids, showStars, showTubes, showUnionTubes, learnedLayers, filteredPaths, selectedPathCluster, filteredTubes, selectedTubeCluster, filteredUnionTubes]);
 
   useEffect(() => {
     if (!map.current) return;
@@ -1135,7 +1391,7 @@ export const MapComponent = forwardRef<MapComponentHandle, MapComponentProps>(({
                     className={`px-3 py-2 rounded shadow text-xs font-medium opacity-90 transition-colors flex items-center gap-1 ${
                         showPaths ? 'bg-green-600 text-white' : 'bg-gray-800 text-gray-300 hover:bg-gray-700'
                     }`}
-                    title={`${filteredPaths?.length || 0} / ${learnedLayers?.paths?.length || 0} flight paths`}
+                    title={`${filteredPaths?.length || 0} / ${totalValidPaths} flight paths`}
                 >
                     <span>{showPaths ? "Paths" : "Show Paths"}</span>
                     {showPaths && (
@@ -1150,12 +1406,54 @@ export const MapComponent = forwardRef<MapComponentHandle, MapComponentProps>(({
                 
                 {/* Path Cluster Dropdown */}
                 {showPathSelector && showPaths && (
-                    <div className="absolute right-0 mt-1 w-64 max-h-80 overflow-y-auto bg-gray-900 border border-gray-700 rounded-lg shadow-xl">
+                    <div className="absolute right-0 mt-1 w-72 bg-gray-900 border border-gray-700 rounded-lg shadow-xl z-50">
+                        <div className="p-2 border-b border-gray-700 space-y-2">
+                            <div className="text-xs text-gray-400 mb-2">Search by Airport Code</div>
+                            <div className="flex gap-2">
+                                <input
+                                    type="text"
+                                    placeholder="Origin (e.g., LLBG)"
+                                    value={originSearchQuery}
+                                    onChange={(e) => setOriginSearchQuery(e.target.value)}
+                                    className="flex-1 px-2 py-1.5 text-xs bg-gray-800 border border-gray-600 rounded text-white placeholder-gray-500 focus:outline-none focus:border-green-500 focus:ring-1 focus:ring-green-500"
+                                />
+                                <input
+                                    type="text"
+                                    placeholder="Dest (e.g., JFK)"
+                                    value={destSearchQuery}
+                                    onChange={(e) => setDestSearchQuery(e.target.value)}
+                                    className="flex-1 px-2 py-1.5 text-xs bg-gray-800 border border-gray-600 rounded text-white placeholder-gray-500 focus:outline-none focus:border-green-500 focus:ring-1 focus:ring-green-500"
+                                />
+                            </div>
+                            {currentFlightOrigin && currentFlightDestination && (
+                                <button
+                                    onClick={() => {
+                                        setOriginSearchQuery(currentFlightOrigin);
+                                        setDestSearchQuery(currentFlightDestination);
+                                        // Find and select the matching cluster
+                                        const matchingKey = `${currentFlightOrigin}_${currentFlightDestination}`;
+                                        const matchingCluster = pathClusters.find(c => c.key === matchingKey);
+                                        if (matchingCluster) {
+                                            setSelectedPathCluster(matchingKey);
+                                        }
+                                    }}
+                                    className="w-full px-2 py-1.5 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded transition-colors flex items-center justify-center gap-1"
+                                    title={`Focus on ${currentFlightOrigin} → ${currentFlightDestination}`}
+                                >
+                                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                                    </svg>
+                                    Focus on Current Flight Route
+                                </button>
+                            )}
+                        </div>
                         <div className="p-2 border-b border-gray-700">
                             <div className="text-xs text-gray-400 mb-2">Filter by Route</div>
                             <button
                                 onClick={() => {
                                     setSelectedPathCluster('all');
+                                    setOriginSearchQuery('');
+                                    setDestSearchQuery('');
                                     setShowPathSelector(false);
                                 }}
                                 className={`w-full text-left px-2 py-1.5 rounded text-xs transition-colors ${
@@ -1164,33 +1462,45 @@ export const MapComponent = forwardRef<MapComponentHandle, MapComponentProps>(({
                                         : 'text-gray-300 hover:bg-gray-800'
                                 }`}
                             >
-                                All Routes ({learnedLayers?.paths?.length || 0})
+                                All Routes ({totalValidPaths})
                             </button>
                         </div>
-                        <div className="p-2 space-y-1">
-                            {pathClusters.map(cluster => (
-                                <button
-                                    key={cluster.key}
-                                    onClick={() => {
-                                        setSelectedPathCluster(cluster.key);
-                                        setShowPathSelector(false);
-                                    }}
-                                    className={`w-full text-left px-2 py-1.5 rounded text-xs transition-colors flex justify-between items-center ${
-                                        selectedPathCluster === cluster.key 
-                                            ? 'bg-green-600 text-white' 
-                                            : 'text-gray-300 hover:bg-gray-800'
-                                    }`}
-                                >
-                                    <span className="truncate">{cluster.label}</span>
-                                    <span className={`ml-2 px-1.5 py-0.5 rounded text-[10px] ${
-                                        selectedPathCluster === cluster.key 
-                                            ? 'bg-white/20' 
-                                            : 'bg-gray-700'
-                                    }`}>
-                                        {cluster.count}
-                                    </span>
-                                </button>
-                            ))}
+                        <div className="p-2 space-y-1 max-h-60 overflow-y-auto">
+                            {filteredPathClusters.length > 0 ? (
+                                filteredPathClusters.map(cluster => (
+                                    <button
+                                        key={cluster.key}
+                                        onClick={() => {
+                                            setSelectedPathCluster(cluster.key);
+                                            setShowPathSelector(false);
+                                        }}
+                                        className={`w-full text-left px-2 py-1.5 rounded text-xs transition-colors flex justify-between items-center ${
+                                            selectedPathCluster === cluster.key 
+                                                ? 'bg-green-600 text-white' 
+                                                : 'text-gray-300 hover:bg-gray-800'
+                                        }`}
+                                    >
+                                        <span className="truncate">{cluster.label}</span>
+                                        <span className={`ml-2 px-1.5 py-0.5 rounded text-[10px] ${
+                                            selectedPathCluster === cluster.key 
+                                                ? 'bg-white/20' 
+                                                : 'bg-gray-700'
+                                        }`}>
+                                            {cluster.count}
+                                        </span>
+                                    </button>
+                                ))
+                            ) : (
+                                <div className="text-xs text-gray-500 text-center py-4">
+                                    No routes found
+                                    {(originSearchQuery || destSearchQuery) && (
+                                        <div className="mt-1">
+                                            {originSearchQuery && <div>Origin: "{originSearchQuery}"</div>}
+                                            {destSearchQuery && <div>Dest: "{destSearchQuery}"</div>}
+                                        </div>
+                                    )}
+                                </div>
+                            )}
                         </div>
                         {showPaths && (
                             <div className="p-2 border-t border-gray-700">
@@ -1199,6 +1509,8 @@ export const MapComponent = forwardRef<MapComponentHandle, MapComponentProps>(({
                                         setShowPaths(false);
                                         setShowPathSelector(false);
                                         setSelectedPathCluster('all');
+                                        setOriginSearchQuery('');
+                                        setDestSearchQuery('');
                                     }}
                                     className="w-full px-2 py-1.5 rounded text-xs text-red-400 hover:bg-red-900/30 transition-colors"
                                 >
@@ -1236,6 +1548,259 @@ export const MapComponent = forwardRef<MapComponentHandle, MapComponentProps>(({
             >
                 {showStars ? "Hide STARs" : "Show STARs"}
             </button>
+            <div className="relative">
+                <button 
+                    onClick={() => {
+                        if (!showTubes) {
+                            setShowTubes(true);
+                        }
+                        setShowTubeSelector(!showTubeSelector);
+                    }}
+                    className={`px-3 py-2 rounded shadow text-xs font-medium opacity-90 transition-colors flex items-center gap-1 ${
+                        showTubes ? 'bg-purple-600 text-white' : 'bg-gray-800 text-gray-300 hover:bg-gray-700'
+                    }`}
+                    title={`${filteredTubes?.length || 0} / ${totalValidTubes} flight tubes`}
+                >
+                    <span>{showTubes ? "Tubes" : "Show Tubes"}</span>
+                    {showTubes && (
+                        <span className="bg-white/20 px-1.5 py-0.5 rounded text-[10px]">
+                            {filteredTubes?.length || 0}
+                        </span>
+                    )}
+                    <svg className={`w-3 h-3 transition-transform ${showTubeSelector ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                    </svg>
+                </button>
+                
+                {/* Tube Cluster Dropdown */}
+                {showTubeSelector && showTubes && (
+                    <div className="absolute right-0 mt-1 w-72 bg-gray-900 border border-gray-700 rounded-lg shadow-xl z-50">
+                        <div className="p-2 border-b border-gray-700 space-y-2">
+                            <div className="text-xs text-gray-400 mb-2">Search by Airport Code</div>
+                            <div className="flex gap-2">
+                                <input
+                                    type="text"
+                                    placeholder="Origin (e.g., LLBG)"
+                                    value={tubeOriginSearchQuery}
+                                    onChange={(e) => setTubeOriginSearchQuery(e.target.value)}
+                                    className="flex-1 px-2 py-1.5 text-xs bg-gray-800 border border-gray-600 rounded text-white placeholder-gray-500 focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500"
+                                />
+                                <input
+                                    type="text"
+                                    placeholder="Dest (e.g., JFK)"
+                                    value={tubeDestSearchQuery}
+                                    onChange={(e) => setTubeDestSearchQuery(e.target.value)}
+                                    className="flex-1 px-2 py-1.5 text-xs bg-gray-800 border border-gray-600 rounded text-white placeholder-gray-500 focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500"
+                                />
+                            </div>
+                            {currentFlightOrigin && currentFlightDestination && (
+                                <button
+                                    onClick={() => {
+                                        setTubeOriginSearchQuery(currentFlightOrigin);
+                                        setTubeDestSearchQuery(currentFlightDestination);
+                                        // Find and select the matching cluster
+                                        const matchingKey = `${currentFlightOrigin}_${currentFlightDestination}`;
+                                        const matchingCluster = tubeClusters.find(c => c.key === matchingKey);
+                                        if (matchingCluster) {
+                                            setSelectedTubeCluster(matchingKey);
+                                        }
+                                    }}
+                                    className="w-full px-2 py-1.5 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded transition-colors flex items-center justify-center gap-1"
+                                    title={`Focus on ${currentFlightOrigin} → ${currentFlightDestination}`}
+                                >
+                                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                                    </svg>
+                                    Focus on Current Flight Route
+                                </button>
+                            )}
+                        </div>
+                        <div className="p-2 border-b border-gray-700">
+                            <div className="text-xs text-gray-400 mb-2">Filter by Route</div>
+                            <button
+                                onClick={() => {
+                                    setSelectedTubeCluster('all');
+                                    setTubeOriginSearchQuery('');
+                                    setTubeDestSearchQuery('');
+                                    setShowTubeSelector(false);
+                                }}
+                                className={`w-full text-left px-2 py-1.5 rounded text-xs transition-colors ${
+                                    selectedTubeCluster === 'all' 
+                                        ? 'bg-purple-600 text-white' 
+                                        : 'text-gray-300 hover:bg-gray-800'
+                                }`}
+                            >
+                                All Routes ({totalValidTubes})
+                            </button>
+                        </div>
+                        <div className="p-2 space-y-1 max-h-60 overflow-y-auto">
+                            {filteredTubeClusters.length > 0 ? (
+                                filteredTubeClusters.map(cluster => (
+                                    <button
+                                        key={cluster.key}
+                                        onClick={() => {
+                                            setSelectedTubeCluster(cluster.key);
+                                            setShowTubeSelector(false);
+                                        }}
+                                        className={`w-full text-left px-2 py-1.5 rounded text-xs transition-colors flex justify-between items-center ${
+                                            selectedTubeCluster === cluster.key 
+                                                ? 'bg-purple-600 text-white' 
+                                                : 'text-gray-300 hover:bg-gray-800'
+                                        }`}
+                                    >
+                                        <span className="truncate">{cluster.label}</span>
+                                        <span className={`ml-2 px-1.5 py-0.5 rounded text-[10px] ${
+                                            selectedTubeCluster === cluster.key 
+                                                ? 'bg-white/20' 
+                                                : 'bg-gray-700'
+                                        }`}>
+                                            {cluster.count}
+                                        </span>
+                                    </button>
+                                ))
+                            ) : (
+                                <div className="text-xs text-gray-500 text-center py-4">
+                                    No routes found
+                                    {(tubeOriginSearchQuery || tubeDestSearchQuery) && (
+                                        <div className="mt-1">
+                                            {tubeOriginSearchQuery && <div>Origin: "{tubeOriginSearchQuery}"</div>}
+                                            {tubeDestSearchQuery && <div>Dest: "{tubeDestSearchQuery}"</div>}
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+                        </div>
+                        {showTubes && (
+                            <div className="p-2 border-t border-gray-700">
+                                <button
+                                    onClick={() => {
+                                        setShowTubes(false);
+                                        setShowTubeSelector(false);
+                                        setSelectedTubeCluster('all');
+                                        setTubeOriginSearchQuery('');
+                                        setTubeDestSearchQuery('');
+                                    }}
+                                    className="w-full px-2 py-1.5 rounded text-xs text-red-400 hover:bg-red-900/30 transition-colors"
+                                >
+                                    Hide All Tubes
+                                </button>
+                            </div>
+                        )}
+                    </div>
+                )}
+            </div>
+            <div className="relative">
+                <button 
+                    onClick={() => {
+                        if (!showUnionTubes) {
+                            setShowUnionTubes(true);
+                        }
+                        setShowUnionTubeSelector(!showUnionTubeSelector);
+                    }}
+                    className={`px-3 py-2 rounded shadow text-xs font-medium opacity-90 transition-colors flex items-center gap-1 ${
+                        showUnionTubes ? 'bg-cyan-600 text-white' : 'bg-gray-800 text-gray-300 hover:bg-gray-700'
+                    }`}
+                    title={`${filteredUnionTubes?.length || 0} / ${unionTubes?.union_tubes?.length || 0} unified tubes (1 per OD pair)`}
+                >
+                    <span>{showUnionTubes ? "Union Tubes" : "Show Union Tubes"}</span>
+                    {showUnionTubes && (
+                        <span className="bg-white/20 px-1.5 py-0.5 rounded text-[10px]">
+                            {filteredUnionTubes?.length || 0}
+                        </span>
+                    )}
+                    <svg className={`w-3 h-3 transition-transform ${showUnionTubeSelector ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                    </svg>
+                </button>
+                
+                {/* Union Tube Search Dropdown */}
+                {showUnionTubeSelector && showUnionTubes && (
+                    <div className="absolute right-0 mt-1 w-72 bg-gray-900 border border-gray-700 rounded-lg shadow-xl z-50">
+                        <div className="p-2 border-b border-gray-700 space-y-2">
+                            <div className="text-xs text-gray-400 mb-2">Search by Airport Code</div>
+                            <div className="flex gap-2">
+                                <input
+                                    type="text"
+                                    placeholder="Origin (e.g., LLBG)"
+                                    value={unionTubeOriginSearchQuery}
+                                    onChange={(e) => setUnionTubeOriginSearchQuery(e.target.value)}
+                                    className="flex-1 px-2 py-1.5 text-xs bg-gray-800 border border-gray-600 rounded text-white placeholder-gray-500 focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500"
+                                />
+                                <input
+                                    type="text"
+                                    placeholder="Dest (e.g., JFK)"
+                                    value={unionTubeDestSearchQuery}
+                                    onChange={(e) => setUnionTubeDestSearchQuery(e.target.value)}
+                                    className="flex-1 px-2 py-1.5 text-xs bg-gray-800 border border-gray-600 rounded text-white placeholder-gray-500 focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500"
+                                />
+                            </div>
+                            {currentFlightOrigin && currentFlightDestination && (
+                                <button
+                                    onClick={() => {
+                                        setUnionTubeOriginSearchQuery(currentFlightOrigin);
+                                        setUnionTubeDestSearchQuery(currentFlightDestination);
+                                    }}
+                                    className="w-full px-2 py-1.5 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded transition-colors flex items-center justify-center gap-1"
+                                    title={`Focus on ${currentFlightOrigin} → ${currentFlightDestination}`}
+                                >
+                                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                                    </svg>
+                                    Focus on Current Flight Route
+                                </button>
+                            )}
+                        </div>
+                        {filteredUnionTubes && filteredUnionTubes.length > 0 && (
+                            <div className="p-2 border-b border-gray-700">
+                                <div className="text-xs text-gray-400 mb-2">
+                                    Showing {filteredUnionTubes.length} of {unionTubes?.union_tubes?.length || 0} routes
+                                    {(unionTubeOriginSearchQuery || unionTubeDestSearchQuery) && (
+                                        <div className="mt-1 text-cyan-400">
+                                            {unionTubeOriginSearchQuery && <div>Origin: "{unionTubeOriginSearchQuery}"</div>}
+                                            {unionTubeDestSearchQuery && <div>Dest: "{unionTubeDestSearchQuery}"</div>}
+                                        </div>
+                                    )}
+                                </div>
+                                <button
+                                    onClick={() => {
+                                        setUnionTubeOriginSearchQuery('');
+                                        setUnionTubeDestSearchQuery('');
+                                    }}
+                                    className="w-full px-2 py-1.5 rounded text-xs bg-gray-800 hover:bg-gray-700 transition-colors"
+                                >
+                                    Clear Filters
+                                </button>
+                            </div>
+                        )}
+                        {(!filteredUnionTubes || filteredUnionTubes.length === 0) && (unionTubeOriginSearchQuery || unionTubeDestSearchQuery) && (
+                            <div className="p-2 text-xs text-gray-400 text-center">
+                                No routes found
+                                {(unionTubeOriginSearchQuery || unionTubeDestSearchQuery) && (
+                                    <div className="mt-1">
+                                        {unionTubeOriginSearchQuery && <div>Origin: "{unionTubeOriginSearchQuery}"</div>}
+                                        {unionTubeDestSearchQuery && <div>Dest: "{unionTubeDestSearchQuery}"</div>}
+                                    </div>
+                                )}
+                            </div>
+                        )}
+                        {showUnionTubes && (
+                            <div className="p-2 border-t border-gray-700">
+                                <button
+                                    onClick={() => {
+                                        setShowUnionTubes(false);
+                                        setShowUnionTubeSelector(false);
+                                        setUnionTubeOriginSearchQuery('');
+                                        setUnionTubeDestSearchQuery('');
+                                    }}
+                                    className="w-full px-2 py-1.5 rounded text-xs text-red-400 hover:bg-red-900/30 transition-colors"
+                                >
+                                    Hide All Union Tubes
+                                </button>
+                            </div>
+                        )}
+                    </div>
+                )}
+            </div>
             {mlAnomalyPoints && mlAnomalyPoints.length > 0 && (
                 <button 
                     onClick={() => setShowMLPoints(!showMLPoints)}
@@ -1252,7 +1817,14 @@ export const MapComponent = forwardRef<MapComponentHandle, MapComponentProps>(({
         {clickedPathInfo && (
             <div className="absolute bottom-4 left-4 z-10 bg-gray-900/95 border border-gray-700 rounded-lg shadow-xl p-3 max-w-xs backdrop-blur-sm">
                 <div className="flex items-center justify-between mb-2">
-                    <span className="text-xs font-semibold text-green-400 uppercase tracking-wide">Path Info</span>
+                    <span className="text-xs font-semibold text-green-400 uppercase tracking-wide">
+                        {clickedPathInfo.type === 'tube' ? 'Tube Info' : 
+                         clickedPathInfo.type === 'union_tube' ? 'Union Tube Info' : 
+                         clickedPathInfo.type === 'sid' ? 'SID Info' :
+                         clickedPathInfo.type === 'star' ? 'STAR Info' :
+                         clickedPathInfo.type === 'turn' ? 'Turn Zone Info' :
+                         'Path Info'}
+                    </span>
                     <button 
                         onClick={() => setClickedPathInfo(null)}
                         className="text-gray-400 hover:text-white transition-colors"
@@ -1283,6 +1855,19 @@ export const MapComponent = forwardRef<MapComponentHandle, MapComponentProps>(({
                         <div className="flex items-center gap-2">
                             <span className="text-gray-400 text-xs">Flights:</span>
                             <span className="text-white text-xs">{clickedPathInfo.member_count}</span>
+                        </div>
+                    )}
+                    {clickedPathInfo.type === 'tube' && clickedPathInfo.member_count && clickedPathInfo.member_count > 0 && (
+                        <div className="mt-2 pt-2 border-t border-gray-700">
+                            <button 
+                                onClick={() => {
+                                    console.log('Show all flights from tube:', clickedPathInfo.id);
+                                    alert(`Feature coming soon: Display ${clickedPathInfo.member_count} flights from tube ${clickedPathInfo.id}\n\nNote: This requires backend API support to fetch all flights in this tube cluster.`);
+                                }}
+                                className="w-full px-3 py-1.5 bg-purple-600 hover:bg-purple-700 text-white text-xs font-medium rounded transition-colors"
+                            >
+                                Show All {clickedPathInfo.member_count} Flights
+                            </button>
                         </div>
                     )}
                 </div>

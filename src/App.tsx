@@ -7,6 +7,8 @@ import { DataExplorerPage } from './DataExplorerPage';
 import { IntelligencePage } from './IntelligencePage';
 import { RoutePlannerPage } from './RoutePlannerPage';
 import { FlightImportPage } from './FlightImportPage';
+import { FlightViewerPage } from './FlightViewerPage';
+import { PolygonSearchPage } from './PolygonSearchPage';
 
 function App() {
   return (
@@ -20,6 +22,8 @@ function App() {
         <Route path="/intelligence" element={<IntelligencePage />} />
         <Route path="/route-planner" element={<RoutePlannerPage />} />
         <Route path="/import" element={<FlightImportPage />} />
+        <Route path="/flight-viewer" element={<FlightViewerPage />} />
+        <Route path="/polygon-search" element={<PolygonSearchPage />} />
       </Routes>
     </BrowserRouter>
   );

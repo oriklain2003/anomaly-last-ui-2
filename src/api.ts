@@ -77,6 +77,14 @@ export const fetchAnalyzeFlight = async (flightId: string): Promise<FlightTrack>
     throw new Error('Track data missing in analysis result');
 };
 
+export const fetchAnalyzeFlightFromDB = async (flightId: string): Promise<any> => {
+    const response = await fetch(`${API_BASE}/analyze/from-db/${flightId}`);
+    if (!response.ok) {
+        throw new Error('Failed to analyze flight from DB');
+    }
+    return response.json();
+};
+
 export const fetchUnifiedTrack = async (flightId: string): Promise<FlightTrack> => {
     const response = await fetch(`${API_BASE}/track/unified/${flightId}`);
     if (!response.ok) {
@@ -149,17 +157,67 @@ export interface LearnedProcedure {
     member_count: number;
 }
 
+export interface LearnedTube {
+    id: string;
+    origin: string | null;
+    destination: string | null;
+    min_alt_ft: number;
+    max_alt_ft: number;
+    member_count: number;
+    geometry: Array<[number, number]>; // Array of [lat, lon] coordinates
+}
+
 export interface LearnedLayers {
     paths: LearnedPath[];
     turns: LearnedTurnZone[];
     sids: LearnedProcedure[];
     stars: LearnedProcedure[];
+    tubes: LearnedTube[];
 }
 
-export const fetchLearnedLayers = async (): Promise<LearnedLayers> => {
-    const response = await fetch(`${API_BASE}/learned-layers`);
+export interface UnionTube {
+    id: string;
+    origin: string;
+    destination: string;
+    min_alt_ft: number | null;
+    max_alt_ft: number | null;
+    tube_count: number;
+    member_count: number;
+    geometry: Array<[number, number]>; // Array of [lat, lon] coordinates
+}
+
+export interface UnionTubesResponse {
+    union_tubes: UnionTube[];
+}
+
+export const fetchLearnedLayers = async (origin?: string, destination?: string): Promise<LearnedLayers> => {
+    const params = new URLSearchParams();
+    if (origin) params.append('origin', origin);
+    if (destination) params.append('destination', destination);
+    
+    const url = params.toString() 
+        ? `${API_BASE}/learned-layers?${params.toString()}`
+        : `${API_BASE}/learned-layers`;
+    
+    const response = await fetch(url);
     if (!response.ok) {
         throw new Error('Failed to fetch learned layers');
+    }
+    return response.json();
+};
+
+export const fetchUnionTubes = async (origin?: string, destination?: string): Promise<UnionTubesResponse> => {
+    const params = new URLSearchParams();
+    if (origin) params.append('origin', origin);
+    if (destination) params.append('destination', destination);
+    
+    const url = params.toString() 
+        ? `${API_BASE}/union-tubes?${params.toString()}`
+        : `${API_BASE}/union-tubes`;
+    
+    const response = await fetch(url);
+    if (!response.ok) {
+        throw new Error('Failed to fetch union tubes');
     }
     return response.json();
 };
@@ -337,6 +395,8 @@ export interface FlightMetadata {
     nearest_airport_end?: string;
     crossed_borders?: string;
     signal_loss_events?: number;
+    severity_cnn?: number;
+    severity_dense?: number;
     data_quality_score?: number;
     feedback?: {
         rule_id?: number;  // Legacy single rule
@@ -3300,6 +3360,75 @@ export const fetchMilitaryBatch = async (
     });
     if (!response.ok) {
         throw new Error('Failed to fetch military batch');
+    }
+    return response.json();
+};
+
+// ============================================================
+// POLYGON SEARCH
+// ============================================================
+
+export interface PolygonSearchResult {
+    flight_id: string;
+    callsign: string;
+    points_in_polygon: number;
+    first_timestamp: number;
+    last_timestamp: number;
+}
+
+export interface PolygonSearchResponse {
+    count: number;
+    flights: PolygonSearchResult[];
+}
+
+/**
+ * Search for flights that pass through a polygon area.
+ * @param polygon Array of [lon, lat] coordinates defining the polygon
+ * @param startTs Optional start timestamp filter
+ * @param endTs Optional end timestamp filter
+ */
+export const searchFlightsByPolygon = async (
+    polygon: number[][],
+    startTs?: number,
+    endTs?: number
+): Promise<PolygonSearchResponse> => {
+    const response = await fetch(`${API_BASE}/research/polygon-search`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            polygon,
+            start_ts: startTs,
+            end_ts: endTs
+        })
+    });
+    if (!response.ok) {
+        throw new Error('Failed to search flights by polygon');
+    }
+    return response.json();
+};
+
+/**
+ * Search for flights using a WKT polygon string.
+ * @param wkt WKT polygon string (e.g., "POLYGON ((lon1 lat1, lon2 lat2, ...))")
+ * @param startTs Optional start timestamp filter
+ * @param endTs Optional end timestamp filter
+ */
+export const searchFlightsByWKT = async (
+    wkt: string,
+    startTs?: number,
+    endTs?: number
+): Promise<PolygonSearchResponse> => {
+    const response = await fetch(`${API_BASE}/research/wkt-search`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            wkt,
+            start_ts: startTs,
+            end_ts: endTs
+        })
+    });
+    if (!response.ok) {
+        throw new Error('Failed to search flights by WKT');
     }
     return response.json();
 };

@@ -5,7 +5,7 @@ import { MapComponent, type MapComponentHandle, type AIHighlightedPoint, type AI
 import { AnalysisPanel } from './components/AnalysisPanel';
 import { SettingsModal } from './components/SettingsModal';
 import { ReasoningChat } from './components/ReasoningChat';
-import { fetchLiveTrack, fetchResearchTrack, fetchUnifiedTrack, fetchFeedbackTrack, fetchTaggedFeedbackTrack } from './api';
+import { fetchLiveTrack, fetchResearchTrack, fetchUnifiedTrack, fetchFeedbackTrack, fetchTaggedFeedbackTrack, fetchTaggedFlightMetadata, fetchResearchFlightMetadata, type FlightMetadata } from './api';
 import type { AnomalyReport, FlightTrack } from './types';
 import type { ProcessedActions } from './utils/aiActions';
 import { Settings, Bell } from 'lucide-react';
@@ -60,6 +60,7 @@ function DesktopAppContent() {
   const [, setLoadingTrack] = useState(false);
   const [showReport, setShowReport] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [flightMetadata, setFlightMetadata] = useState<FlightMetadata | null>(null);
   const bellAudioRef = useRef<HTMLAudioElement | null>(null);
   
   // AI Highlight State
@@ -167,6 +168,42 @@ function DesktopAppContent() {
         setAiHighlightedSegment(null);
     }
   }, [selectedAnomaly, mode]);
+
+  // Fetch flight metadata when anomaly changes
+  useEffect(() => {
+    if (selectedAnomaly?.flight_id) {
+      const fetchMetadata = async () => {
+        // For research mode, try research endpoint first
+        if (mode === 'research') {
+          try {
+            const data = await fetchResearchFlightMetadata(selectedAnomaly.flight_id);
+            return data;
+          } catch {
+            // Fall back to tagged metadata if research fails
+            return await fetchTaggedFlightMetadata(selectedAnomaly.flight_id);
+          }
+        }
+        
+        // For feedback mode, use tagged endpoint
+        if (mode === 'feedback') {
+          return await fetchTaggedFlightMetadata(selectedAnomaly.flight_id);
+        }
+        
+        // For other modes, try tagged first, then research as fallback
+        try {
+          return await fetchTaggedFlightMetadata(selectedAnomaly.flight_id);
+        } catch {
+          return await fetchResearchFlightMetadata(selectedAnomaly.flight_id);
+        }
+      };
+      
+      fetchMetadata()
+        .then(data => setFlightMetadata(data))
+        .catch(() => setFlightMetadata(null));
+    } else {
+      setFlightMetadata(null);
+    }
+  }, [selectedAnomaly?.flight_id, mode]);
 
   useEffect(() => {
     const audio = new Audio(ALERT_AUDIO_SRC);
@@ -346,6 +383,12 @@ function DesktopAppContent() {
             >
                 {t('app.nav.explorer')}
             </Link>
+            <Link
+                to="/flight-viewer"
+                className="flex h-10 px-3 items-center justify-center rounded-lg bg-surface-highlight text-white/80 hover:text-white transition-colors border border-white/10 text-sm font-bold no-underline"
+            >
+                Flight Viewer
+            </Link>
             <button
                 onClick={() => setIsSettingsOpen(true)}
                 className="flex h-10 w-10 items-center justify-center rounded-lg bg-surface-highlight text-white/80 hover:text-white transition-colors border border-white/10"
@@ -397,66 +440,12 @@ function DesktopAppContent() {
                     aiHighlightedPoint={aiHighlightedPoint}
                     aiHighlightedSegment={aiHighlightedSegment}
                     onClearAIHighlights={handleClearAIHighlights}
+                    currentFlightOrigin={flightMetadata?.origin_airport}
+                    currentFlightDestination={flightMetadata?.destination_airport}
                 />
                 
                 {/* Legend Overlay */}
-                <div className="absolute bottom-4 end-4 bg-background-dark/80 backdrop-blur-sm p-3 rounded-lg border border-white/10 text-white z-10">
-                    <p className="text-sm font-bold mb-2">{t('app.legend.title')}</p>
-                    <div className="flex flex-col gap-2 text-xs">
-                        <div className="flex items-center gap-2">
-                            <span className="h-2.5 w-2.5 rounded-full bg-red-500"></span>
-                            <span>{t('app.legend.anomaly')}</span>
-                        </div>
-                        <div className="flex items-center gap-2">
-                            <span className="h-2.5 w-2.5 rounded-full bg-blue-500"></span>
-                            <span>{t('app.legend.normal')}</span>
-                        </div>
-                        <div className="flex items-center gap-2">
-                            <span className="h-2.5 w-2.5 rounded-full bg-green-500"></span>
-                            <span>{t('app.legend.start')}</span>
-                        </div>
-                         <div className="flex items-center gap-2">
-                            <span className="h-2.5 w-2.5 rounded-full bg-red-500"></span>
-                            <span>{t('app.legend.end')}</span>
-                        </div>
-                        {secondaryFlightData && (
-                             <div className="flex items-center gap-2">
-                                <span className="h-2.5 w-2.5 rounded-full bg-orange-400"></span>
-                                <span>{t('app.legend.conflicting')}</span>
-                            </div>
-                        )}
-                        {(aiHighlightedPoint || aiHighlightedSegment) && (
-                            <div className="flex items-center gap-2">
-                                <span className="h-2.5 w-2.5 rounded-full bg-amber-500 animate-pulse"></span>
-                                <span>{t('app.legend.aiHighlight')}</span>
-                            </div>
-                        )}
-                        {/* ML Anomaly Points Legend */}
-                        {mlAnomalyPoints.length > 0 && (
-                            <>
-                                <div className="border-t border-white/10 pt-2 mt-1">
-                                    <p className="text-[10px] text-white/50 font-bold mb-1">{t('app.legend.mlAnomaly')}</p>
-                                </div>
-                                <div className="flex items-center gap-2">
-                                    <span className="h-2.5 w-2.5 rounded-full bg-purple-500"></span>
-                                    <span>Deep Dense</span>
-                                </div>
-                                <div className="flex items-center gap-2">
-                                    <span className="h-2.5 w-2.5 rounded-full bg-orange-500"></span>
-                                    <span>Deep CNN</span>
-                                </div>
-                                <div className="flex items-center gap-2">
-                                    <span className="h-2.5 w-2.5 rounded-full bg-cyan-500"></span>
-                                    <span>Transformer</span>
-                                </div>
-                                <div className="flex items-center gap-2">
-                                    <span className="h-2.5 w-2.5 rounded-full bg-pink-500"></span>
-                                    <span>Hybrid</span>
-                                </div>
-                            </>
-                        )}
-                    </div>
-                </div>
+
             </section>
 
             {/* Analysis Panel (Report + Flight Info) */}
