@@ -101,7 +101,7 @@ export function IntelligencePage() {
         </div>
         <div className="flex flex-1 justify-end gap-2">
           <Link
-            to="/"
+            to={import.meta.env.VITE_HOME || '/'}
             className="flex h-10 px-3 items-center justify-center rounded-lg bg-surface-highlight text-white/80 hover:text-white transition-colors border border-white/10 text-sm font-bold no-underline"
           >
             <Home className="h-4 w-4 mr-2" />

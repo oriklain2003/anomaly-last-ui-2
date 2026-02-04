@@ -1,7 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { Sidebar, type SidebarMode } from './components/Sidebar';
 import { MapComponent, type MLAnomalyPoint } from './components/MapComponent';
-import { ChatInterface } from './components/ChatInterface';
 import { ReportPanel } from './components/ReportPanel';
 import { fetchLiveTrack, fetchResearchTrack, fetchUnifiedTrack, fetchFeedbackTrack } from './api';
 import type { AnomalyReport, FlightTrack } from './types';
@@ -192,15 +191,7 @@ export function MobileApp() {
                 </div>
 
                 {/* Chat Tab */}
-                <div className={clsx("absolute inset-0 z-20 bg-background-dark", activeTab === 'chat' ? 'block' : 'hidden')}>
-                     <ChatInterface 
-                        data={selectedAnomaly?.full_report} 
-                        flightId={selectedAnomaly?.flight_id || "No Flight Selected"} 
-                        flightPoints={flightData?.points || []}
-                        embedded={true}
-                        className="w-full h-full"
-                    />
-                </div>
+
             </main>
 
             {/* Bottom Tab Bar */}
