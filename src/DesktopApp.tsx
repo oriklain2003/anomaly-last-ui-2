@@ -389,6 +389,12 @@ function DesktopAppContent() {
             >
                 Flight Viewer
             </Link>
+            <Link
+                to="/classify"
+                className="flex h-10 px-3 items-center justify-center rounded-lg bg-gradient-to-r from-purple-600/40 to-blue-600/40 hover:from-purple-600/60 hover:to-blue-600/60 text-white transition-colors border border-purple-500/30 text-sm font-bold no-underline"
+            >
+                AI Classify
+            </Link>
             <button
                 onClick={() => setIsSettingsOpen(true)}
                 className="flex h-10 w-10 items-center justify-center rounded-lg bg-surface-highlight text-white/80 hover:text-white transition-colors border border-white/10"

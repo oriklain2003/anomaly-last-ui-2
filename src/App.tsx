@@ -9,6 +9,7 @@ import { RoutePlannerPage } from './RoutePlannerPage';
 import { FlightImportPage } from './FlightImportPage';
 import { FlightViewerPage } from './FlightViewerPage';
 import { PolygonSearchPage } from './PolygonSearchPage';
+import { FlightClassifyPage } from './FlightClassifyPage';
 
 function App() {
   return (
@@ -24,6 +25,7 @@ function App() {
         <Route path="/import" element={<FlightImportPage />} />
         <Route path="/flight-viewer" element={<FlightViewerPage />} />
         <Route path="/polygon-search" element={<PolygonSearchPage />} />
+        <Route path="/classify" element={<FlightClassifyPage />} />
       </Routes>
     </BrowserRouter>
   );

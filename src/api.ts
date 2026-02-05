@@ -85,6 +85,44 @@ export const fetchAnalyzeFlightFromDB = async (flightId: string): Promise<any> =
     return response.json();
 };
 
+export interface ClassifyFlightRequest {
+    flight_id: string;
+    flight_data: TrackPoint[];
+    anomaly_report: any;
+    flight_time: number;
+}
+
+export interface ClassifyFlightResponse {
+    classification: {
+        rule_id: number;
+        rule_name: string;
+        confidence: string;
+        reasoning: string;
+    };
+    rule_details: {
+        id: number;
+        name: string;
+        nameHe: string;
+        description: string;
+        category: string;
+        color: string;
+    };
+}
+
+export const classifyFlight = async (request: ClassifyFlightRequest): Promise<ClassifyFlightResponse> => {
+    const response = await fetch(`${API_BASE}/ai/classify`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(request),
+    });
+    if (!response.ok) {
+        throw new Error('Failed to classify flight');
+    }
+    return response.json();
+};
+
 export const fetchUnifiedTrack = async (flightId: string): Promise<FlightTrack> => {
     const response = await fetch(`${API_BASE}/track/unified/${flightId}`);
     if (!response.ok) {
@@ -94,7 +132,7 @@ export const fetchUnifiedTrack = async (flightId: string): Promise<FlightTrack> 
 };
 
 export const fetchResearchTrack = async (flightId: string): Promise<FlightTrack> => {
-    const response = await fetch(`${API_BASE}/research_rerun/track/${flightId}`);
+    const response = await fetch(`${API_BASE}/research/track/${flightId}`);
     if (!response.ok) {
         throw new Error('Failed to fetch research track');
     }
@@ -420,9 +458,17 @@ export const fetchTaggedFlightMetadata = async (flightId: string): Promise<Fligh
 
 // Fetch flight metadata from research.db
 export const fetchResearchFlightMetadata = async (flightId: string): Promise<FlightMetadata> => {
-    const response = await fetch(`${API_BASE}/research_rerun/metadata/${flightId}`);
+    const response = await fetch(`${API_BASE}/research/metadata/${flightId}`);
     if (!response.ok) {
         throw new Error('Failed to fetch research flight metadata');
+    }
+    return response.json();
+};
+
+export const fetchResearchAnomaly = async (flightId: string): Promise<AnomalyReport> => {
+    const response = await fetch(`${API_BASE}/research/anomaly/${flightId}`);
+    if (!response.ok) {
+        throw new Error('Failed to fetch research anomaly report');
     }
     return response.json();
 };
