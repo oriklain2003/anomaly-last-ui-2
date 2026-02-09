@@ -110,9 +110,17 @@ export interface ClassifyFlightRequest {
     flight_data: TrackPoint[];
     anomaly_report: any;
     flight_time: number;
+    custom_prompt?: string;  // NEW: Optional custom prompt for free-form classification
 }
 
-export interface ClassifyFlightResponse {
+// Response when using custom_prompt
+export interface ClassifyFlightResponseCustom {
+    classification: string;  // Free-form text analysis
+    custom_prompt: string;   // Echo of the prompt sent
+}
+
+// Response when using standard classification (no custom_prompt)
+export interface ClassifyFlightResponseStandard {
     classification: {
         rule_id: number;
         rule_name: string;
@@ -128,6 +136,18 @@ export interface ClassifyFlightResponse {
         color: string;
     };
 }
+
+// Union type for both response formats
+export type ClassifyFlightResponse = ClassifyFlightResponseStandard | ClassifyFlightResponseCustom;
+
+// Type guards to distinguish between response types
+export const isCustomClassification = (response: ClassifyFlightResponse): response is ClassifyFlightResponseCustom => {
+    return typeof (response as ClassifyFlightResponseCustom).classification === 'string';
+};
+
+export const isStandardClassification = (response: ClassifyFlightResponse): response is ClassifyFlightResponseStandard => {
+    return typeof (response as ClassifyFlightResponseStandard).classification === 'object';
+};
 
 export const classifyFlight = async (request: ClassifyFlightRequest): Promise<ClassifyFlightResponse> => {
     // Ensure anomaly_report is an object, not a string

@@ -6,11 +6,23 @@ import {
   fetchResearchFlightMetadata,
   fetchResearchAnomaly,
   classifyFlight,
+  isCustomClassification,
+  isStandardClassification,
   type FlightMetadata,
   type ClassifyFlightResponse 
 } from './api';
 import type { FlightTrack, AnomalyReport } from './types';
-import { ArrowLeft, Search, Loader2, Sparkles, CheckCircle2, AlertCircle } from 'lucide-react';
+import { ArrowLeft, Search, Loader2, Sparkles, CheckCircle2, AlertCircle, MessageSquare } from 'lucide-react';
+
+// Example prompts for users
+const EXAMPLE_PROMPTS = [
+  "Describe what unusual event or behavior occurred",
+  "Classify the severity and type of this anomaly",
+  "Identify if this was an emergency situation",
+  "Explain what the pilot was doing and why",
+  "Determine if this was military or civilian activity",
+  "Assess if this flight poses any safety concerns"
+];
 
 export function FlightClassifyPage() {
   const [flightId, setFlightId] = useState('');
@@ -21,6 +33,8 @@ export function FlightClassifyPage() {
   const [metadata, setMetadata] = useState<FlightMetadata | null>(null);
   const [anomalyReport, setAnomalyReport] = useState<AnomalyReport | null>(null);
   const [classificationResult, setClassificationResult] = useState<ClassifyFlightResponse | null>(null);
+  const [customPrompt, setCustomPrompt] = useState('');
+  const [useCustomPrompt, setUseCustomPrompt] = useState(false);
   const mapRef = useRef<MapComponentHandle>(null);
 
   const handleSearch = async () => {
@@ -61,9 +75,16 @@ export function FlightClassifyPage() {
     }
   };
 
-  const handleClassify = async () => {
+  const handleClassify = async (promptOverride?: string) => {
     if (!flightData || !metadata || !anomalyReport) {
       setError('Flight data not fully loaded');
+      return;
+    }
+
+    // Validate custom prompt if using custom mode
+    const finalPrompt = promptOverride || customPrompt;
+    if (useCustomPrompt && !finalPrompt.trim()) {
+      setError('Please enter a custom prompt');
       return;
     }
 
@@ -77,7 +98,8 @@ export function FlightClassifyPage() {
         flight_id: metadata.flight_id,
         flight_data: flightData.points,
         anomaly_report: anomalyReport.full_report, // Use full_report field
-        flight_time: anomalyReport.timestamp
+        flight_time: anomalyReport.timestamp,
+        custom_prompt: useCustomPrompt ? finalPrompt : undefined
       });
 
       setClassificationResult(result);
@@ -148,8 +170,71 @@ export function FlightClassifyPage() {
           {metadata && flightData && anomalyReport && !classificationResult && (
             <div className="bg-surface rounded-xl p-4 border border-white/5">
               <h3 className="text-sm font-semibold text-white/80 mb-3">AI Classification</h3>
+              
+              {/* Mode Toggle */}
+              <div className="flex gap-2 mb-3">
+                <button
+                  onClick={() => setUseCustomPrompt(false)}
+                  className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-all ${
+                    !useCustomPrompt
+                      ? 'bg-primary text-white'
+                      : 'bg-white/5 text-white/60 hover:bg-white/10'
+                  }`}
+                >
+                  <div className="flex items-center justify-center gap-2">
+                    <Sparkles className="h-4 w-4" />
+                    Standard
+                  </div>
+                </button>
+                <button
+                  onClick={() => setUseCustomPrompt(true)}
+                  className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-all ${
+                    useCustomPrompt
+                      ? 'bg-primary text-white'
+                      : 'bg-white/5 text-white/60 hover:bg-white/10'
+                  }`}
+                >
+                  <div className="flex items-center justify-center gap-2">
+                    <MessageSquare className="h-4 w-4" />
+                    Custom
+                  </div>
+                </button>
+              </div>
+
+              {/* Custom Prompt Input */}
+              {useCustomPrompt && (
+                <div className="mb-3 space-y-2">
+                  <label className="block text-xs font-medium text-white/60">
+                    Custom Prompt
+                  </label>
+                  <textarea
+                    value={customPrompt}
+                    onChange={(e) => setCustomPrompt(e.target.value)}
+                    placeholder="e.g., Describe what unusual event occurred..."
+                    className="w-full px-3 py-2 bg-surface-highlight border border-white/10 rounded-lg text-white text-sm placeholder:text-white/40 focus:outline-none focus:border-primary resize-none"
+                    rows={3}
+                  />
+                  
+                  {/* Example Prompts */}
+                  <div className="space-y-1">
+                    <div className="text-xs text-white/50">Example prompts:</div>
+                    <div className="flex flex-wrap gap-1">
+                      {EXAMPLE_PROMPTS.map((prompt, idx) => (
+                        <button
+                          key={idx}
+                          onClick={() => setCustomPrompt(prompt)}
+                          className="px-2 py-1 bg-white/5 hover:bg-white/10 rounded text-xs text-white/70 hover:text-white transition-colors"
+                        >
+                          {prompt}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
+
               <button
-                onClick={handleClassify}
+                onClick={() => handleClassify()}
                 disabled={classifying}
                 className="w-full px-4 py-3 bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 disabled:from-purple-600/40 disabled:to-blue-600/40 disabled:cursor-not-allowed rounded-lg text-white font-medium transition-all flex items-center justify-center gap-2"
               >
@@ -161,12 +246,15 @@ export function FlightClassifyPage() {
                 ) : (
                   <>
                     <Sparkles className="h-5 w-5" />
-                    Classify Flight
+                    {useCustomPrompt ? 'Analyze with Custom Prompt' : 'Classify Flight'}
                   </>
                 )}
               </button>
               <p className="mt-2 text-xs text-white/50 text-center">
-                AI will analyze the flight pattern and classify it
+                {useCustomPrompt 
+                  ? 'AI will analyze the flight based on your custom prompt'
+                  : 'AI will analyze the flight pattern and classify it'
+                }
               </p>
             </div>
           )}
@@ -179,73 +267,102 @@ export function FlightClassifyPage() {
                 <h3 className="text-lg font-semibold text-white">Classification Result</h3>
               </div>
 
-              {/* Main Classification */}
-              <div className="mb-4 p-4 rounded-lg bg-gradient-to-r from-purple-600/20 to-blue-600/20 border border-purple-500/30">
-                <div className="flex items-start justify-between mb-2">
-                  <div>
-                    <div className="text-xs text-white/60 mb-1">Rule</div>
-                    <div className="text-lg font-bold text-white">
-                      {classificationResult.classification.rule_name}
+              {/* Custom Prompt Response */}
+              {isCustomClassification(classificationResult) && (
+                <>
+                  {/* Show the prompt that was used */}
+                  <div className="mb-3 p-3 rounded-lg bg-white/5 border border-white/10">
+                    <div className="text-xs text-white/60 mb-1 flex items-center gap-1">
+                      <MessageSquare className="h-3 w-3" />
+                      Custom Prompt
+                    </div>
+                    <div className="text-sm text-white/90 italic">
+                      "{classificationResult.custom_prompt}"
                     </div>
                   </div>
-                  <div className="text-right">
-                    <div className="text-xs text-white/60 mb-1">Confidence</div>
-                    <div className={`text-sm font-semibold px-2 py-1 rounded ${
-                      classificationResult.classification.confidence === 'High'
-                        ? 'bg-green-600/30 text-green-400 border border-green-500/50'
-                        : classificationResult.classification.confidence === 'Medium'
-                        ? 'bg-yellow-600/30 text-yellow-400 border border-yellow-500/50'
-                        : 'bg-red-600/30 text-red-400 border border-red-500/50'
-                    }`}>
-                      {classificationResult.classification.confidence}
-                    </div>
-                  </div>
-                </div>
-                <div className="text-sm text-white/80 leading-relaxed">
-                  {classificationResult.classification.reasoning}
-                </div>
-              </div>
 
-              {/* Rule Details */}
-              <div className="space-y-2">
-                <div className="text-xs font-semibold text-white/60 uppercase tracking-wider">
-                  Rule Details
-                </div>
-                <div className="space-y-1.5">
-                  <DetailRow 
-                    label="Rule ID" 
-                    value={classificationResult.rule_details.id.toString()} 
-                  />
-                  <DetailRow 
-                    label="Name (English)" 
-                    value={classificationResult.rule_details.name} 
-                  />
-                  <DetailRow 
-                    label="Name (Hebrew)" 
-                    value={classificationResult.rule_details.nameHe} 
-                  />
-                  <DetailRow 
-                    label="Description" 
-                    value={classificationResult.rule_details.description} 
-                  />
-                  <DetailRow 
-                    label="Category" 
-                    value={classificationResult.rule_details.category} 
-                  />
-                  <div className="flex justify-between text-sm">
-                    <span className="text-white/60">Color:</span>
-                    <div className="flex items-center gap-2">
-                      <div 
-                        className="w-4 h-4 rounded border border-white/20"
-                        style={{ backgroundColor: classificationResult.rule_details.color }}
-                      />
-                      <span className="text-white font-mono text-xs">
-                        {classificationResult.rule_details.color}
-                      </span>
+                  {/* Free-form analysis result */}
+                  <div className="mb-4 p-4 rounded-lg bg-gradient-to-r from-purple-600/20 to-blue-600/20 border border-purple-500/30">
+                    <div className="text-xs text-white/60 mb-2 uppercase tracking-wider">Analysis</div>
+                    <div className="text-sm text-white/90 leading-relaxed whitespace-pre-wrap">
+                      {classificationResult.classification}
                     </div>
                   </div>
-                </div>
-              </div>
+                </>
+              )}
+
+              {/* Standard Classification Response */}
+              {isStandardClassification(classificationResult) && (
+                <>
+                  {/* Main Classification */}
+                  <div className="mb-4 p-4 rounded-lg bg-gradient-to-r from-purple-600/20 to-blue-600/20 border border-purple-500/30">
+                    <div className="flex items-start justify-between mb-2">
+                      <div>
+                        <div className="text-xs text-white/60 mb-1">Rule</div>
+                        <div className="text-lg font-bold text-white">
+                          {classificationResult.classification.rule_name}
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <div className="text-xs text-white/60 mb-1">Confidence</div>
+                        <div className={`text-sm font-semibold px-2 py-1 rounded ${
+                          classificationResult.classification.confidence === 'High'
+                            ? 'bg-green-600/30 text-green-400 border border-green-500/50'
+                            : classificationResult.classification.confidence === 'Medium'
+                            ? 'bg-yellow-600/30 text-yellow-400 border border-yellow-500/50'
+                            : 'bg-red-600/30 text-red-400 border border-red-500/50'
+                        }`}>
+                          {classificationResult.classification.confidence}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="text-sm text-white/80 leading-relaxed">
+                      {classificationResult.classification.reasoning}
+                    </div>
+                  </div>
+
+                  {/* Rule Details */}
+                  <div className="space-y-2">
+                    <div className="text-xs font-semibold text-white/60 uppercase tracking-wider">
+                      Rule Details
+                    </div>
+                    <div className="space-y-1.5">
+                      <DetailRow 
+                        label="Rule ID" 
+                        value={classificationResult.rule_details.id.toString()} 
+                      />
+                      <DetailRow 
+                        label="Name (English)" 
+                        value={classificationResult.rule_details.name} 
+                      />
+                      <DetailRow 
+                        label="Name (Hebrew)" 
+                        value={classificationResult.rule_details.nameHe} 
+                      />
+                      <DetailRow 
+                        label="Description" 
+                        value={classificationResult.rule_details.description} 
+                      />
+                      <DetailRow 
+                        label="Category" 
+                        value={classificationResult.rule_details.category} 
+                      />
+                      <div className="flex justify-between text-sm">
+                        <span className="text-white/60">Color:</span>
+                        <div className="flex items-center gap-2">
+                          <div 
+                            className="w-4 h-4 rounded border border-white/20"
+                            style={{ backgroundColor: classificationResult.rule_details.color }}
+                          />
+                          <span className="text-white font-mono text-xs">
+                            {classificationResult.rule_details.color}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </>
+              )}
 
               {/* Re-classify button */}
               <button
