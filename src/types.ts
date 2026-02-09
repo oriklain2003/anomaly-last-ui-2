@@ -44,6 +44,8 @@ export interface AnomalyReport {
     severity_cnn: number;
     severity_dense: number;
     full_report: any;
+    matched_rule_ids?: string;    // Denormalized from DB (comma-separated)
+    matched_rule_names?: string;  // Denormalized from DB (comma-separated)
     feedback_id?: number;  // For history mode
     feedback_comments?: string;  // For history mode
     feedback_rule_id?: number | null;  // For history mode (legacy single rule)

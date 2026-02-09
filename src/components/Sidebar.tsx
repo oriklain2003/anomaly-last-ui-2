@@ -753,11 +753,24 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     ) : (
                         filteredAnomalies.map((anomaly) => {
                              // Determine severity color based on confidence score
-                             const score = anomaly.full_report?.summary?.confidence_score || 0;
+                             // Use summary confidence if available, fallback to 100 if DB says anomaly
+                             const score = anomaly.full_report?.summary?.confidence_score ?? (anomaly.is_anomaly ? 100 : 0);
                              const severityColor = getConfidenceColor(score);
                              
-                             // Triggers list or type
-                             const triggers = anomaly.full_report?.summary?.triggers || [];
+                             // Triggers list or type - prefer specific rule names over generic "Rules"
+                             const layerTriggers = anomaly.full_report?.layer_1_rules?.triggers || [];
+                             const matchedRuleNames = (anomaly.full_report?.layer_1_rules?.report?.matched_rules || anomaly.full_report?.matched_rules || [])
+                                 .map((r: any) => r.name || `Rule ${r.id}`);
+                             // Also try top-level matched_rule_names from API (PostgreSQL denormalized columns)
+                             const dbRuleNames = anomaly.matched_rule_names 
+                                 ? anomaly.matched_rule_names.split(', ').filter(Boolean) 
+                                 : [];
+                             const summaryTriggers = anomaly.full_report?.summary?.triggers || [];
+                             // Priority: layer_1 triggers > matched rule objects > DB denormalized > summary triggers
+                             const triggers = layerTriggers.length > 0 ? layerTriggers 
+                                 : matchedRuleNames.length > 0 ? matchedRuleNames 
+                                 : dbRuleNames.length > 0 ? dbRuleNames 
+                                 : summaryTriggers;
                              const type = triggers.length > 0 ? triggers.join(', ') : 'Unknown Anomaly';
                              
                              // Display Title: Callsign > Flight ID

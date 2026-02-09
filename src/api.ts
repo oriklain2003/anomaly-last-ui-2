@@ -12,6 +12,23 @@ import type { ChatMessage } from './chatTypes';
 const API_BASE = (import.meta.env.VITE_API_URL || '') + '/api';
 
 // ============================================================
+// Helper Functions
+// ============================================================
+
+/**
+ * Parse full_report field if it's a JSON string
+ * This handles the case where the API returns full_report as a stringified JSON
+ */
+const parseAnomalyReport = (anomaly: any): AnomalyReport => {
+    return {
+        ...anomaly,
+        full_report: typeof anomaly.full_report === 'string' 
+            ? JSON.parse(anomaly.full_report) 
+            : anomaly.full_report
+    };
+};
+
+// ============================================================
 // AI Analyze Types
 // ============================================================
 
@@ -37,7 +54,8 @@ export const fetchLiveAnomalies = async (startTs: number, endTs: number): Promis
     if (!response.ok) {
         throw new Error('Failed to fetch anomalies');
     }
-    return response.json();
+    const data = await response.json();
+    return data.map(parseAnomalyReport);
 };
 
 export const fetchLiveTrack = async (flightId: string): Promise<FlightTrack> => {
@@ -53,7 +71,8 @@ export const fetchResearchAnomalies = async (startTs: number, endTs: number): Pr
     if (!response.ok) {
         throw new Error('Failed to fetch research anomalies');
     }
-    return response.json();
+    const data = await response.json();
+    return data.map(parseAnomalyReport);
 };
 
 // Fetch all flights for dashboard (normal from research + all from feedback_tagged)
@@ -62,7 +81,8 @@ export const fetchDashboardFlights = async (startTs: number, endTs: number): Pro
     if (!response.ok) {
         throw new Error('Failed to fetch dashboard flights');
     }
-    return response.json();
+    const data = await response.json();
+    return data.map(parseAnomalyReport);
 };
 
 export const fetchAnalyzeFlight = async (flightId: string): Promise<FlightTrack> => {
@@ -110,12 +130,25 @@ export interface ClassifyFlightResponse {
 }
 
 export const classifyFlight = async (request: ClassifyFlightRequest): Promise<ClassifyFlightResponse> => {
+    // Ensure anomaly_report is an object, not a string
+    let anomalyReport = request.anomaly_report;
+    if (typeof anomalyReport === 'string') {
+        try {
+            anomalyReport = JSON.parse(anomalyReport);
+        } catch (e) {
+            console.error('Failed to parse anomaly_report string:', e);
+        }
+    }
+    
     const response = await fetch(`${API_BASE}/ai/classify`, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
         },
-        body: JSON.stringify(request),
+        body: JSON.stringify({
+            ...request,
+            anomaly_report: anomalyReport
+        }),
     });
     if (!response.ok) {
         throw new Error('Failed to classify flight');
@@ -132,7 +165,7 @@ export const fetchUnifiedTrack = async (flightId: string): Promise<FlightTrack> 
 };
 
 export const fetchResearchTrack = async (flightId: string): Promise<FlightTrack> => {
-    const response = await fetch(`${API_BASE}/research/track/${flightId}`);
+    const response = await fetch(`${API_BASE}/research_rerun/track/${flightId}`);
     if (!response.ok) {
         throw new Error('Failed to fetch research track');
     }
@@ -273,7 +306,8 @@ export const fetchFlightsByRule = async (ruleId: number, signal?: AbortSignal): 
     if (!response.ok) {
         throw new Error('Failed to fetch flights by rule');
     }
-    return response.json();
+    const data = await response.json();
+    return data.map(parseAnomalyReport);
 };
 
 export const fetchCallsignFromResearch = async (flightId: string): Promise<string | null> => {
@@ -358,7 +392,8 @@ export const fetchFeedbackHistory = async (startTs: number = 0, endTs?: number, 
     if (!response.ok) {
         throw new Error('Failed to fetch feedback history');
     }
-    return response.json();
+    const data = await response.json();
+    return data.map(parseAnomalyReport);
 };
 
 // Fetch from the new feedback_tagged.db (clean database)
@@ -377,7 +412,8 @@ export const fetchTaggedFeedbackHistory = async (startTs: number = 0, endTs?: nu
     if (!response.ok) {
         throw new Error('Failed to fetch tagged feedback history');
     }
-    return response.json();
+    const data = await response.json();
+    return data.map(parseAnomalyReport);
 };
 
 // Fetch track from feedback_tagged.db
@@ -458,7 +494,7 @@ export const fetchTaggedFlightMetadata = async (flightId: string): Promise<Fligh
 
 // Fetch flight metadata from research.db
 export const fetchResearchFlightMetadata = async (flightId: string): Promise<FlightMetadata> => {
-    const response = await fetch(`${API_BASE}/research/metadata/${flightId}`);
+    const response = await fetch(`${API_BASE}/research_rerun/metadata/${flightId}`);
     if (!response.ok) {
         throw new Error('Failed to fetch research flight metadata');
     }
@@ -470,7 +506,8 @@ export const fetchResearchAnomaly = async (flightId: string): Promise<AnomalyRep
     if (!response.ok) {
         throw new Error('Failed to fetch research anomaly report');
     }
-    return response.json();
+    const data = await response.json();
+    return parseAnomalyReport(data);
 };
 
 export const updateFeedback = async (feedbackId: number, params: UpdateFeedbackParams): Promise<void> => {
@@ -504,7 +541,8 @@ export const reanalyzeFeedbackFlight = async (flightId: string): Promise<Anomaly
         throw new Error(errorData.detail || 'Failed to re-analyze flight');
     }
     
-    return response.json();
+    const data = await response.json();
+    return parseAnomalyReport(data);
 };
 
 // ============================================================
@@ -516,6 +554,17 @@ export const reanalyzeFeedbackFlight = async (flightId: string): Promise<Anomaly
  * Returns the AI's response text and optional map actions.
  */
 export const analyzeWithAI = async (request: AIAnalyzeRequest, signal?: AbortSignal): Promise<AIAnalyzeResponse> => {
+    // Ensure anomaly_report is an object, not a string
+    // This handles cases where full_report might still be a JSON string
+    let anomalyReport = request.anomaly_report;
+    if (typeof anomalyReport === 'string') {
+        try {
+            anomalyReport = JSON.parse(anomalyReport);
+        } catch (e) {
+            console.error('Failed to parse anomaly_report string:', e);
+        }
+    }
+    
     const response = await fetch(`${API_BASE}/ai/analyze`, {
         method: 'POST',
         headers: {
@@ -526,7 +575,7 @@ export const analyzeWithAI = async (request: AIAnalyzeRequest, signal?: AbortSig
             question: request.question,
             flight_id: request.flight_id,
             flight_data: request.flight_data,
-            anomaly_report: request.anomaly_report,
+            anomaly_report: anomalyReport,
             selected_point: request.selected_point,
             history: request.history || [],
             length: request.length || 'medium',
@@ -584,7 +633,17 @@ export const sendReasoningQuery = async (
     if (flightContext) {
         body.flight_id = flightContext.flightId;
         body.points = flightContext.points;
-        body.anomaly_report = flightContext.anomalyReport;
+        
+        // Ensure anomalyReport is an object, not a string
+        let anomalyReport = flightContext.anomalyReport;
+        if (typeof anomalyReport === 'string') {
+            try {
+                anomalyReport = JSON.parse(anomalyReport);
+            } catch (e) {
+                console.error('Failed to parse anomalyReport string:', e);
+            }
+        }
+        body.anomaly_report = anomalyReport;
     }
     
     const response = await fetch(`${API_BASE}/ai/reasoning`, {

@@ -67,6 +67,21 @@ export interface MapComponentHandle {
 }
 
 // ============================================================
+// Haversine distance calculation (returns km)
+// ============================================================
+
+const haversineDistance = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
+    const R = 6371; // Earth's mean radius in km
+    const toRad = (d: number) => d * Math.PI / 180;
+    const dLat = toRad(lat2 - lat1);
+    const dLon = toRad(lon2 - lon1);
+    const a = Math.sin(dLat / 2) ** 2 +
+              Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
+              Math.sin(dLon / 2) ** 2;
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+};
+
+// ============================================================
 // Component Implementation
 // ============================================================
 
@@ -109,6 +124,13 @@ export const MapComponent = forwardRef<MapComponentHandle, MapComponentProps>(({
   const [unionTubeOriginSearchQuery, setUnionTubeOriginSearchQuery] = useState<string>('');
   const [unionTubeDestSearchQuery, setUnionTubeDestSearchQuery] = useState<string>('');
   const [showUnionTubeSelector, setShowUnionTubeSelector] = useState(false);
+
+  // Range Measurement Tool
+  const [measureActive, setMeasureActive] = useState(false);
+  const [measureDistances, setMeasureDistances] = useState<{ segKm: number; segNm: number; totalKm: number; totalNm: number }[]>([]);
+  const measurePointsRef = useRef<[number, number][]>([]); // [lng, lat]
+  const measureMarkersRef = useRef<maplibregl.Marker[]>([]);
+  const measureActiveRef = useRef(false);
 
   // Calculate total valid paths (backend already filters these)
   const totalValidPaths = useMemo(() => {
@@ -605,6 +627,27 @@ export const MapComponent = forwardRef<MapComponentHandle, MapComponentProps>(({
           'line-blur': 4
         }
       }, 'ai-highlight-segment-line'); // Insert below the main line
+
+      // Range Measurement Line Layer
+      map.current.addSource('measure-line', {
+        type: 'geojson',
+        data: { type: 'FeatureCollection', features: [] }
+      });
+
+      map.current.addLayer({
+        id: 'measure-line-layer',
+        type: 'line',
+        source: 'measure-line',
+        layout: {
+          'line-join': 'round',
+          'line-cap': 'round'
+        },
+        paint: {
+          'line-color': '#fbbf24',
+          'line-width': 2,
+          'line-dasharray': [4, 4]
+        }
+      });
 
       const popup = new maplibregl.Popup({
         closeButton: false,
@@ -1183,6 +1226,123 @@ export const MapComponent = forwardRef<MapComponentHandle, MapComponentProps>(({
     updateTubes();
     updateUnionTubes();
   }, [mapLoaded, showPaths, showTurns, showSids, showStars, showTubes, showUnionTubes, learnedLayers, filteredPaths, selectedPathCluster, filteredTubes, selectedTubeCluster, filteredUnionTubes]);
+
+  // Clear measurement helper
+  const clearMeasurement = () => {
+    measurePointsRef.current = [];
+    measureMarkersRef.current.forEach(m => m.remove());
+    measureMarkersRef.current = [];
+    setMeasureDistances([]);
+    if (map.current) {
+      const source = map.current.getSource('measure-line') as maplibregl.GeoJSONSource;
+      if (source) {
+        source.setData({ type: 'FeatureCollection', features: [] });
+      }
+    }
+  };
+
+  // Range measurement tool effect
+  useEffect(() => {
+    if (!map.current || !mapLoaded) return;
+
+    measureActiveRef.current = measureActive;
+
+    if (measureActive) {
+      map.current.getCanvas().style.cursor = 'crosshair';
+    } else {
+      map.current.getCanvas().style.cursor = '';
+    }
+
+    const handleMeasureClick = (e: maplibregl.MapMouseEvent) => {
+      if (!measureActiveRef.current || !map.current) return;
+
+      const { lng, lat } = e.lngLat;
+      const pts = measurePointsRef.current;
+      pts.push([lng, lat]);
+
+      // Add a dot marker for this point
+      const el = document.createElement('div');
+      el.className = 'measure-point';
+      el.style.cssText = `
+        width: 10px; height: 10px;
+        background: #fbbf24; border: 2px solid white;
+        border-radius: 50%;
+        box-shadow: 0 0 4px rgba(251,191,36,0.8);
+      `;
+      const marker = new maplibregl.Marker({ element: el })
+        .setLngLat([lng, lat])
+        .addTo(map.current);
+      measureMarkersRef.current.push(marker);
+
+      // Update line
+      const source = map.current.getSource('measure-line') as maplibregl.GeoJSONSource;
+      if (source && pts.length >= 2) {
+        source.setData({
+          type: 'FeatureCollection',
+          features: [{
+            type: 'Feature',
+            properties: {},
+            geometry: { type: 'LineString', coordinates: pts }
+          }]
+        });
+      }
+
+      // Calculate distances
+      if (pts.length >= 2) {
+        const newDist: { segKm: number; segNm: number; totalKm: number; totalNm: number }[] = [];
+        let totalKm = 0;
+        for (let i = 1; i < pts.length; i++) {
+          const segKm = haversineDistance(pts[i - 1][1], pts[i - 1][0], pts[i][1], pts[i][0]);
+          totalKm += segKm;
+          newDist.push({ segKm, segNm: segKm / 1.852, totalKm, totalNm: totalKm / 1.852 });
+        }
+        setMeasureDistances([...newDist]);
+
+        // Add midpoint distance label for last segment
+        const prev = pts[pts.length - 2];
+        const curr = pts[pts.length - 1];
+        const midLng = (prev[0] + curr[0]) / 2;
+        const midLat = (prev[1] + curr[1]) / 2;
+        const last = newDist[newDist.length - 1];
+
+        const labelEl = document.createElement('div');
+        labelEl.className = 'measure-label';
+        labelEl.innerHTML = `${last.segKm.toFixed(1)} km | ${last.segNm.toFixed(1)} nm`;
+        labelEl.style.cssText = `
+          background: rgba(0,0,0,0.85); color: #fbbf24;
+          padding: 2px 6px; border-radius: 4px;
+          font-size: 11px; font-weight: 600;
+          white-space: nowrap; pointer-events: none;
+          border: 1px solid rgba(251,191,36,0.5);
+          font-family: ui-monospace, monospace;
+        `;
+        const labelMarker = new maplibregl.Marker({ element: labelEl, anchor: 'bottom' })
+          .setLngLat([midLng, midLat])
+          .addTo(map.current);
+        measureMarkersRef.current.push(labelMarker);
+      }
+    };
+
+    // Escape key to exit measure mode
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && measureActiveRef.current) {
+        setMeasureActive(false);
+      }
+    };
+
+    map.current.on('click', handleMeasureClick);
+    document.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      if (map.current) {
+        map.current.off('click', handleMeasureClick);
+        if (!measureActiveRef.current) {
+          map.current.getCanvas().style.cursor = '';
+        }
+      }
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [measureActive, mapLoaded]);
 
   useEffect(() => {
     if (!map.current) return;
@@ -1811,6 +1971,42 @@ export const MapComponent = forwardRef<MapComponentHandle, MapComponentProps>(({
                     {showMLPoints ? "Hide ML Points" : "Show ML Points"}
                 </button>
             )}
+            {/* Range Measurement Tool */}
+            <div className="flex gap-1">
+                <button
+                    onClick={() => {
+                        if (measureActive) {
+                            setMeasureActive(false);
+                        } else {
+                            clearMeasurement();
+                            setMeasureActive(true);
+                        }
+                    }}
+                    className={`px-3 py-2 rounded shadow text-xs font-medium opacity-90 transition-colors flex items-center gap-1.5 ${
+                        measureActive ? 'bg-yellow-500 text-black' : 'bg-gray-800 text-gray-300 hover:bg-gray-700'
+                    }`}
+                    title="Measure distance between points (Esc to stop)"
+                >
+                    <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="M2 12h20M2 12l4-4M2 12l4 4M22 12l-4-4M22 12l-4 4M7 8v8M12 8v8M17 8v8" />
+                    </svg>
+                    {measureActive ? 'Measuring...' : 'Measure'}
+                </button>
+                {(measureActive || measureDistances.length > 0) && (
+                    <button
+                        onClick={() => {
+                            clearMeasurement();
+                            setMeasureActive(false);
+                        }}
+                        className="px-2 py-2 rounded shadow text-xs font-medium opacity-90 bg-gray-800 text-red-400 hover:bg-gray-700 transition-colors"
+                        title="Clear measurement"
+                    >
+                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                    </button>
+                )}
+            </div>
         </div>
         
         {/* Clicked Path Info Panel */}
@@ -1874,6 +2070,49 @@ export const MapComponent = forwardRef<MapComponentHandle, MapComponentProps>(({
             </div>
         )}
         
+        {/* Range Measurement Summary Panel */}
+        {measureDistances.length > 0 && (
+            <div className="absolute bottom-4 right-4 z-10 bg-gray-900/95 border border-yellow-500/30 rounded-lg shadow-xl p-3 min-w-[220px] backdrop-blur-sm">
+                <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs font-semibold text-yellow-400 uppercase tracking-wide flex items-center gap-1.5">
+                        <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <path d="M2 12h20M2 12l4-4M2 12l4 4M22 12l-4-4M22 12l-4 4" />
+                        </svg>
+                        Range Measurement
+                    </span>
+                    <button
+                        onClick={() => { clearMeasurement(); setMeasureActive(false); }}
+                        className="text-gray-400 hover:text-white transition-colors"
+                    >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                    </button>
+                </div>
+                <div className="space-y-1">
+                    {measureDistances.map((d, i) => (
+                        <div key={i} className="flex justify-between text-xs font-mono gap-4">
+                            <span className="text-gray-400">Seg {i + 1}:</span>
+                            <span className="text-white">{d.segKm.toFixed(2)} km / {d.segNm.toFixed(2)} nm</span>
+                        </div>
+                    ))}
+                    {measureDistances.length > 1 && (
+                        <div className="flex justify-between text-xs font-mono pt-1 mt-1 border-t border-gray-700 gap-4">
+                            <span className="text-yellow-400 font-semibold">Total:</span>
+                            <span className="text-yellow-400 font-semibold">
+                                {measureDistances[measureDistances.length - 1].totalKm.toFixed(2)} km / {measureDistances[measureDistances.length - 1].totalNm.toFixed(2)} nm
+                            </span>
+                        </div>
+                    )}
+                </div>
+                {measureActive && (
+                    <div className="mt-2 text-[10px] text-gray-500 text-center">
+                        Click on map to add points &bull; Esc to stop
+                    </div>
+                )}
+            </div>
+        )}
+
         {/* CSS for AI Highlight Marker Animation */}
         <style>{`
             .ai-highlight-marker {

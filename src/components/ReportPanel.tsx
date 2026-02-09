@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { X, AlertTriangle, CheckCircle, PlayCircle, Radio, Plane, Navigation, MapPin, RotateCcw, Compass, ShieldAlert, Wifi, RefreshCw, Loader2, ExternalLink, ChevronDown, Skull, CircleDot, Target, GraduationCap, Shield, Eye, Satellite } from 'lucide-react';
+import { X, AlertTriangle, CheckCircle, PlayCircle, Radio, Plane, Navigation, MapPin, RotateCcw, Compass, ShieldAlert, Wifi, RefreshCw, Loader2, ExternalLink, ChevronDown, Skull, CircleDot, Target, GraduationCap, Shield, Eye, Satellite, Gauge, UserX, Clock, WifiOff, Building2 } from 'lucide-react';
 import type { AnomalyReport } from '../types';
 import { submitFeedback, fetchCallsignFromResearch, reanalyzeFeedbackFlight } from '../api';
 import clsx from 'clsx';
@@ -32,13 +32,20 @@ const TAGGING_RULES: Rule[] = [
     // Technical (Purple)
     { id: 8, name: 'Signal Loss', nameHe: 'אובדן אות', description: 'Loss of ADS-B signal', category: 'technical', color: 'purple' },
     { id: 9, name: 'Off Course', nameHe: 'סטייה ממסלול', description: 'Significant deviation from expected flight path', category: 'technical', color: 'purple' },
-    { id: 14, name: 'GPS Jamming', nameHe: 'שיבוש GPS', description: 'GPS jamming indicators detected (altitude oscillation, spoofed values, MLAT-only)', category: 'technical', color: 'purple' },
+    { id: 18, name: 'GPS Jamming', nameHe: 'שיבוש GPS', description: 'GPS jamming indicators detected (altitude oscillation, spoofed values, MLAT-only)', category: 'technical', color: 'purple' },
     
     // Military (Green)
     { id: 10, name: 'Military Flight', nameHe: 'טיסה צבאית', description: 'Identified military aircraft', category: 'military', color: 'green' },
     { id: 11, name: 'Operational Military Flight', nameHe: 'טיסה צבאית מבצעית', description: 'Military aircraft on operational mission', category: 'military', color: 'green' },
     { id: 12, name: 'Suspicious Behavior', nameHe: 'התנהגות חשודה', description: 'Unusual or suspicious flight behavior', category: 'military', color: 'green' },
     { id: 13, name: 'Flight Academy', nameHe: 'בית ספר לטיסה', description: 'Training flight from flight school', category: 'military', color: 'green' },
+    { id: 14, name: 'Circular Surveillance', nameHe: 'טיסה מעגלית חשודה', description: 'Non-commercial off-route circular flight pattern', category: 'military', color: 'green' },
+    { id: 15, name: 'Distance Trend Diversion', nameHe: 'הסטה מיעד', description: 'Consistent distancing from planned destination', category: 'flight_ops', color: 'blue' },
+    { id: 16, name: 'Performance Mismatch', nameHe: 'אי-התאמת ביצועים', description: 'Turn rate exceeds physical limits for declared aircraft type', category: 'military', color: 'green' },
+    { id: 17, name: 'Identity Spoofing', nameHe: 'התחזות זהות', description: 'Speed/climb rate exceeds physical envelope of declared aircraft', category: 'military', color: 'green' },
+    { id: 19, name: 'Endurance Breach', nameHe: 'חריגת סיבולת זמן', description: 'Flight duration exceeds 120% of aircraft type max endurance', category: 'military', color: 'green' },
+    { id: 20, name: 'Signal Dropout', nameHe: 'ניתוק אות טקטי', description: 'Suspicious in-flight signal discontinuity with stable conditions', category: 'technical', color: 'purple' },
+    { id: 21, name: 'Military Airport Usage', nameHe: 'שימוש בשדה צבאי', description: 'Commercial aircraft at military-only airport', category: 'military', color: 'green' },
 ];
 
 // Rule icon mapping
@@ -54,10 +61,17 @@ const getRuleIcon = (ruleId: number) => {
         8: Wifi,            // Signal Loss
         9: Compass,         // Off Course
         10: Shield,         // Military Flight
-        14: Satellite,      // GPS Jamming
         11: Target,         // Operational Military Flight
         12: Eye,            // Suspicious Behavior
         13: GraduationCap,  // Flight Academy
+        14: RefreshCw,      // Circular Surveillance
+        15: Navigation,     // Distance Trend Diversion
+        16: Gauge,          // Performance Mismatch
+        17: UserX,          // Identity Spoofing
+        18: Satellite,      // GPS Jamming
+        19: Clock,          // Endurance Breach
+        20: WifiOff,        // Signal Dropout
+        21: Building2,      // Military Airport Usage
     };
     return iconMap[ruleId] || AlertTriangle;
 };
@@ -224,10 +238,23 @@ const LayerCard: React.FC<{ title: string; data: any; type: 'rules' | 'model'; r
                                     ))}
                                 </ul>
                                 
-                                {/* Show details for specific rules if present */}
+                                {/* Show details for each matched rule */}
                                 {data.report?.matched_rules?.map((rule: any) => {
+                                    // Special rendering for proximity and path deviation
                                     if (rule.id === 4) return <div key={rule.id}>{renderProximityEvents(rule)}</div>;
                                     if (rule.id === 11) return <div key={rule.id}>{renderPathDeviation(rule)}</div>;
+                                    // Generic rendering for all other matched rules (show summary + key details)
+                                    if (rule.summary) {
+                                        return (
+                                            <div key={rule.id} className="mt-1 bg-white/5 p-2 rounded border border-white/10 text-[10px] text-white/70">
+                                                <div className="flex items-center gap-1 mb-0.5">
+                                                    <span className="font-bold text-white/90">#{rule.id}</span>
+                                                    {rule.category && <span className="text-white/40">({rule.category})</span>}
+                                                </div>
+                                                <p>{rule.summary}</p>
+                                            </div>
+                                        );
+                                    }
                                     return null;
                                 })}
                             </div>
@@ -530,6 +557,36 @@ export const ReportPanel: React.FC<ReportPanelProps> = ({ anomaly, onClose, clas
     const report = localAnomaly.full_report || {};
     const summary = report.summary || {};
 
+    // Use top-level is_anomaly (from DB) as authoritative source,
+    // falling back to summary.is_anomaly from the full_report.
+    // This ensures flights flagged as anomalies in DB show correctly
+    // even if the full_report summary has is_anomaly=false (e.g. confidence < 80%).
+    const effectiveIsAnomaly = localAnomaly.is_anomaly ?? summary.is_anomaly ?? false;
+
+    // Derive confidence score: use summary if available, otherwise infer from DB anomaly flag
+    const effectiveConfidence = summary.confidence_score ?? (effectiveIsAnomaly ? 100 : 0);
+
+    // Derive triggers: prefer specific layer_1 rule names over generic summary triggers
+    const effectiveTriggers = (() => {
+        // Priority 1: Specific rule names from layer_1_rules.triggers
+        const layerTriggers = report.layer_1_rules?.triggers || [];
+        if (layerTriggers.length > 0) return layerTriggers;
+        // Priority 2: Extract from matched_rules objects
+        const matchedRules = report.layer_1_rules?.report?.matched_rules || report.matched_rules || [];
+        if (matchedRules.length > 0) return matchedRules.map((r: any) => r.name || `Rule ${r.id}`);
+        // Priority 3: Denormalized rule names from API (PostgreSQL columns)
+        const dbRuleNames = localAnomaly.matched_rule_names;
+        if (dbRuleNames && typeof dbRuleNames === 'string') {
+            const names = dbRuleNames.split(', ').filter(Boolean);
+            if (names.length > 0) return names;
+        }
+        // Priority 4: Summary triggers (may be generic like "Rules")
+        if (summary.triggers && summary.triggers.length > 0) return summary.triggers;
+        // Fallback: If DB says anomaly but no triggers found
+        if (effectiveIsAnomaly) return ['Rules'];
+        return [];
+    })();
+
     const getConfidenceColor = (score: number) => {
         if (score > 85) return "text-red-500";
         if (score > 70) return "text-purple-500";
@@ -537,7 +594,7 @@ export const ReportPanel: React.FC<ReportPanelProps> = ({ anomaly, onClose, clas
         return "text-pink-500";
     };
 
-    const confidenceColor = getConfidenceColor(summary.confidence_score || 0);
+    const confidenceColor = getConfidenceColor(effectiveConfidence);
 
     // Extract secondary flight IDs for proximity rule (ID 4)
     const getSecondaryFlightIds = () => {
@@ -742,19 +799,24 @@ export const ReportPanel: React.FC<ReportPanelProps> = ({ anomaly, onClose, clas
                 <div className="bg-primary/10 rounded-lg p-3 border border-primary/20" dir={isHebrew ? "rtl" : "ltr"}>
                     <p className="text-xs text-primary font-bold uppercase mb-1">{isHebrew ? "פסיקת מערכת" : "System Verdict"}</p>
                     <div className="flex items-center gap-2 mb-2">
-                        <span className={clsx("text-lg font-bold", summary.is_anomaly ? "text-red-400" : "text-green-400")}>
-                            {summary.is_anomaly 
+                        <span className={clsx("text-lg font-bold", effectiveIsAnomaly ? "text-red-400" : "text-green-400")}>
+                            {effectiveIsAnomaly 
                                 ? (isHebrew ? "זוהתה אנומליה" : "ANOMALY DETECTED") 
                                 : (isHebrew ? "טיסה תקינה" : "NORMAL FLIGHT")}
                         </span>
                     </div>
                     <div className="flex flex-col gap-1">
                         <p className="text-xs text-white/80">
-                            {isHebrew ? "ציון ביטחון: " : "Confidence Score: "}<span className={clsx("font-mono font-bold", confidenceColor)}>{summary.confidence_score}%</span>
+                            {isHebrew ? "ציון ביטחון: " : "Confidence Score: "}<span className={clsx("font-mono font-bold", confidenceColor)}>{effectiveConfidence}%</span>
                         </p>
                         <p className="text-xs text-white/60">
                             {isHebrew ? "זוהה ב: " : "Detected At: "}<span className="font-mono">{new Date(localAnomaly.timestamp * 1000).toLocaleString()}</span>
                         </p>
+                        {effectiveTriggers.length > 0 && (
+                            <p className="text-xs text-white/60">
+                                {isHebrew ? "שכבות שזיהו: " : "Triggered by: "}<span className="font-mono text-yellow-400">{effectiveTriggers.join(', ')}</span>
+                            </p>
+                        )}
                     </div>
                 </div>
 
