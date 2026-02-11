@@ -261,6 +261,63 @@
   text-shadow: 0 0 3px black, 0 0 6px #00d4ff;
 }
 
+/* ═══ Version X — holographic shimmer badge ═══ */
+.badge-vx {
+  background-image: linear-gradient(
+    105deg,
+    #ff00cc,
+    #ff9500,
+    #ffe600,
+    #00ff88,
+    #00d4ff,
+    #aa44ff,
+    #ff00cc
+  );
+  color: white;
+  border: 1px solid #ff00cc;
+  box-shadow:
+    0 0 8px rgba(255, 0, 204, 0.6),
+    0 0 18px rgba(0, 212, 255, 0.35),
+    inset 0 0 6px rgba(255, 255, 255, 0.15);
+  text-shadow: 0 0 4px black, 0 0 8px #ff00cc;
+}
+
+@keyframes shimmer-vx {
+  0%   { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.animate-shimmer-vx {
+  background-size: 200% 100%;
+  animation: shimmer-vx 3s linear infinite;
+}
+
+/* Shiny card glow for version-x flights */
+.card-vx-glow {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid rgba(255, 0, 204, 0.35) !important;
+  box-shadow:
+    0 0 12px rgba(255, 0, 204, 0.15),
+    0 0 30px rgba(0, 212, 255, 0.08);
+}
+.card-vx-glow::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    120deg,
+    transparent 25%,
+    rgba(255, 255, 255, 0.06) 50%,
+    transparent 75%
+  );
+  background-size: 250% 100%;
+  animation: shimmer-vx 4s ease-in-out infinite;
+  pointer-events: none;
+  border-radius: inherit;
+  z-index: 0;
+}
+
 /* MapLibre Path Tooltip Styles */
 .path-tooltip .maplibregl-popup-content {
   background: transparent !important;

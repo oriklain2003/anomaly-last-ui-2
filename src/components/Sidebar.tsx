@@ -70,7 +70,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     const lastSoundTimeRef = useRef(0);
 
     const triggerOptions = ['All', 'Combination', 'Rules', 'XGBoost', 'DeepDense', 'DeepCNN', 'Transformer', 'Hybrid'];
-    const versionOptions = ['All', 'v1', 'v2', 'v3', 'v4'];
+    const versionOptions = ['All', 'v1', 'v2', 'v3', 'v4', 'vx'];
 
     // Realtime tracking
     const lastFetchTimeRef = useRef<number>(0);
@@ -346,9 +346,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
         const cutoffTimestampV3 = new Date('2025-07-17T00:00:00Z').getTime() / 1000;
         const cutoffTimestampV4 = new Date('2025-10-21T00:00:00Z').getTime() / 1000;
         const cutoffTimestampV5 = new Date('2025-11-09T00:00:00Z').getTime() / 1000;
+        const cutoffTimestampVx = new Date('2026-01-14T00:00:00Z').getTime() / 1000;
         
         let version = 'v1';
-        if (a.timestamp >= cutoffTimestampV5) {
+        if (a.timestamp >= cutoffTimestampVx) {
+            version = 'vx';
+        } else if (a.timestamp >= cutoffTimestampV5) {
             version = 'v5';
         } else if (a.timestamp >= cutoffTimestampV4) {
             version = 'v4';
@@ -709,7 +712,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                         {/* Version Filter */}
                         <div>
                             <p className="text-xs text-white/60 font-bold uppercase mb-2">{t('sidebar.filterVersion')}</p>
-                            <div className="grid grid-cols-4 gap-2">
+                            <div className="grid grid-cols-3 gap-2">
                                 {versionOptions.map((option) => (
                                     <button
                                         key={option}
@@ -717,8 +720,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                         className={clsx(
                                             "px-2 py-1.5 rounded-md text-xs font-medium transition-colors",
                                             selectedVersion === option
-                                                ? "bg-primary text-background-dark"
-                                                : "bg-white/5 text-white/60 hover:bg-white/10 hover:text-white"
+                                                ? option === 'vx' ? "badge-vx animate-shimmer-vx" : "bg-primary text-background-dark"
+                                                : option === 'vx' ? "bg-fuchsia-900/30 text-fuchsia-300 hover:bg-fuchsia-800/40 hover:text-fuchsia-200 border border-fuchsia-500/20" : "bg-white/5 text-white/60 hover:bg-white/10 hover:text-white"
                                         )}
                                     >
                                         {option}
@@ -782,13 +785,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
                              const cutoffTimestampV3 = new Date('2025-07-21T00:00:00Z').getTime() / 1000;
                              const cutoffTimestampV4 = new Date('2025-10-21T00:00:00Z').getTime() / 1000;
                              const cutoffTimestampV5 = new Date('2025-11-09T00:00:00Z').getTime() / 1000;
+                             const cutoffTimestampVx = new Date('2026-01-14T00:00:00Z').getTime() / 1000;
                              
                              let versionLabel = 'v1 OLD';
                              let versionStyle = "bg-zinc-800 text-zinc-500 border-zinc-700";
+                             const isVersionX = anomaly.timestamp >= cutoffTimestampVx;
 
-                             if (anomaly.timestamp >= cutoffTimestampV5) {
-                                 versionLabel = 'v5 NEW';
-                                 versionStyle = "badge-v5 animate-gradient-x";
+                             if (isVersionX) {
+                                 versionLabel = 'vX';
+                                 versionStyle = "badge-vx animate-shimmer-vx";
+                             } else if (anomaly.timestamp >= cutoffTimestampV5) {
+                                 versionLabel = 'v5 OLD';
+                                 versionStyle = "bg-zinc-800 text-zinc-500 border-zinc-700";
                              } else if (anomaly.timestamp >= cutoffTimestampV4) {
                                  versionLabel = 'v4 OLD';
                                  versionStyle = "bg-zinc-800 text-zinc-500 border-zinc-700";
@@ -808,7 +816,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                         "flex flex-col gap-2 p-3 rounded-lg cursor-pointer transition-colors border",
                                         selectedAnomalyId === anomaly.flight_id 
                                             ? "bg-primary/20 border-primary" 
-                                            : "hover:bg-white/5 border-transparent"
+                                            : isVersionX
+                                                ? "card-vx-glow hover:bg-white/5"
+                                                : "hover:bg-white/5 border-transparent"
                                     )}
                                 >
                                     <div className="flex justify-between items-center">

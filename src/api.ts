@@ -67,7 +67,7 @@ export const fetchLiveTrack = async (flightId: string): Promise<FlightTrack> => 
 };
 
 export const fetchResearchAnomalies = async (startTs: number, endTs: number): Promise<AnomalyReport[]> => {
-    const response = await fetch(`${API_BASE}/research_rerun/anomalies?start_ts=${startTs}&end_ts=${endTs}`);
+    const response = await fetch(`${API_BASE}/research/anomalies?start_ts=${startTs}&end_ts=${endTs}`);
     if (!response.ok) {
         throw new Error('Failed to fetch research anomalies');
     }
@@ -185,7 +185,7 @@ export const fetchUnifiedTrack = async (flightId: string): Promise<FlightTrack> 
 };
 
 export const fetchResearchTrack = async (flightId: string): Promise<FlightTrack> => {
-    const response = await fetch(`${API_BASE}/research_rerun/track/${flightId}`);
+    const response = await fetch(`${API_BASE}/research/track/${flightId}`);
     if (!response.ok) {
         throw new Error('Failed to fetch research track');
     }
@@ -332,7 +332,7 @@ export const fetchFlightsByRule = async (ruleId: number, signal?: AbortSignal): 
 
 export const fetchCallsignFromResearch = async (flightId: string): Promise<string | null> => {
     try {
-        const response = await fetch(`${API_BASE}/research_rerun/callsign/${flightId}`);
+        const response = await fetch(`${API_BASE}/research/callsign/${flightId}`);
         if (!response.ok) return null;
         const data = await response.json();
         return data?.callsign || null;
@@ -514,7 +514,7 @@ export const fetchTaggedFlightMetadata = async (flightId: string): Promise<Fligh
 
 // Fetch flight metadata from research.db
 export const fetchResearchFlightMetadata = async (flightId: string): Promise<FlightMetadata> => {
-    const response = await fetch(`${API_BASE}/research_rerun/metadata/${flightId}`);
+    const response = await fetch(`${API_BASE}/research/metadata/${flightId}`);
     if (!response.ok) {
         throw new Error('Failed to fetch research flight metadata');
     }
@@ -3517,7 +3517,7 @@ export const searchFlightsByPolygon = async (
     startTs?: number,
     endTs?: number
 ): Promise<PolygonSearchResponse> => {
-    const response = await fetch(`${API_BASE}/research_rerun/polygon-search`, {
+    const response = await fetch(`${API_BASE}/research/polygon-search`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -3543,7 +3543,7 @@ export const searchFlightsByWKT = async (
     startTs?: number,
     endTs?: number
 ): Promise<PolygonSearchResponse> => {
-    const response = await fetch(`${API_BASE}/research_rerun/wkt-search`, {
+    const response = await fetch(`${API_BASE}/research/wkt-search`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
