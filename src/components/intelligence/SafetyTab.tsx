@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { AlertTriangle, AlertOctagon, Activity, Calendar, Clock, MapPin, ArrowRightLeft, RotateCcw, Shield, Award, Filter, CheckCircle, Signal, TrendingUp, Building2, Map } from 'lucide-react';
+import { AlertTriangle, AlertOctagon, Activity, Calendar, Clock, MapPin, ArrowRightLeft, RotateCcw, Shield, Award, Filter, CheckCircle, Signal,  Building2, Map } from 'lucide-react';
 import { StatCard } from './StatCard';
 import { TableCard } from './TableCard';
 import { ChartCard } from './ChartCard';
@@ -823,7 +823,7 @@ export function SafetyTab({ startTs, endTs, cacheKey = 0, sharedData }: SafetyTa
   const [signalLoss, setSignalLoss] = useState<SignalLossLocation[]>([]);
   const [, setSignalLossMonthly] = useState<SignalLossMonthly[]>([]);
   const [signalLossHourly, setSignalLossHourly] = useState<SignalLossHourly[]>([]);
-  const [peakHours, setPeakHours] = useState<PeakHoursAnalysis | null>(null);
+  const [_peakHours, setPeakHours] = useState<PeakHoursAnalysis | null>(null);
   const [, setDeviationsByType] = useState<DeviationByType[]>([]);
   const [bottleneckZones, setBottleneckZones] = useState<BottleneckZone[]>([]);
   const [signalLossClusters, setSignalLossClusters] = useState<SignalLossClustersResponse | null>(null);
@@ -1919,65 +1919,6 @@ export function SafetyTab({ startTs, endTs, cacheKey = 0, sharedData }: SafetyTa
             </div>
           )}
 
-          {/* Peak Hours Analysis */}
-          {peakHours && peakHours.hourly_data && (
-            <div className="space-y-4 mt-8">
-              <div className="border-b border-white/10 pb-4">
-                <h2 className="text-white text-xl font-bold mb-2 flex items-center gap-2">
-                  <TrendingUp className="w-5 h-5 text-blue-500" />
-                  Peak Hours Analysis
-                  <QuestionTooltip 
-                    question={"באיזה שעה ביום הכי עמוס בשמיים?"}
-                    questionEn="What hour is the busiest in the sky?"
-                    level="L1"
-                  />
-                </h2>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <StatCard
-                  title="Peak Traffic Hours"
-                  value={peakHours.peak_traffic_hours.slice(0, 3).map(h => `${h}:00`).join(', ')}
-                  subtitle="Busiest times"
-                  icon={<Clock className="w-6 h-6" />}
-                />
-                <StatCard
-                  title="Total Flights"
-                  value={(peakHours.total_flights || 0).toLocaleString()}
-                  subtitle="In period"
-                />
-                <StatCard
-                  title="Correlation Score"
-                  value={`${(peakHours.correlation_score * 100).toFixed(0)}%`}
-                  subtitle="Traffic-safety correlation"
-                />
-              </div>
-
-              <ChartCard title="Hourly Traffic Distribution">
-                <ResponsiveContainer width="100%" height={250}>
-                  <BarChart data={peakHours.hourly_data}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#ffffff20" />
-                    <XAxis 
-                      dataKey="hour" 
-                      stroke="#ffffff60"
-                      tick={{ fill: '#ffffff60', fontSize: 11 }}
-                      tickFormatter={(h) => `${h}:00`}
-                    />
-                    <YAxis stroke="#ffffff60" tick={{ fill: '#ffffff60' }} />
-                    <Tooltip
-                      contentStyle={{
-                        backgroundColor: '#1a1a1a',
-                        border: '1px solid #ffffff20',
-                        borderRadius: '8px'
-                      }}
-                    />
-                    <Bar dataKey="traffic" fill="#3b82f6" name="Traffic" radius={[4, 4, 0, 0]} />
-                    <Bar dataKey="safety_events" fill="#ef4444" name="Safety Events" radius={[4, 4, 0, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
-              </ChartCard>
-            </div>
-          )}
 
           {/* Diversions Monthly */}
           {diversionsMonthly.length > 0 && (

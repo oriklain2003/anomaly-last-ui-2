@@ -123,13 +123,14 @@ export function OverviewTab({ startTs, endTs, cacheKey = 0, sharedData }: Overvi
           icon={<AlertCircle className="w-6 h-6" />}
           question={{ he: "כמה אירועי בטיחות (התקרבויות מתחת ל2000 רגל ו5 מייל) היו מעל ישראל/מעל ירדן?", en: "How many safety events were over Israel/Jordan?", level: "L1" }}
         />
-        <StatCard
-          title="Go-Arounds"
-          value={stats.go_arounds.toLocaleString()}
-          subtitle="Aborted landings"
-          icon={<TrendingUp className="w-6 h-6" />}
-          question={{ he: "כמה מטוסים ביטלו נחיתה ברגע האחרון?", en: "How many planes aborted landing at the last minute?", level: "L1" }}
+                <StatCard
+          title="Military Flights"
+          value={(militaryByDestination?.total_flights || stats.military_flights || 0).toLocaleString()}
+          subtitle="Military/Government"
+          icon={<Plane className="w-5 h-5" />}
+          question={{ he: "כמה מטוסים צבאיים טסים בשמי המזרח התיכון?", en: "How many military planes fly in Middle East skies?", level: "L1" }}
         />
+
       </div>
 
       {/* Flight Traffic Over Time Chart */}
@@ -241,9 +242,9 @@ export function OverviewTab({ startTs, endTs, cacheKey = 0, sharedData }: Overvi
       {/* Additional Stats Row */}
       <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-4">
         <StatCard
-          title="Emergency Codes"
+          title="Emergency Flights"
           value={stats.emergency_codes.toLocaleString()}
-          subtitle="7700/7600/7500"
+          subtitle=""
           icon={<AlertCircle className="w-5 h-5" />}
           question={{ he: "כמה מטוסים החליפו לקוד מצוקה ומה קרה להם?", en: "How many planes switched to distress code?", level: "L1" }}
         />
@@ -269,11 +270,11 @@ export function OverviewTab({ startTs, endTs, cacheKey = 0, sharedData }: Overvi
           question={{ he: "כמה מטוסים המריאו וחזרו לנחיתה ישר לאחר המראה (בניגוד למתוכנן)", en: "How many planes returned immediately after takeoff?", level: "L1" }}
         />
         <StatCard
-          title="Military Flights"
-          value={(militaryByDestination?.total_flights || stats.military_flights || 0).toLocaleString()}
-          subtitle="Military/Government"
-          icon={<Plane className="w-5 h-5" />}
-          question={{ he: "כמה מטוסים צבאיים טסים בשמי המזרח התיכון?", en: "How many military planes fly in Middle East skies?", level: "L1" }}
+          title="Go-Arounds"
+          value={stats.go_arounds.toLocaleString()}
+          subtitle="Aborted landings"
+          icon={<TrendingUp className="w-6 h-6" />}
+          question={{ he: "כמה מטוסים ביטלו נחיתה ברגע האחרון?", en: "How many planes aborted landing at the last minute?", level: "L1" }}
         />
         <StatCard
           title="Detection Rate"

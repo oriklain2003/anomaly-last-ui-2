@@ -643,7 +643,7 @@ export function IntelligenceTab({ startTs, endTs, cacheKey = 0, sharedData }: In
               />
             </h2>
             <p className="text-white/60 text-sm">
-              Areas with extended signal loss - potential jamming or coverage gaps
+              Areas with extended signal loss - potential Dynamic Signal loss or coverage gaps
             </p>
           </div>
 
@@ -671,7 +671,7 @@ export function IntelligenceTab({ startTs, endTs, cacheKey = 0, sharedData }: In
         </>
       )}
 
-      {/* NEW: Combined Signal Map - GPS Jamming + Signal Loss on same map */}
+      {/* NEW: Combined Signal Map - Dynamic Signal loss + Signal Loss on same map */}
       {(gpsJammingClusters || signalLossClusters || signalLoss.length > 0 || signalLossZones.length > 0) && (
         <div className="bg-surface rounded-xl border border-gradient-to-r from-red-500/30 to-orange-500/30 overflow-hidden">
           <div className="px-6 py-4 border-b border-white/10 bg-gradient-to-r from-red-500/10 via-orange-500/10 to-yellow-500/5">
@@ -683,12 +683,12 @@ export function IntelligenceTab({ startTs, endTs, cacheKey = 0, sharedData }: In
                   <span className="px-2 py-0.5 bg-gradient-to-r from-red-500/20 to-orange-500/20 text-orange-400 text-xs font-bold rounded-full border border-orange-500/30">NEW</span>
                 </h3>
                 <p className="text-white/60 text-sm mt-1">
-                  GPS Jamming (active interference) + Signal Loss (coverage gaps) on the same map
+                  Dynamic Signal loss + Signal Loss (coverage gaps) on the same map
                 </p>
                 <div className="mt-2 flex items-center gap-3">
                   <div className="inline-flex items-center gap-2 px-2 py-1 bg-red-500/20 rounded text-xs text-red-300 border border-red-500/30">
                     <span>🔺</span>
-                    <span>Red = GPS Jamming (active)</span>
+                    <span>Red = Dynamic Signal loss (active)</span>
                   </div>
                   <div className="inline-flex items-center gap-2 px-2 py-1 bg-orange-500/20 rounded text-xs text-orange-300 border border-orange-500/30">
                     <span>📡</span>
@@ -701,7 +701,7 @@ export function IntelligenceTab({ startTs, endTs, cacheKey = 0, sharedData }: In
                   <Info className="w-4 h-4 text-orange-400 mt-0.5 shrink-0" />
                   <div className="text-xs text-white/70">
                     <strong className="text-orange-300">Unified View:</strong> See both types of signal anomalies 
-                    together to identify patterns and distinguish between intentional jamming vs coverage gaps.
+                    together to identify patterns and distinguish between intentional Dynamic Signal loss vs coverage gaps.
                   </div>
                 </div>
               </div>
@@ -735,7 +735,7 @@ export function IntelligenceTab({ startTs, endTs, cacheKey = 0, sharedData }: In
           />
         </div>
         <p className="text-white/60 text-sm ml-12">
-          Turning DATA into INTEL - GPS jamming mapping, foreign military presence, suspicious patterns
+          Turning DATA into INTEL - The nation with the highest arial activity in the region mapping, foreign military presence, suspicious patterns
         </p>
       </div>
 
@@ -743,7 +743,7 @@ export function IntelligenceTab({ startTs, endTs, cacheKey = 0, sharedData }: In
       {/* GPS Jamming Overview */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <StatCard
-          title="GPS Jamming Zones"
+          title="Dynamic Signal loss Zones"
           value={gpsJamming.length}
           subtitle="Detected interference areas"
           icon={<Radar className="w-6 h-6" />}
@@ -765,10 +765,10 @@ export function IntelligenceTab({ startTs, endTs, cacheKey = 0, sharedData }: In
         <div className="bg-surface rounded-xl border border-white/10 p-6">
           <h3 className="text-white font-bold mb-4 flex items-center gap-2">
             <Clock className="w-5 h-5 text-amber-500" />
-            GPS Jamming Temporal Patterns
+            Dynamic Signal loss Temporal Patterns
           </h3>
           <p className="text-white/60 text-sm mb-4">
-            When does GPS jamming occur most frequently?
+            When does Dynamic Signal loss occur most frequently?
           </p>
           
           {/* Calculation Explanation */}
@@ -778,13 +778,13 @@ export function IntelligenceTab({ startTs, endTs, cacheKey = 0, sharedData }: In
               <div className="text-xs">
                 <p className="text-amber-300 font-medium mb-2">How This is Calculated:</p>
                 <ul className="text-white/60 space-y-1">
-                  <li><span className="text-amber-400">1.</span> Each flight is analyzed for jamming signatures (altitude jumps, impossible speeds, signal loss, etc.)</li>
-                  <li><span className="text-amber-400">2.</span> Events with jamming score ≥15 are tagged with their timestamp</li>
+                  <li><span className="text-amber-400">1.</span> Each flight is analyzed for Dynamic Signal loss signatures (altitude jumps, impossible speeds, signal loss, etc.)</li>
+                  <li><span className="text-amber-400">2.</span> Events with Dynamic Signal loss score ≥15 are tagged with their timestamp</li>
                   <li><span className="text-amber-400">3.</span> We count how many events occur in each hour (0-23) and day of week</li>
-                  <li><span className="text-amber-400">4.</span> Peak hours/days show when jamming activity is most intense</li>
+                  <li><span className="text-amber-400">4.</span> Peak hours/days show when Dynamic Signal loss activity is most intense</li>
                 </ul>
                 <p className="text-white/50 mt-2 italic">
-                  Pattern: If jamming spikes at specific hours/days consistently, it may indicate coordinated interference activity rather than random equipment failures.
+                  Pattern: If Dynamic Signal loss spikes at specific hours/days consistently, it may indicate coordinated interference activity rather than random equipment failures.
                 </p>
               </div>
             </div>

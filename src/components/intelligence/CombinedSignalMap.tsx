@@ -187,7 +187,7 @@ export function CombinedSignalMap({ jammingClusters, signalLossClusters, signalL
           const popup = new maplibregl.Popup({ offset: 25, closeButton: false }).setHTML(`
             <div style="padding: 12px; background: #1f2937; border-radius: 10px; color: white; min-width: 200px; border: 2px solid #ef4444;">
               <div style="font-weight: bold; color: #ef4444; margin-bottom: 10px; font-size: 14px;">
-                🔺 GPS Jamming Cluster
+                🔺 Dynamic Signal loss Cluster
               </div>
               <div style="display: grid; gap: 6px; font-size: 12px;">
                 <div style="display: flex; justify-content: space-between;">
@@ -286,7 +286,7 @@ export function CombinedSignalMap({ jammingClusters, signalLossClusters, signalL
 
           const popup = new maplibregl.Popup({ offset: 20, closeButton: false }).setHTML(`
             <div style="padding: 10px; background: #1f2937; border-radius: 8px; color: white; min-width: 180px; border: 1px solid #ef4444;">
-              <div style="font-weight: bold; color: #ef4444; margin-bottom: 8px;">🔺 GPS Jamming Zone</div>
+              <div style="font-weight: bold; color: #ef4444; margin-bottom: 8px;">🔺 Dynamic Signal loss Zone</div>
               <div style="display: grid; gap: 4px; font-size: 12px;">
                 <div style="display: flex; justify-content: space-between;">
                   <span style="color: #9ca3af;">Events:</span>
@@ -682,7 +682,7 @@ export function CombinedSignalMap({ jammingClusters, signalLossClusters, signalL
           }`}
         >
           <span>🔺</span>
-          GPS Jamming
+          Dynamic Signal loss
           {showJamming && <span className="ml-1 bg-red-500/50 px-1.5 rounded">{jammingZoneCount}</span>}
         </button>
         <button
@@ -710,7 +710,7 @@ export function CombinedSignalMap({ jammingClusters, signalLossClusters, signalL
         <div className="flex items-center gap-2 mb-2">
           <div className="w-4 h-4 rounded bg-red-500/30 border-2 border-red-500 border-dashed" />
           <div>
-            <span className="text-red-400 font-medium">GPS Jamming</span>
+            <span className="text-red-400 font-medium">Dynamic Signal loss</span>
             <p className="text-white/50 text-[10px]">Active interference zones</p>
           </div>
         </div>
@@ -732,7 +732,7 @@ export function CombinedSignalMap({ jammingClusters, signalLossClusters, signalL
         <div className="grid grid-cols-2 gap-x-4 gap-y-1">
           <div className="text-white/50">Total Zones:</div>
           <div className="text-white font-bold">{jammingZoneCount + signalLossZoneCount}</div>
-          <div className="text-red-400/80">Jamming Events:</div>
+          <div className="text-red-400/80">Dynamic Signal loss Events:</div>
           <div className="text-red-400 font-bold">{jammingEventCount}</div>
           <div className="text-orange-400/80">Signal Loss Events:</div>
           <div className="text-orange-400 font-bold">{signalLossEventCount}</div>
